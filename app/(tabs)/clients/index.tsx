@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Search, ChevronRight, CircleDot } from 'lucide-react-native';
+import { Search, ChevronRight, CircleDot, ParkingSquare } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useParking } from '@/providers/ParkingProvider';
 import ShiftGuard from '@/components/ShiftGuard';
@@ -11,7 +11,7 @@ type FilterStatus = 'all' | 'paid' | 'debtors';
 
 export default function ClientsScreen() {
   const router = useRouter();
-  const { activeClients, activeCars, debts, subscriptions } = useParking();
+  const { activeClients, activeCars, debts, subscriptions, activeSessions } = useParking();
   const [search, setSearch] = useState<string>('');
   const [filter, setFilter] = useState<FilterStatus>('all');
 
@@ -39,11 +39,20 @@ export default function ClientsScreen() {
     return result.sort((a, b) => a.name.localeCompare(b.name));
   }, [activeClients, activeCars, debts, search, filter]);
 
+  const parkedClientIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const s of activeSessions) {
+      ids.add(s.clientId);
+    }
+    return ids;
+  }, [activeSessions]);
+
   const renderClient = useCallback(({ item }: { item: Client }) => {
     const clientCars = activeCars.filter(c => c.clientId === item.id);
     const hasDebt = debts.some(d => d.clientId === item.id);
     const totalDebt = debts.filter(d => d.clientId === item.id).reduce((s, d) => s + d.remainingAmount, 0);
     const sub = subscriptions.find(s => s.clientId === item.id);
+    const isParked = parkedClientIds.has(item.id);
 
     return (
       <TouchableOpacity
@@ -56,7 +65,14 @@ export default function ClientsScreen() {
             <CircleDot size={10} color={hasDebt ? Colors.danger : Colors.success} />
           </View>
           <View style={styles.clientInfo}>
-            <Text style={styles.clientName}>{item.name}</Text>
+            <View style={styles.clientNameRow}>
+              <Text style={styles.clientName}>{item.name}</Text>
+              {isParked && (
+                <View style={styles.parkingBadge}>
+                  <ParkingSquare size={11} color={Colors.white} />
+                </View>
+              )}
+            </View>
             <Text style={styles.clientPlates}>
               {clientCars.map(c => c.carModel ? `${c.plateNumber} (${c.carModel})` : c.plateNumber).join(', ') || '—'}
             </Text>
@@ -73,7 +89,7 @@ export default function ClientsScreen() {
         </View>
       </TouchableOpacity>
     );
-  }, [activeCars, debts, subscriptions, router]);
+  }, [activeCars, debts, subscriptions, router, parkedClientIds]);
 
   return (
     <ShiftGuard allowView>
@@ -202,10 +218,23 @@ const styles = StyleSheet.create({
   clientInfo: {
     flex: 1,
   },
+  clientNameRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 6,
+  },
   clientName: {
     fontSize: 15,
     fontWeight: '600' as const,
     color: Colors.text,
+  },
+  parkingBadge: {
+    backgroundColor: Colors.info,
+    width: 20,
+    height: 20,
+    borderRadius: 5,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
   },
   clientPlates: {
     fontSize: 13,
