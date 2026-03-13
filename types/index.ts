@@ -19,6 +19,7 @@ export interface Client {
   id: string;
   name: string;
   phone: string;
+  phone2?: string;
   notes: string;
   createdAt: string;
   updatedAt?: string;

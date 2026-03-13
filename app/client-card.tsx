@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Alert, Linking, TextInput } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { Phone, Car, Calendar, CreditCard, AlertTriangle, Trash2, Plus, Check, X, LogIn, LogOut, XCircle, RotateCcw, Ban } from 'lucide-react-native';
+import { Phone, Car, Calendar, CreditCard, AlertTriangle, Trash2, Plus, Check, X, LogIn, LogOut, XCircle, RotateCcw, Ban, Pencil } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/providers/AuthProvider';
 import { useParking } from '@/providers/ParkingProvider';
@@ -17,7 +17,7 @@ export default function ClientCardScreen() {
     clients, cars, sessions, subscriptions, debts, transactions, payments,
     getCarsByClient, getClientTotalDebt, deleteClient, addCarToClient,
     checkIn, checkOut, getSubscription, cancelCheckIn, cancelCheckOut, cancelPayment,
-    needsShiftCheck,
+    needsShiftCheck, updateClient, updateCar,
   } = useParking();
 
   const [showAddCar, setShowAddCar] = useState<boolean>(false);
@@ -27,6 +27,15 @@ export default function ClientCardScreen() {
   const [checkInCarId, setCheckInCarId] = useState<string>('');
   const [checkInServiceType, setCheckInServiceType] = useState<ServiceType>('onetime');
   const [checkInPlannedDeparture, setCheckInPlannedDeparture] = useState<string>('');
+
+  const [isEditing, setIsEditing] = useState<boolean>(false);
+  const [editName, setEditName] = useState<string>('');
+  const [editPhone, setEditPhone] = useState<string>('');
+  const [editPhone2, setEditPhone2] = useState<string>('');
+  const [editNotes, setEditNotes] = useState<string>('');
+  const [editingCarId, setEditingCarId] = useState<string | null>(null);
+  const [editCarPlate, setEditCarPlate] = useState<string>('');
+  const [editCarModel, setEditCarModel] = useState<string>('');
 
   const shiftRequired = needsShiftCheck();
 
@@ -69,12 +78,70 @@ export default function ClientCardScreen() {
     [transactions, clientId]
   );
 
-  const handleCall = useCallback(() => {
-    if (client?.phone) {
-      const phone = client.phone.replace(/\D/g, '');
+  const handleCall = useCallback((phoneNumber?: string) => {
+    const num = phoneNumber || client?.phone;
+    if (num) {
+      const phone = num.replace(/\D/g, '');
       void Linking.openURL(`tel:+${phone}`);
     }
   }, [client]);
+
+  const startEditClient = useCallback(() => {
+    if (!client) return;
+    setEditName(client.name);
+    setEditPhone(client.phone);
+    setEditPhone2(client.phone2 ?? '');
+    setEditNotes(client.notes);
+    setIsEditing(true);
+  }, [client]);
+
+  const saveEditClient = useCallback(() => {
+    if (!clientId || !client) return;
+    if (!editName.trim()) {
+      Alert.alert('Ошибка', 'Имя клиента не может быть пустым');
+      return;
+    }
+    if (!editPhone.trim()) {
+      Alert.alert('Ошибка', 'Телефон не может быть пустым');
+      return;
+    }
+    updateClient(clientId, {
+      name: editName.trim(),
+      phone: editPhone.trim(),
+      phone2: editPhone2.trim() || undefined,
+      notes: editNotes.trim(),
+    });
+    setIsEditing(false);
+    Alert.alert('Готово', 'Данные клиента обновлены');
+  }, [clientId, client, editName, editPhone, editPhone2, editNotes, updateClient]);
+
+  const startEditCar = useCallback((carId: string) => {
+    const car = clientCars.find(c => c.id === carId);
+    if (!car) return;
+    setEditingCarId(carId);
+    setEditCarPlate(car.plateNumber);
+    setEditCarModel(car.carModel ?? '');
+  }, [clientCars]);
+
+  const saveEditCar = useCallback(() => {
+    if (!editingCarId) return;
+    if (!editCarPlate.trim()) {
+      Alert.alert('Ошибка', 'Номер автомобиля не может быть пустым');
+      return;
+    }
+    const formatted = formatPlateNumber(editCarPlate);
+    const existingCar = cars.find(c => c.plateNumber === formatted && c.id !== editingCarId);
+    if (existingCar) {
+      Alert.alert('Ошибка', `Автомобиль ${formatted} уже зарегистрирован`);
+      return;
+    }
+    updateCar(editingCarId, {
+      plateNumber: editCarPlate.trim(),
+      carModel: editCarModel.trim(),
+    });
+    setEditingCarId(null);
+    Alert.alert('Готово', 'Данные автомобиля обновлены');
+  }, [editingCarId, editCarPlate, editCarModel, cars, updateCar]);
 
   const handleDelete = useCallback(() => {
     if (!clientId || !client) return;
@@ -231,12 +298,79 @@ export default function ClientCardScreen() {
             <Text style={styles.deletedBannerText}>Клиент удалён (ошибочно введён)</Text>
           </View>
         )}
-        <Text style={styles.profileName}>{client.name}</Text>
-        <TouchableOpacity style={styles.phoneRow} onPress={handleCall}>
-          <Phone size={16} color={Colors.info} />
-          <Text style={styles.phoneText}>{client.phone}</Text>
-        </TouchableOpacity>
-        {client.notes ? <Text style={styles.notesText}>{client.notes}</Text> : null}
+        {isEditing ? (
+          <View style={styles.editForm}>
+            <Text style={styles.editLabel}>ФИО</Text>
+            <TextInput
+              style={styles.editInput}
+              value={editName}
+              onChangeText={setEditName}
+              placeholder="Имя клиента"
+              placeholderTextColor={Colors.textMuted}
+              autoFocus
+            />
+            <Text style={styles.editLabel}>Телефон</Text>
+            <TextInput
+              style={styles.editInput}
+              value={editPhone}
+              onChangeText={setEditPhone}
+              placeholder="Номер телефона"
+              placeholderTextColor={Colors.textMuted}
+              keyboardType="phone-pad"
+            />
+            <Text style={styles.editLabel}>Доп. телефон</Text>
+            <TextInput
+              style={styles.editInput}
+              value={editPhone2}
+              onChangeText={setEditPhone2}
+              placeholder="Второй номер (необязательно)"
+              placeholderTextColor={Colors.textMuted}
+              keyboardType="phone-pad"
+            />
+            <Text style={styles.editLabel}>Заметки</Text>
+            <TextInput
+              style={[styles.editInput, styles.editInputMultiline]}
+              value={editNotes}
+              onChangeText={setEditNotes}
+              placeholder="Заметки"
+              placeholderTextColor={Colors.textMuted}
+              multiline
+              numberOfLines={3}
+            />
+            <View style={styles.editActions}>
+              <TouchableOpacity style={styles.editSaveBtn} onPress={saveEditClient} activeOpacity={0.7}>
+                <Check size={16} color={Colors.white} />
+                <Text style={styles.editSaveBtnText}>Сохранить</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.editCancelBtn} onPress={() => setIsEditing(false)} activeOpacity={0.7}>
+                <X size={16} color={Colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : (
+          <>
+            <View style={styles.profileNameRow}>
+              <Text style={styles.profileName}>{client.name}</Text>
+              {isAdmin && !isDeleted && (
+                <TouchableOpacity style={styles.editIconBtn} onPress={startEditClient} activeOpacity={0.7}>
+                  <Pencil size={15} color={Colors.primary} />
+                </TouchableOpacity>
+              )}
+            </View>
+            <TouchableOpacity style={styles.phoneRow} onPress={() => handleCall(client.phone)}>
+              <Phone size={16} color={Colors.info} />
+              <Text style={styles.phoneText}>{client.phone}</Text>
+            </TouchableOpacity>
+            {client.phone2 ? (
+              <TouchableOpacity style={styles.phoneRow} onPress={() => handleCall(client.phone2)}>
+                <Phone size={14} color={Colors.textSecondary} />
+                <Text style={styles.phone2Text}>{client.phone2}</Text>
+                <Text style={styles.phone2Label}>доп.</Text>
+              </TouchableOpacity>
+            ) : null}
+            {client.notes ? <Text style={styles.notesText}>{client.notes}</Text> : null}
+          </>
+        )}
 
         <View style={styles.statusRow}>
           {totalDebt > 0 ? (
@@ -516,6 +650,37 @@ export default function ClientCardScreen() {
       <View style={styles.card}>
         {clientCars.map(car => {
           const sub = subscriptions.find(s => s.carId === car.id && s.clientId === clientId);
+          if (editingCarId === car.id) {
+            return (
+              <View key={car.id} style={styles.editCarForm}>
+                <TextInput
+                  style={styles.editCarInput}
+                  value={editCarPlate}
+                  onChangeText={setEditCarPlate}
+                  placeholder="Номер авто"
+                  placeholderTextColor={Colors.textMuted}
+                  autoCapitalize="characters"
+                  autoFocus
+                />
+                <TextInput
+                  style={styles.editCarModelInput}
+                  value={editCarModel}
+                  onChangeText={setEditCarModel}
+                  placeholder="Модель"
+                  placeholderTextColor={Colors.textMuted}
+                />
+                <View style={styles.editCarActions}>
+                  <TouchableOpacity style={styles.editCarSaveBtn} onPress={saveEditCar} activeOpacity={0.7}>
+                    <Check size={14} color={Colors.white} />
+                    <Text style={styles.editCarSaveBtnText}>Сохранить</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.editCarCancelBtn} onPress={() => setEditingCarId(null)} activeOpacity={0.7}>
+                    <X size={14} color={Colors.textSecondary} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            );
+          }
           return (
             <View key={car.id} style={styles.carRow}>
               <View style={styles.carPlateBlock}>
@@ -524,6 +689,11 @@ export default function ClientCardScreen() {
                   <Text style={styles.carPlate}>{car.plateNumber}</Text>
                   {car.carModel ? <Text style={styles.carModelText}>{car.carModel}</Text> : null}
                 </View>
+                {isAdmin && !isDeleted && (
+                  <TouchableOpacity style={styles.editCarIconBtn} onPress={() => startEditCar(car.id)} activeOpacity={0.7}>
+                    <Pencil size={12} color={Colors.primary} />
+                  </TouchableOpacity>
+                )}
               </View>
               {sub && (
                 <View style={styles.subInfo}>
@@ -714,7 +884,7 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700' as const,
     color: Colors.text,
-    marginBottom: 6,
+    flex: 1,
   },
   phoneRow: {
     flexDirection: 'row',
@@ -1328,5 +1498,153 @@ const styles = StyleSheet.create({
     fontWeight: '500' as const,
     color: Colors.success,
     flex: 1,
+  },
+  profileNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 6,
+  },
+  editIconBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    backgroundColor: Colors.infoLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  phone2Text: {
+    fontSize: 14,
+    color: Colors.textSecondary,
+    fontWeight: '500' as const,
+  },
+  phone2Label: {
+    fontSize: 11,
+    color: Colors.textMuted,
+    marginLeft: 2,
+  },
+  editForm: {
+    gap: 8,
+  },
+  editLabel: {
+    fontSize: 12,
+    fontWeight: '600' as const,
+    color: Colors.textSecondary,
+    textTransform: 'uppercase' as const,
+    letterSpacing: 0.5,
+  },
+  editInput: {
+    backgroundColor: Colors.inputBg,
+    borderRadius: 10,
+    height: 44,
+    paddingHorizontal: 14,
+    fontSize: 15,
+    color: Colors.text,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  editInputMultiline: {
+    height: 70,
+    paddingTop: 10,
+    textAlignVertical: 'top' as const,
+  },
+  editActions: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  editSaveBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: Colors.primary,
+    gap: 6,
+  },
+  editSaveBtnText: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+    color: Colors.white,
+  },
+  editCancelBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: Colors.inputBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  editCarIconBtn: {
+    width: 26,
+    height: 26,
+    borderRadius: 6,
+    backgroundColor: Colors.infoLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 4,
+  },
+  editCarForm: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  editCarInput: {
+    backgroundColor: Colors.inputBg,
+    borderRadius: 10,
+    height: 40,
+    paddingHorizontal: 12,
+    fontSize: 15,
+    fontWeight: '600' as const,
+    color: Colors.text,
+    letterSpacing: 1,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  editCarModelInput: {
+    backgroundColor: Colors.inputBg,
+    borderRadius: 10,
+    height: 40,
+    paddingHorizontal: 12,
+    fontSize: 14,
+    color: Colors.text,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  editCarActions: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+  },
+  editCarSaveBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: Colors.primary,
+    gap: 5,
+  },
+  editCarSaveBtnText: {
+    fontSize: 13,
+    fontWeight: '600' as const,
+    color: Colors.white,
+  },
+  editCarCancelBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: Colors.inputBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Colors.border,
   },
 });

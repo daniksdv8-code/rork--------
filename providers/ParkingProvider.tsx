@@ -408,6 +408,41 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     return { client: newClient, car: newCar };
   }, [schedulePush, logAction]);
 
+  const updateClient = useCallback((clientId: string, updates: { name?: string; phone?: string; phone2?: string; notes?: string }) => {
+    const now = new Date().toISOString();
+    const client = clients.find(c => c.id === clientId);
+    if (!client) return;
+    setClients(prev => prev.map(c =>
+      c.id === clientId ? { ...c, ...updates, updatedAt: now } : c
+    ));
+    const changes: string[] = [];
+    if (updates.name && updates.name !== client.name) changes.push(`имя: ${client.name} → ${updates.name}`);
+    if (updates.phone && updates.phone !== client.phone) changes.push(`тел: ${client.phone} → ${updates.phone}`);
+    if (updates.phone2 !== undefined && updates.phone2 !== client.phone2) changes.push(`тел2: ${updates.phone2 || '—'}`);
+    if (updates.notes !== undefined && updates.notes !== client.notes) changes.push(`заметки`);
+    logAction('client_edit', 'Редактирование клиента', `${client.name}: ${changes.join(', ') || 'без изменений'}`, clientId, 'client');
+    schedulePush();
+    console.log(`[Client] Updated client ${clientId}: ${changes.join(', ')}`);
+  }, [clients, schedulePush, logAction]);
+
+  const updateCar = useCallback((carId: string, updates: { plateNumber?: string; carModel?: string }) => {
+    const now = new Date().toISOString();
+    const car = cars.find(c => c.id === carId);
+    if (!car) return;
+    const finalUpdates: Partial<Car> = { updatedAt: now };
+    if (updates.plateNumber) finalUpdates.plateNumber = formatPlateNumber(updates.plateNumber);
+    if (updates.carModel !== undefined) finalUpdates.carModel = updates.carModel || undefined;
+    setCars(prev => prev.map(c =>
+      c.id === carId ? { ...c, ...finalUpdates } : c
+    ));
+    const changes: string[] = [];
+    if (updates.plateNumber && formatPlateNumber(updates.plateNumber) !== car.plateNumber) changes.push(`номер: ${car.plateNumber} → ${formatPlateNumber(updates.plateNumber)}`);
+    if (updates.carModel !== undefined && updates.carModel !== (car.carModel ?? '')) changes.push(`модель: ${updates.carModel || '—'}`);
+    logAction('client_edit', 'Редактирование авто', `${car.plateNumber}: ${changes.join(', ') || 'без изменений'}`, carId, 'car');
+    schedulePush();
+    console.log(`[Car] Updated car ${carId}: ${changes.join(', ')}`);
+  }, [cars, schedulePush, logAction]);
+
   const addCarToClient = useCallback((clientId: string, plateNumber: string, carModel?: string): Car => {
     const newCar: Car = {
       id: generateId(),
@@ -1664,6 +1699,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     getClientDebts,
     getClientTotalDebt,
     getSubscription,
+    updateClient,
+    updateCar,
     addClient,
     addCarToClient,
     checkIn,
@@ -1705,6 +1742,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     shifts, expenses, withdrawals, users, activeScheduledShifts, actionLogs,
     isLoaded, isServerSynced, activeSessions, debtors, todayStats, expiringSubscriptions,
     getClientByCar, getCarsByClient, getAllCarsByClient, getClientDebts, getClientTotalDebt, getSubscription,
+    updateClient, updateCar,
     addClient, addCarToClient, checkIn, checkOut,
     cancelCheckIn, cancelCheckOut, cancelPayment,
     payMonthly, payDebt, withdrawCash, searchClients, updateTariffs, deleteClient, findMatchingClients,
