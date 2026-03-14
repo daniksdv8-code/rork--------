@@ -4,6 +4,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Clock, Wallet, Check, AlertTriangle, Calendar, CreditCard, Banknote, RotateCcw } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useParking } from '@/providers/ParkingProvider';
+import { useAuth } from '@/providers/AuthProvider';
 import { formatDateTime, calculateDays, formatDate, isExpired, getMonthlyAmount } from '@/utils/date';
 import { PaymentMethod } from '@/types';
 
@@ -11,6 +12,7 @@ export default function ExitModal() {
   const router = useRouter();
   const { sessionId } = useLocalSearchParams<{ sessionId: string }>();
   const { sessions, cars, clients, tariffs, subscriptions, payments, checkOut, needsShiftCheck, earlyExitWithRefund } = useParking();
+  const { isAdmin } = useAuth();
   const [method, setMethod] = useState<PaymentMethod>('cash');
   const [refundMethod, setRefundMethod] = useState<PaymentMethod>('cash');
 
@@ -185,7 +187,7 @@ export default function ExitModal() {
   const fullyPrepaid = !isMonthly && prepaid > 0 && remainingAmount === 0;
   const monthlyPaid = isMonthly && hasActiveSub;
   const noPaymentNeeded = fullyPrepaid || monthlyPaid;
-  const canRefund = monthlyPaid && refundCalc && refundCalc.refundAmount > 0;
+  const canRefund = isAdmin && monthlyPaid && refundCalc && refundCalc.refundAmount > 0;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
