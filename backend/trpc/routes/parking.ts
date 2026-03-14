@@ -4,9 +4,20 @@ import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync } from "
 import { join } from "path";
 import { createHash, randomBytes } from "crypto";
 
+let fsAvailable = false;
 const DATA_DIR = join(process.cwd(), ".data");
 const DATA_FILE = join(DATA_DIR, "parking-store.json");
 const TEMP_FILE = join(DATA_DIR, "parking-store.tmp.json");
+
+try {
+  mkdirSync(DATA_DIR, { recursive: true });
+  writeFileSync(join(DATA_DIR, ".probe"), "ok", "utf-8");
+  fsAvailable = true;
+  console.log("[Storage] Filesystem available, data will persist to disk");
+} catch {
+  fsAvailable = false;
+  console.log("[Storage] Filesystem NOT available (Deno Worker?), using in-memory storage only");
+}
 
 const MAX_TRANSACTIONS = 10000;
 const MAX_ACTION_LOGS = 5000;
@@ -27,20 +38,16 @@ function verifyPassword(password: string, hash: string, salt: string): boolean {
   return computed === hash;
 }
 
-function ensureDataDir() {
-  if (!existsSync(DATA_DIR)) {
-    mkdirSync(DATA_DIR, { recursive: true });
-    console.log(`[Storage] Created data directory: ${DATA_DIR}`);
-  }
-}
-
 function loadFromDisk(): boolean {
-  ensureDataDir();
-  if (!existsSync(DATA_FILE)) {
-    console.log("[Storage] No data file found, will initialize fresh");
+  if (!fsAvailable) {
+    console.log("[Storage] No filesystem, skipping disk load");
     return false;
   }
   try {
+    if (!existsSync(DATA_FILE)) {
+      console.log("[Storage] No data file found, will initialize fresh");
+      return false;
+    }
     const raw = readFileSync(DATA_FILE, "utf-8");
     const parsed = JSON.parse(raw);
     store = parsed.store ?? null;
@@ -55,14 +62,13 @@ function loadFromDisk(): boolean {
 }
 
 function saveToDisk() {
+  if (!fsAvailable) return;
   if (writeLock) {
-    console.log("[Storage] Write lock active, queuing save");
     setTimeout(() => saveToDisk(), 50);
     return;
   }
   writeLock = true;
   try {
-    ensureDataDir();
     const payload = JSON.stringify({ store, version, restoreEpoch }, null, 2);
     writeFileSync(TEMP_FILE, payload, "utf-8");
     renameSync(TEMP_FILE, DATA_FILE);

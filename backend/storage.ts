@@ -5,6 +5,18 @@ const DATA_DIR = join(process.cwd(), '.data');
 const DATA_FILE = join(DATA_DIR, 'parking-store.json');
 const TEMP_FILE = join(DATA_DIR, 'parking-store.tmp.json');
 
+let fsAvailable = false;
+
+try {
+  mkdirSync(DATA_DIR, { recursive: true });
+  writeFileSync(join(DATA_DIR, '.probe'), 'ok', 'utf-8');
+  fsAvailable = true;
+  console.log('[Storage] Filesystem available, data will persist to disk');
+} catch {
+  fsAvailable = false;
+  console.log('[Storage] Filesystem NOT available, using in-memory storage only');
+}
+
 interface StoreMeta {
   version: number;
   restoreEpoch: number;
@@ -19,17 +31,14 @@ let cachedState: StoreState | null = null;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 const DEBOUNCE_MS = 100;
 
-function ensureDir(): void {
-  if (!existsSync(DATA_DIR)) {
-    mkdirSync(DATA_DIR, { recursive: true });
-    console.log(`[Storage] Created data directory: ${DATA_DIR}`);
-  }
-}
-
 export function loadFromDisk(): StoreState {
   if (cachedState) return cachedState;
 
-  ensureDir();
+  if (!fsAvailable) {
+    console.log('[Storage] No filesystem, starting with empty state');
+    cachedState = { data: null, meta: { version: 0, restoreEpoch: 0 } };
+    return cachedState;
+  }
 
   if (!existsSync(DATA_FILE)) {
     console.log('[Storage] No data file found, starting fresh');
@@ -59,7 +68,7 @@ export function loadFromDisk(): StoreState {
 }
 
 function writeToDiskSync(state: StoreState): void {
-  ensureDir();
+  if (!fsAvailable) return;
   try {
     const json = JSON.stringify(state);
     writeFileSync(TEMP_FILE, json, 'utf-8');
