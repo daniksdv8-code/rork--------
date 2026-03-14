@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Alert } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { Clock, Wallet, Check, AlertTriangle, Calendar, CreditCard, Banknote } from 'lucide-react-native';
+import { Clock, Wallet, Check, AlertTriangle, Calendar, CreditCard, Banknote, RotateCcw } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useParking } from '@/providers/ParkingProvider';
 import { formatDateTime, calculateDays, formatDate, isExpired, getMonthlyAmount } from '@/utils/date';
@@ -10,9 +10,9 @@ import { PaymentMethod } from '@/types';
 export default function ExitModal() {
   const router = useRouter();
   const { sessionId } = useLocalSearchParams<{ sessionId: string }>();
-  const { sessions, cars, clients, tariffs, subscriptions, checkOut, needsShiftCheck } = useParking();
+  const { sessions, cars, clients, tariffs, subscriptions, payments, checkOut, needsShiftCheck, earlyExitWithRefund } = useParking();
   const [method, setMethod] = useState<PaymentMethod>('cash');
-
+  const [refundMethod, setRefundMethod] = useState<PaymentMethod>('cash');
 
   const shiftRequired = needsShiftCheck();
 
@@ -42,6 +42,52 @@ export default function ExitModal() {
   const monthlyAmountCard = getMonthlyAmount(tariffs.monthlyCard);
   const monthlyAmount = method === 'cash' ? monthlyAmountCash : monthlyAmountCard;
   const monthlyDailyRate = method === 'cash' ? tariffs.monthlyCash : tariffs.monthlyCard;
+
+  const refundCalc = useMemo(() => {
+    if (!session || !isMonthly || !hasActiveSub || !sub) return null;
+
+    const activePayments = payments.filter(p =>
+      p.clientId === session.clientId &&
+      p.carId === session.carId &&
+      p.serviceType === 'monthly' &&
+      !p.cancelled &&
+      p.amount > 0
+    ).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    const lastPayment = activePayments[0];
+    if (!lastPayment) return null;
+
+    const paidAmount = lastPayment.amount;
+    const paymentMethodUsed = lastPayment.method;
+    const rate = paymentMethodUsed === 'cash' ? tariffs.monthlyCash : tariffs.monthlyCard;
+
+    const periodStart = new Date(lastPayment.date);
+    periodStart.setHours(0, 0, 0, 0);
+    const todayDate = new Date();
+    todayDate.setHours(0, 0, 0, 0);
+    const diffMs = todayDate.getTime() - periodStart.getTime();
+    const daysUsed = Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)) + 1);
+    const usedAmount = daysUsed * rate;
+    const refundAmount = Math.max(0, paidAmount - usedAmount);
+
+    const paidUntilDate = new Date(sub.paidUntil);
+    paidUntilDate.setHours(0, 0, 0, 0);
+    const totalPaidDays = Math.max(1, Math.ceil((paidUntilDate.getTime() - periodStart.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+    const unusedDays = Math.max(0, totalPaidDays - daysUsed);
+
+    return {
+      paidAmount,
+      paymentMethod: paymentMethodUsed,
+      dailyRate: rate,
+      daysUsed,
+      totalPaidDays,
+      unusedDays,
+      usedAmount,
+      refundAmount,
+      paymentDate: lastPayment.date,
+      paidUntil: sub.paidUntil,
+    };
+  }, [session, isMonthly, hasActiveSub, sub, payments, tariffs]);
 
   const handlePayAndExit = useCallback(() => {
     if (shiftRequired) {
@@ -100,6 +146,34 @@ export default function ExitModal() {
     router.push(`/pay-monthly-modal?clientId=${session.clientId}&carId=${session.carId}`);
   }, [session, router, shiftRequired]);
 
+  const handleEarlyExitWithRefund = useCallback(() => {
+    if (shiftRequired) {
+      Alert.alert('Смена не открыта', 'Откройте смену, чтобы оформить возврат.');
+      return;
+    }
+    if (!session || !refundCalc || refundCalc.refundAmount <= 0) return;
+
+    Alert.alert(
+      'Досрочный выезд с возвратом',
+      `Клиент простоял ${refundCalc.daysUsed} дн. из ${refundCalc.totalPaidDays}.\n\nИспользовано: ${refundCalc.usedAmount} ₽\nВозврат: ${refundCalc.refundAmount} ₽ (${refundMethod === 'cash' ? 'наличные' : 'безнал'})\n\nОформить возврат?`,
+      [
+        { text: 'Отмена', style: 'cancel' },
+        {
+          text: 'Оформить возврат',
+          style: 'destructive',
+          onPress: () => {
+            const result = earlyExitWithRefund(session.id, refundMethod);
+            Alert.alert(
+              'Готово',
+              `Досрочный выезд оформлен.\n\nИспользовано: ${result.daysUsed} дн. × ${result.dailyRate} ₽\nВозвращено: ${result.refundAmount} ₽`
+            );
+            router.back();
+          },
+        },
+      ]
+    );
+  }, [session, refundCalc, refundMethod, earlyExitWithRefund, router, shiftRequired]);
+
   if (!session || !car || !client) {
     return (
       <View style={styles.emptyContainer}>
@@ -111,6 +185,7 @@ export default function ExitModal() {
   const fullyPrepaid = !isMonthly && prepaid > 0 && remainingAmount === 0;
   const monthlyPaid = isMonthly && hasActiveSub;
   const noPaymentNeeded = fullyPrepaid || monthlyPaid;
+  const canRefund = monthlyPaid && refundCalc && refundCalc.refundAmount > 0;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -209,6 +284,89 @@ export default function ExitModal() {
             <Check size={20} color={Colors.white} />
             <Text style={styles.exitBtnText}>Зафиксировать выезд</Text>
           </TouchableOpacity>
+
+          {canRefund && (
+            <>
+              <View style={styles.refundSeparator}>
+                <View style={styles.refundSeparatorLine} />
+                <Text style={styles.refundSeparatorText}>Досрочный выезд</Text>
+                <View style={styles.refundSeparatorLine} />
+              </View>
+
+              <View style={styles.refundCard}>
+                <View style={styles.refundHeader}>
+                  <RotateCcw size={18} color={Colors.warning} />
+                  <Text style={styles.refundTitle}>Перерасчёт и возврат</Text>
+                </View>
+
+                <View style={styles.refundCalcBlock}>
+                  <View style={styles.calcRow}>
+                    <Text style={styles.calcLabel}>Оплата:</Text>
+                    <Text style={styles.calcValue}>{refundCalc!.paidAmount} ₽ ({formatDate(refundCalc!.paymentDate)})</Text>
+                  </View>
+                  <View style={styles.calcRow}>
+                    <Text style={styles.calcLabel}>Оплачено до:</Text>
+                    <Text style={styles.calcValue}>{formatDate(refundCalc!.paidUntil)}</Text>
+                  </View>
+                  <View style={styles.calcDivider} />
+                  <View style={styles.calcRow}>
+                    <Text style={styles.calcLabel}>Тариф:</Text>
+                    <Text style={styles.calcValue}>{refundCalc!.dailyRate} ₽/день ({refundCalc!.paymentMethod === 'cash' ? 'нал.' : 'безнал.'})</Text>
+                  </View>
+                  <View style={styles.calcRow}>
+                    <Text style={styles.calcLabel}>Фактически использовано:</Text>
+                    <Text style={styles.calcValueBold}>{refundCalc!.daysUsed} дн.</Text>
+                  </View>
+                  <View style={styles.calcRow}>
+                    <Text style={styles.calcLabel}>Стоимость использования:</Text>
+                    <Text style={styles.calcValueBold}>{refundCalc!.usedAmount} ₽</Text>
+                  </View>
+                  <View style={styles.calcRow}>
+                    <Text style={styles.calcLabel}>Неиспользовано:</Text>
+                    <Text style={[styles.calcValue, { color: Colors.warning }]}>{refundCalc!.unusedDays} дн.</Text>
+                  </View>
+                  <View style={styles.calcDivider} />
+                  <View style={styles.calcRow}>
+                    <Text style={styles.refundTotalLabel}>К возврату:</Text>
+                    <Text style={styles.refundTotalValue}>{refundCalc!.refundAmount} ₽</Text>
+                  </View>
+                </View>
+
+                <Text style={styles.refundMethodLabel}>Способ возврата</Text>
+                <View style={styles.methodRow}>
+                  <TouchableOpacity
+                    style={[styles.methodBtn, refundMethod === 'cash' && styles.refundMethodBtnActive]}
+                    onPress={() => setRefundMethod('cash')}
+                  >
+                    <Banknote size={18} color={refundMethod === 'cash' ? Colors.white : Colors.textSecondary} />
+                    <Text style={[styles.methodBtnText, refundMethod === 'cash' && styles.methodBtnTextActive]}>
+                      Наличные
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.methodBtn, refundMethod === 'card' && styles.refundMethodBtnActive]}
+                    onPress={() => setRefundMethod('card')}
+                  >
+                    <CreditCard size={18} color={refundMethod === 'card' ? Colors.white : Colors.textSecondary} />
+                    <Text style={[styles.methodBtnText, refundMethod === 'card' && styles.methodBtnTextActive]}>
+                      Безнал
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                <TouchableOpacity
+                  style={[styles.refundBtn, shiftRequired && styles.exitBtnDisabled]}
+                  onPress={handleEarlyExitWithRefund}
+                  activeOpacity={0.7}
+                >
+                  <RotateCcw size={18} color={Colors.white} />
+                  <Text style={styles.refundBtnText}>
+                    Досрочный выезд — возврат {refundCalc!.refundAmount} ₽
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
         </>
       ) : (
         <>
@@ -678,5 +836,83 @@ const styles = StyleSheet.create({
     color: Colors.danger,
     opacity: 0.8,
     lineHeight: 18,
+  },
+  refundSeparator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 12,
+    gap: 12,
+  },
+  refundSeparatorLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: Colors.warning + '40',
+  },
+  refundSeparatorText: {
+    fontSize: 13,
+    fontWeight: '600' as const,
+    color: Colors.warning,
+    textTransform: 'uppercase' as const,
+    letterSpacing: 0.5,
+  },
+  refundCard: {
+    backgroundColor: Colors.card,
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: Colors.warning + '40',
+    marginBottom: 10,
+  },
+  refundHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 14,
+  },
+  refundTitle: {
+    fontSize: 16,
+    fontWeight: '700' as const,
+    color: Colors.text,
+  },
+  refundCalcBlock: {
+    gap: 8,
+    marginBottom: 16,
+  },
+  refundMethodLabel: {
+    fontSize: 13,
+    fontWeight: '600' as const,
+    color: Colors.textSecondary,
+    textTransform: 'uppercase' as const,
+    letterSpacing: 0.5,
+    marginBottom: 8,
+  },
+  refundMethodBtnActive: {
+    backgroundColor: Colors.warning,
+    borderColor: Colors.warning,
+  },
+  refundTotalLabel: {
+    fontSize: 15,
+    fontWeight: '700' as const,
+    color: Colors.warning,
+  },
+  refundTotalValue: {
+    fontSize: 22,
+    fontWeight: '700' as const,
+    color: Colors.warning,
+  },
+  refundBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.warning,
+    height: 52,
+    borderRadius: 14,
+    gap: 8,
+    marginTop: 4,
+  },
+  refundBtnText: {
+    color: Colors.white,
+    fontSize: 16,
+    fontWeight: '600' as const,
   },
 });

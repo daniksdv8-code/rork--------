@@ -794,6 +794,98 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     }
   }, [sessions, tariffs, subscriptions, addTransaction, schedulePush, cars, logAction, currentUser, shifts, updateShiftExpected]);
 
+  const earlyExitWithRefund = useCallback((sessionId: string, refundMethod: PaymentMethod): { refundAmount: number; daysUsed: number; dailyRate: number; paidAmount: number } => {
+    const session = sessions.find(s => s.id === sessionId);
+    if (!session) return { refundAmount: 0, daysUsed: 0, dailyRate: 0, paidAmount: 0 };
+
+    const now = new Date().toISOString();
+    const activeShift = shifts.find(s => s.status === 'open');
+    const sub = subscriptions.find(s => s.carId === session.carId && s.clientId === session.clientId);
+
+    const activePayments = payments.filter(p =>
+      p.clientId === session.clientId &&
+      p.carId === session.carId &&
+      p.serviceType === 'monthly' &&
+      !p.cancelled
+    ).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    const lastPayment = activePayments[0];
+    if (!lastPayment || !sub) {
+      return { refundAmount: 0, daysUsed: 0, dailyRate: 0, paidAmount: 0 };
+    }
+
+    const paidAmount = lastPayment.amount;
+    const paymentMethod = lastPayment.method;
+    const dailyRate = paymentMethod === 'cash' ? tariffs.monthlyCash : tariffs.monthlyCard;
+
+    const periodStart = new Date(lastPayment.date);
+    periodStart.setHours(0, 0, 0, 0);
+    const todayDate = new Date();
+    todayDate.setHours(0, 0, 0, 0);
+    const diffMs = todayDate.getTime() - periodStart.getTime();
+    const daysUsed = Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)) + 1);
+    const usedAmount = daysUsed * dailyRate;
+    const refundAmount = Math.max(0, paidAmount - usedAmount);
+
+    setSessions(prev => prev.map(s =>
+      s.id === sessionId ? { ...s, exitTime: now, status: 'completed' as const, updatedAt: now } : s
+    ));
+
+    addTransaction({
+      clientId: session.clientId,
+      carId: session.carId,
+      type: 'exit',
+      amount: 0,
+      method: null,
+      date: now,
+      description: `Досрочный выезд (месяц): использовано ${daysUsed} дн. из оплаченного периода`,
+    });
+
+    if (refundAmount > 0) {
+      addTransaction({
+        clientId: session.clientId,
+        carId: session.carId,
+        type: 'refund',
+        amount: refundAmount,
+        method: refundMethod,
+        date: now,
+        description: `Возврат за досрочный выезд: ${refundAmount} ₽ (оплачено ${paidAmount} ₽, использовано ${daysUsed} дн. × ${dailyRate} ₽ = ${usedAmount} ₽, ${refundMethod === 'cash' ? 'наличные' : 'безнал'})`,
+      });
+
+      const refundPayment: Payment = {
+        id: generateId(),
+        clientId: session.clientId,
+        carId: session.carId,
+        amount: -refundAmount,
+        method: refundMethod,
+        date: now,
+        serviceType: 'monthly',
+        operatorId: currentUser?.id ?? 'unknown',
+        operatorName: currentUser?.name ?? 'Неизвестно',
+        description: `Возврат за досрочный выезд: ${refundAmount} ₽ (${daysUsed} дн. использовано из ${paidAmount} ₽)`,
+        shiftId: activeShift?.id ?? null,
+        updatedAt: now,
+      };
+      setPayments(prev => [...prev, refundPayment]);
+
+      if (refundMethod === 'cash' && activeShift) {
+        updateShiftExpected(activeShift.id, -refundAmount);
+      }
+
+      if (sub) {
+        setSubscriptions(prev => prev.map(s =>
+          s.id === sub.id ? { ...s, paidUntil: now, updatedAt: now } : s
+        ));
+      }
+    }
+
+    const carObj = cars.find(c => c.id === session.carId);
+    logAction('refund', 'Досрочный выезд с возвратом', `${carObj?.plateNumber ?? session.carId}, ${daysUsed} дн., возврат ${refundAmount} ₽ (${refundMethod === 'cash' ? 'нал' : 'безнал'})`, sessionId, 'session');
+    schedulePush();
+    console.log(`[EarlyExit] Refund: ${refundAmount} ₽, days used: ${daysUsed}, paid: ${paidAmount}, daily: ${dailyRate}`);
+    return { refundAmount, daysUsed, dailyRate, paidAmount };
+  }, [sessions, subscriptions, payments, tariffs, shifts, cars, currentUser, addTransaction, schedulePush, logAction, updateShiftExpected]);
+
   const cancelCheckIn = useCallback((sessionId: string) => {
     const session = sessions.find(s => s.id === sessionId && s.status === 'active');
     if (!session) return;
@@ -1072,16 +1164,20 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     const todayTx = transactions.filter(t => isToday(t.date));
     const todayPaymentTx = todayTx.filter(t => (t.type === 'payment' || t.type === 'debt_payment') && t.amount > 0);
     const todayCancelTx = todayTx.filter(t => t.type === 'cancel_payment');
+    const todayRefundTx = todayTx.filter(t => t.type === 'refund');
     const _cancelledAmount = todayCancelTx.reduce((s, t) => s + t.amount, 0);
 
     const cashToday = todayPaymentTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0);
     const cardToday = todayPaymentTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0);
     const cashCancelled = todayCancelTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0);
     const cardCancelled = todayCancelTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0);
+    const cashRefunded = todayRefundTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0);
+    const cardRefunded = todayRefundTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0);
 
-    const netCash = cashToday - cashCancelled;
-    const netCard = cardToday - cardCancelled;
+    const netCash = cashToday - cashCancelled - cashRefunded;
+    const netCard = cardToday - cardCancelled - cardRefunded;
     const totalDebt = activeDebts.reduce((s, d) => s + d.remainingAmount, 0);
+    const totalRefunds = cashRefunded + cardRefunded;
 
     return {
       carsOnParking: activeSessions.length,
@@ -1090,6 +1186,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       totalRevenue: netCash + netCard,
       debtorsCount: debtors.length,
       totalDebt,
+      totalRefunds,
     };
   }, [transactions, activeDebts, activeSessions, debtors]);
 
@@ -1138,10 +1235,17 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       new Date(t.date).getTime() >= openTime &&
       new Date(t.date).getTime() <= closeTime
     );
+    const shiftRefundTx = transactions.filter(t =>
+      t.type === 'refund' &&
+      new Date(t.date).getTime() >= openTime &&
+      new Date(t.date).getTime() <= closeTime
+    );
     const cashIncome = shiftTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0)
-      - shiftCancelTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0);
+      - shiftCancelTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0)
+      - shiftRefundTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0);
     const cardIncome = shiftTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0)
-      - shiftCancelTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0);
+      - shiftCancelTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0)
+      - shiftRefundTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0);
     const totalExpenses = expenses.filter(e => e.shiftId === shiftId).reduce((s, e) => s + e.amount, 0);
     const totalWithdrawals = withdrawals.filter(w => w.shiftId === shiftId).reduce((s, w) => s + w.amount, 0);
     const calculatedBalance = shift.carryOver + cashIncome - totalExpenses - totalWithdrawals;
@@ -1736,6 +1840,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     actionLogs,
     logAction,
     deleteScheduledShift,
+    earlyExitWithRefund,
   }), [
     clients, cars, activeClients, activeCars, isClientDeleted,
     sessions, subscriptions, payments, debts, transactions, tariffs,
@@ -1750,5 +1855,6 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     addManagedUser, removeManagedUser, updateManagedUserPassword, toggleManagedUserActive,
     updateAdminProfile, validateLogin, resetAllData, createBackup, restoreBackup,
     addScheduledShift, updateScheduledShift, deleteScheduledShift, logAction,
+    earlyExitWithRefund,
   ]);
 });

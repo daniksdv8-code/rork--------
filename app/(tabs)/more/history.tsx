@@ -50,10 +50,12 @@ export default function HistoryScreen() {
       case 'cancel_payment': return { Icon: XCircle, color: Colors.danger, bg: Colors.dangerLight };
       case 'withdrawal': return { Icon: ArrowDownCircle, color: Colors.warning, bg: Colors.warningLight };
       case 'client_deleted': return { Icon: Trash2, color: Colors.danger, bg: Colors.dangerLight };
+      case 'refund': return { Icon: RotateCcw, color: Colors.warning, bg: Colors.warningLight };
+      default: return { Icon: MinusCircle, color: Colors.textSecondary, bg: Colors.inputBg };
     }
   };
 
-  const getTypeLabel = (type: Transaction['type']) => {
+  const getTypeLabel = (type: Transaction['type']): string => {
     switch (type) {
       case 'payment': return 'Оплата';
       case 'debt': return 'Долг';
@@ -65,6 +67,8 @@ export default function HistoryScreen() {
       case 'cancel_payment': return 'Отмена оплаты';
       case 'withdrawal': return 'Снятие';
       case 'client_deleted': return 'Удаление клиента';
+      case 'refund': return 'Возврат';
+      default: return 'Операция';
     }
   };
 

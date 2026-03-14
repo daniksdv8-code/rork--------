@@ -24,7 +24,7 @@ const ACTION_GROUPS: Record<FilterType, ActionType[]> = {
   all: [],
   clients: ['client_add', 'client_edit', 'client_delete', 'car_add', 'car_delete'],
   parking: ['checkin', 'checkout', 'cancel_checkin', 'cancel_checkout'],
-  payments: ['payment', 'cancel_payment', 'debt_payment', 'expense_add', 'withdrawal'],
+  payments: ['payment', 'cancel_payment', 'debt_payment', 'expense_add', 'withdrawal', 'refund'],
   shifts: ['shift_open', 'shift_close', 'schedule_add', 'schedule_edit', 'schedule_delete'],
   system: ['tariff_update', 'user_add', 'user_remove', 'user_toggle', 'user_password', 'admin_profile', 'data_reset'],
 };
@@ -57,6 +57,9 @@ function getActionIcon(action: ActionType) {
     case 'schedule_edit': return { Icon: CalendarDays, color: Colors.info, bg: Colors.infoLight };
     case 'schedule_delete': return { Icon: CalendarDays, color: Colors.danger, bg: Colors.dangerLight };
     case 'data_reset': return { Icon: Trash2, color: Colors.danger, bg: Colors.dangerLight };
+    case 'backup_create': return { Icon: Shield, color: Colors.info, bg: Colors.infoLight };
+    case 'backup_restore': return { Icon: RotateCcw, color: Colors.warning, bg: Colors.warningLight };
+    case 'refund': return { Icon: RotateCcw, color: Colors.warning, bg: Colors.warningLight };
     default: return { Icon: CircleDot, color: Colors.textSecondary, bg: Colors.inputBg };
   }
 }

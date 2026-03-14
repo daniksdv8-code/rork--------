@@ -58,11 +58,29 @@ export default function ReportsScreen() {
       (!cutoff || new Date(t.date) >= cutoff)
     );
 
-    const cash = paymentTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0);
-    const card = paymentTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0);
+    const cancelTx = transactions.filter(t =>
+      t.type === 'cancel_payment' &&
+      (!cutoff || new Date(t.date) >= cutoff)
+    );
+
+    const refundTx = transactions.filter(t =>
+      t.type === 'refund' &&
+      (!cutoff || new Date(t.date) >= cutoff)
+    );
+
+    const cashGross = paymentTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0);
+    const cardGross = paymentTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0);
+    const cashCancelled = cancelTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0);
+    const cardCancelled = cancelTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0);
+    const cashRefunded = refundTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0);
+    const cardRefunded = refundTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0);
+
+    const cash = cashGross - cashCancelled - cashRefunded;
+    const card = cardGross - cardCancelled - cardRefunded;
+    const totalRefunds = cashRefunded + cardRefunded;
     const totalDebtAmount = debts.reduce((s, d) => s + d.remainingAmount, 0);
 
-    return { cash, card, total: cash + card, totalDebtAmount };
+    return { cash, card, total: cash + card, totalDebtAmount, totalRefunds };
   }, [transactions, debts, revenuePeriod]);
 
   const vehicleData = useMemo(() => {
@@ -93,24 +111,46 @@ export default function ReportsScreen() {
     if (shift.closingSummary) return shift.closingSummary.cashIncome;
     const openTime = new Date(shift.openedAt).getTime();
     const closeTime = shift.closedAt ? new Date(shift.closedAt).getTime() : Date.now();
-    return transactions.filter(t =>
+    const income = transactions.filter(t =>
       (t.type === 'payment' || t.type === 'debt_payment') &&
       t.method === 'cash' && t.amount > 0 &&
       new Date(t.date).getTime() >= openTime &&
       new Date(t.date).getTime() <= closeTime
     ).reduce((s, t) => s + t.amount, 0);
+    const cancelled = transactions.filter(t =>
+      t.type === 'cancel_payment' && t.method === 'cash' &&
+      new Date(t.date).getTime() >= openTime &&
+      new Date(t.date).getTime() <= closeTime
+    ).reduce((s, t) => s + t.amount, 0);
+    const refunded = transactions.filter(t =>
+      t.type === 'refund' && t.method === 'cash' &&
+      new Date(t.date).getTime() >= openTime &&
+      new Date(t.date).getTime() <= closeTime
+    ).reduce((s, t) => s + t.amount, 0);
+    return income - cancelled - refunded;
   }, [transactions]);
 
   const shiftCardIncome = useCallback((shift: CashShift) => {
     if (shift.closingSummary) return shift.closingSummary.cardIncome;
     const openTime = new Date(shift.openedAt).getTime();
     const closeTime = shift.closedAt ? new Date(shift.closedAt).getTime() : Date.now();
-    return transactions.filter(t =>
+    const income = transactions.filter(t =>
       (t.type === 'payment' || t.type === 'debt_payment') &&
       t.method === 'card' && t.amount > 0 &&
       new Date(t.date).getTime() >= openTime &&
       new Date(t.date).getTime() <= closeTime
     ).reduce((s, t) => s + t.amount, 0);
+    const cancelled = transactions.filter(t =>
+      t.type === 'cancel_payment' && t.method === 'card' &&
+      new Date(t.date).getTime() >= openTime &&
+      new Date(t.date).getTime() <= closeTime
+    ).reduce((s, t) => s + t.amount, 0);
+    const refunded = transactions.filter(t =>
+      t.type === 'refund' && t.method === 'card' &&
+      new Date(t.date).getTime() >= openTime &&
+      new Date(t.date).getTime() <= closeTime
+    ).reduce((s, t) => s + t.amount, 0);
+    return income - cancelled - refunded;
   }, [transactions]);
 
   const shiftExpenseTotal = useCallback((shift: CashShift) => {
@@ -226,6 +266,13 @@ export default function ReportsScreen() {
               <Text style={[styles.breakdownValue, { color: Colors.info }]}>{revenueData.card} ₽</Text>
             </View>
           </View>
+
+          {revenueData.totalRefunds > 0 && (
+            <View style={[styles.breakdownCard, { borderLeftColor: Colors.warning, marginHorizontal: 0 }]}>
+              <Text style={styles.breakdownLabel}>Возвраты</Text>
+              <Text style={[styles.breakdownValue, { color: Colors.warning }]}>−{revenueData.totalRefunds} ₽</Text>
+            </View>
+          )}
 
           <View style={[styles.breakdownCard, { borderLeftColor: Colors.danger, marginHorizontal: 0 }]}>
             <Text style={styles.breakdownLabel}>Неоплаченные долги</Text>

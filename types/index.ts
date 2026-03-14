@@ -1,7 +1,7 @@
 export type PaymentMethod = 'cash' | 'card';
 export type ServiceType = 'monthly' | 'onetime';
 export type SessionStatus = 'active' | 'completed';
-export type TransactionType = 'payment' | 'debt' | 'exit' | 'debt_payment' | 'entry' | 'cancel_entry' | 'cancel_exit' | 'cancel_payment' | 'withdrawal' | 'client_deleted';
+export type TransactionType = 'payment' | 'debt' | 'exit' | 'debt_payment' | 'entry' | 'cancel_entry' | 'cancel_exit' | 'cancel_payment' | 'withdrawal' | 'client_deleted' | 'refund';
 export type UserRole = 'admin' | 'manager';
 
 export interface User {
@@ -197,7 +197,8 @@ export type ActionType =
   | 'schedule_delete'
   | 'data_reset'
   | 'backup_create'
-  | 'backup_restore';
+  | 'backup_restore'
+  | 'refund';
 
 export interface ActionLog {
   id: string;
