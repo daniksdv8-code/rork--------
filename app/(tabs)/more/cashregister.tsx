@@ -118,26 +118,48 @@ export default function CashRegisterScreen() {
     if (shift.closingSummary) return shift.closingSummary.cashIncome;
     const openTime = new Date(shift.openedAt).getTime();
     const closeTime = shift.closedAt ? new Date(shift.closedAt).getTime() : Date.now();
-    return transactions.filter(t =>
+    const income = transactions.filter(t =>
       (t.type === 'payment' || t.type === 'debt_payment') &&
       t.method === 'cash' &&
       t.amount > 0 &&
       new Date(t.date).getTime() >= openTime &&
       new Date(t.date).getTime() <= closeTime
     ).reduce((s, t) => s + t.amount, 0);
+    const cancelled = transactions.filter(t =>
+      t.type === 'cancel_payment' && t.method === 'cash' &&
+      new Date(t.date).getTime() >= openTime &&
+      new Date(t.date).getTime() <= closeTime
+    ).reduce((s, t) => s + t.amount, 0);
+    const refunded = transactions.filter(t =>
+      t.type === 'refund' && t.method === 'cash' &&
+      new Date(t.date).getTime() >= openTime &&
+      new Date(t.date).getTime() <= closeTime
+    ).reduce((s, t) => s + t.amount, 0);
+    return income - cancelled - refunded;
   }, [transactions]);
 
   const shiftCardIncome = useCallback((shift: CashShift) => {
     if (shift.closingSummary) return shift.closingSummary.cardIncome;
     const openTime = new Date(shift.openedAt).getTime();
     const closeTime = shift.closedAt ? new Date(shift.closedAt).getTime() : Date.now();
-    return transactions.filter(t =>
+    const income = transactions.filter(t =>
       (t.type === 'payment' || t.type === 'debt_payment') &&
       t.method === 'card' &&
       t.amount > 0 &&
       new Date(t.date).getTime() >= openTime &&
       new Date(t.date).getTime() <= closeTime
     ).reduce((s, t) => s + t.amount, 0);
+    const cancelled = transactions.filter(t =>
+      t.type === 'cancel_payment' && t.method === 'card' &&
+      new Date(t.date).getTime() >= openTime &&
+      new Date(t.date).getTime() <= closeTime
+    ).reduce((s, t) => s + t.amount, 0);
+    const refunded = transactions.filter(t =>
+      t.type === 'refund' && t.method === 'card' &&
+      new Date(t.date).getTime() >= openTime &&
+      new Date(t.date).getTime() <= closeTime
+    ).reduce((s, t) => s + t.amount, 0);
+    return income - cancelled - refunded;
   }, [transactions]);
 
   const shiftExpenses = useCallback((shiftId: string) => {
@@ -165,6 +187,16 @@ export default function CashRegisterScreen() {
       new Date(t.date).getTime() >= openTime &&
       new Date(t.date).getTime() <= closeTime
     );
+    const cancelTx = transactions.filter(t =>
+      t.type === 'cancel_payment' &&
+      new Date(t.date).getTime() >= openTime &&
+      new Date(t.date).getTime() <= closeTime
+    );
+    const refundTx = transactions.filter(t =>
+      t.type === 'refund' &&
+      new Date(t.date).getTime() >= openTime &&
+      new Date(t.date).getTime() <= closeTime
+    );
     const byOp: Record<string, { name: string; cash: number; card: number }> = {};
     shiftTx.forEach(t => {
       if (!byOp[t.operatorId]) {
@@ -172,6 +204,13 @@ export default function CashRegisterScreen() {
       }
       if (t.method === 'cash') byOp[t.operatorId].cash += t.amount;
       else if (t.method === 'card') byOp[t.operatorId].card += t.amount;
+    });
+    [...cancelTx, ...refundTx].forEach(t => {
+      if (!byOp[t.operatorId]) {
+        byOp[t.operatorId] = { name: t.operatorName, cash: 0, card: 0 };
+      }
+      if (t.method === 'cash') byOp[t.operatorId].cash -= t.amount;
+      else if (t.method === 'card') byOp[t.operatorId].card -= t.amount;
     });
     return Object.values(byOp);
   }, [transactions]);
@@ -196,8 +235,23 @@ export default function CashRegisterScreen() {
       (!cutoff || new Date(t.date) >= cutoff)
     );
 
-    const totalCash = filteredTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0);
-    const totalCard = filteredTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0);
+    const cancelTx = transactions.filter(t =>
+      t.type === 'cancel_payment' &&
+      (!cutoff || new Date(t.date) >= cutoff)
+    );
+
+    const refundTx = transactions.filter(t =>
+      t.type === 'refund' &&
+      (!cutoff || new Date(t.date) >= cutoff)
+    );
+
+    const cashCancelled = cancelTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0);
+    const cardCancelled = cancelTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0);
+    const cashRefunded = refundTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0);
+    const cardRefunded = refundTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0);
+
+    const totalCash = filteredTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0) - cashCancelled - cashRefunded;
+    const totalCard = filteredTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0) - cardCancelled - cardRefunded;
 
     const filteredExpenses = expenses.filter(e => !cutoff || new Date(e.date) >= cutoff);
     const totalExpenses = filteredExpenses.reduce((s, e) => s + e.amount, 0);
@@ -219,6 +273,7 @@ export default function CashRegisterScreen() {
     return {
       totalCash, totalCard, total: totalCash + totalCard,
       totalExpenses, totalWithdrawals,
+      totalRefunds: cashRefunded + cardRefunded,
       netCash: totalCash - totalExpenses - totalWithdrawals,
       operators: Object.values(byOperator),
       periodExpenses: filteredExpenses,
@@ -441,6 +496,13 @@ export default function CashRegisterScreen() {
                 <Text style={[styles.shiftStatValue, { color: Colors.warning }]}>{reportData.totalWithdrawals} ₽</Text>
               </View>
             </View>
+
+            {reportData.totalRefunds > 0 && (
+              <View style={[styles.shiftStatCard, { borderLeftColor: '#e67e22', marginBottom: 10 }]}>
+                <Text style={styles.shiftStatLabel}>Возвраты (уже вычтены из прихода)</Text>
+                <Text style={[styles.shiftStatValue, { color: '#e67e22' }]}>−{reportData.totalRefunds} ₽</Text>
+              </View>
+            )}
 
             <View style={[styles.shiftStatCard, { borderLeftColor: Colors.primary, marginBottom: 12 }]}>
               <Text style={styles.shiftStatLabel}>Нал. итого (приход − расходы − снятия)</Text>
