@@ -15,7 +15,7 @@ export default function ClientCardScreen() {
   const { isAdmin } = useAuth();
   const {
     clients, cars, sessions, subscriptions, debts, transactions, payments,
-    getCarsByClient, getClientTotalDebt, deleteClient, addCarToClient,
+    getCarsByClient, getClientTotalDebt, deleteCar, deleteClient, addCarToClient,
     checkIn, checkOut, getSubscription, cancelCheckIn, cancelCheckOut, cancelPayment,
     needsShiftCheck, updateClient, updateCar,
   } = useParking();
@@ -143,19 +143,47 @@ export default function ClientCardScreen() {
     Alert.alert('Готово', 'Данные автомобиля обновлены');
   }, [editingCarId, editCarPlate, editCarModel, cars, updateCar]);
 
+  const handleDeleteCar = useCallback((carId: string) => {
+    const car = clientCars.find(c => c.id === carId);
+    if (!car) return;
+    const hasActiveSession = clientActiveSessions.some(s => s.carId === carId);
+    const warningText = hasActiveSession
+      ? `\n\n❗ У этого авто есть активная стоянка, она будет отменена.`
+      : '';
+    Alert.alert(
+      'Удаление автомобиля',
+      `Вы уверены, что хотите удалить автомобиль ${car.plateNumber}${car.carModel ? ` (${car.carModel})` : ''}? Это действие нельзя отменить.${warningText}`,
+      [
+        { text: 'Отмена', style: 'cancel' },
+        {
+          text: 'Удалить',
+          style: 'destructive',
+          onPress: () => {
+            deleteCar(carId);
+            Alert.alert('Готово', `Автомобиль ${car.plateNumber} удалён`);
+          },
+        },
+      ]
+    );
+  }, [clientCars, clientActiveSessions, deleteCar]);
+
   const handleDelete = useCallback(() => {
     if (!clientId || !client) return;
-    Alert.alert('Удаление', `Удалить клиента ${client.name} и все связанные данные?`, [
-      { text: 'Отмена', style: 'cancel' },
-      {
-        text: 'Удалить',
-        style: 'destructive',
-        onPress: () => {
-          deleteClient(clientId);
-          router.back();
+    Alert.alert(
+      'Удаление клиента',
+      `Вы уверены, что хотите удалить клиента ${client.name} и все его автомобили? Это действие нельзя отменить.`,
+      [
+        { text: 'Отмена', style: 'cancel' },
+        {
+          text: 'Удалить',
+          style: 'destructive',
+          onPress: () => {
+            deleteClient(clientId);
+            router.back();
+          },
         },
-      },
-    ]);
+      ]
+    );
   }, [clientId, client, deleteClient, router]);
 
   const handleCheckIn = useCallback(() => {
@@ -690,9 +718,14 @@ export default function ClientCardScreen() {
                   {car.carModel ? <Text style={styles.carModelText}>{car.carModel}</Text> : null}
                 </View>
                 {isAdmin && !isDeleted && (
-                  <TouchableOpacity style={styles.editCarIconBtn} onPress={() => startEditCar(car.id)} activeOpacity={0.7}>
-                    <Pencil size={12} color={Colors.primary} />
-                  </TouchableOpacity>
+                  <View style={styles.carAdminActions}>
+                    <TouchableOpacity style={styles.editCarIconBtn} onPress={() => startEditCar(car.id)} activeOpacity={0.7}>
+                      <Pencil size={12} color={Colors.primary} />
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.deleteCarIconBtn} onPress={() => handleDeleteCar(car.id)} activeOpacity={0.7}>
+                      <Trash2 size={12} color={Colors.danger} />
+                    </TouchableOpacity>
+                  </View>
                 )}
               </View>
               {sub && (
@@ -1579,6 +1612,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
   },
+  carAdminActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginLeft: 4,
+  },
   editCarIconBtn: {
     width: 26,
     height: 26,
@@ -1586,7 +1625,14 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.infoLight,
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: 4,
+  },
+  deleteCarIconBtn: {
+    width: 26,
+    height: 26,
+    borderRadius: 6,
+    backgroundColor: Colors.dangerLight,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   editCarForm: {
     paddingHorizontal: 12,

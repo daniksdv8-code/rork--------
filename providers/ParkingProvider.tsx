@@ -1331,6 +1331,26 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     schedulePush();
   }, [schedulePush, logAction]);
 
+  const deleteCar = useCallback((carId: string) => {
+    const now = new Date().toISOString();
+    const car = cars.find(c => c.id === carId);
+    if (!car) return;
+
+    setCars(prev => prev.map(c =>
+      c.id === carId ? { ...c, deleted: true, deletedAt: now, updatedAt: now } : c
+    ));
+
+    setSessions(prev => prev.map(s =>
+      s.carId === carId && s.status === 'active'
+        ? { ...s, status: 'completed' as const, exitTime: now, cancelled: true, updatedAt: now }
+        : s
+    ));
+
+    logAction('car_delete', 'Удалена машина', `${car.plateNumber}${car.carModel ? ` (${car.carModel})` : ''}`, carId, 'car');
+    schedulePush();
+    console.log(`[Delete] Car ${carId} (${car.plateNumber}) soft-deleted, data preserved in history`);
+  }, [cars, schedulePush, logAction]);
+
   const deleteClient = useCallback((clientId: string) => {
     const now = new Date().toISOString();
     const client = clients.find(c => c.id === clientId);
@@ -1358,7 +1378,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       amount: 0,
       method: null,
       date: now,
-      description: `Клиент удалён (ошибочно введён): ${client?.name ?? '—'}, авто: ${plateNumbers || '—'}`,
+      description: `Клиент удалён: ${client?.name ?? '—'}, авто: ${plateNumbers || '—'}`,
     });
 
     logAction('client_delete', 'Удалён клиент', `${client?.name ?? '—'}, авто: ${plateNumbers || '—'}`, clientId, 'client');
@@ -1817,6 +1837,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     withdrawCash,
     searchClients,
     updateTariffs,
+    deleteCar,
     deleteClient,
     findMatchingClients,
     openShift,
@@ -1850,7 +1871,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     updateClient, updateCar,
     addClient, addCarToClient, checkIn, checkOut,
     cancelCheckIn, cancelCheckOut, cancelPayment,
-    payMonthly, payDebt, withdrawCash, searchClients, updateTariffs, deleteClient, findMatchingClients,
+    payMonthly, payDebt, withdrawCash, searchClients, updateTariffs, deleteCar, deleteClient, findMatchingClients,
     openShift, closeShift, getActiveShift, getActiveManagerShift, isShiftOpen, needsShiftCheck, addExpense,
     addManagedUser, removeManagedUser, updateManagedUserPassword, toggleManagedUserActive,
     updateAdminProfile, validateLogin, resetAllData, createBackup, restoreBackup,
