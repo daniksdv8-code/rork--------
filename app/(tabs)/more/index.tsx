@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
-import { AlertTriangle, Clock, BarChart3, Settings, ChevronRight, Banknote, CalendarDays, FileText, Download } from 'lucide-react-native';
+import { AlertTriangle, Clock, BarChart3, Settings, ChevronRight, Banknote, CalendarDays, FileText, Download, Wallet } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/providers/AuthProvider';
 import { useParking } from '@/providers/ParkingProvider';
@@ -52,6 +52,12 @@ export default function MoreScreen() {
   ];
 
   if (isAdmin) {
+    menuItems.push({
+      label: 'Финансы',
+      icon: Wallet,
+      route: '/(tabs)/more/finance',
+      color: '#0D9488',
+    });
     menuItems.push({
       label: 'Экспорт данных',
       icon: Download,

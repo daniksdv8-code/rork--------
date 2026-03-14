@@ -5,7 +5,7 @@ import {
   Client, Car, ParkingSession, MonthlySubscription,
   Payment, Debt, Transaction, Tariffs,
   PaymentMethod, ServiceType, CashShift, Expense, User, CashWithdrawal, ScheduledShift,
-  ActionLog, ActionType
+  ActionLog, ActionType, AdminExpense, AdminCashOperation, ExpenseCategory
 } from '@/types';
 import { EMPTY_DATA } from '@/mocks/initialData';
 import { generateId } from '@/utils/id';
@@ -35,6 +35,9 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   const [users, setUsers] = useState<User[]>([]);
   const [scheduledShifts, setScheduledShifts] = useState<ScheduledShift[]>([]);
   const [actionLogs, setActionLogs] = useState<ActionLog[]>([]);
+  const [adminExpenses, setAdminExpenses] = useState<AdminExpense[]>([]);
+  const [adminCashOperations, setAdminCashOperations] = useState<AdminCashOperation[]>([]);
+  const [expenseCategories, setExpenseCategories] = useState<ExpenseCategory[]>([]);
   const [deletedClientIds, setDeletedClientIds] = useState<string[]>([]);
   const [isLoaded, setIsLoaded] = useState<boolean>(false);
   const [isServerSynced, setIsServerSynced] = useState<boolean>(false);
@@ -51,11 +54,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   const restoreEpochRef = useRef<number>(-1);
 
   const latestDataRef = useRef({
-    clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs,
+    clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories,
   });
   useEffect(() => {
-    latestDataRef.current = { clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs };
-  }, [clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs]);
+    latestDataRef.current = { clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories };
+  }, [clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories]);
 
   const logAction = useCallback((action: ActionType, label: string, details: string, entityId?: string, entityType?: string) => {
     const entry: ActionLog = {
@@ -103,6 +106,9 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     }
     setScheduledShifts((d.scheduledShifts ?? []).filter((s: any) => !s.deleted));
     setActionLogs((d.actionLogs ?? []).slice(0, MAX_ACTION_LOGS));
+    setAdminExpenses(d.adminExpenses ?? []);
+    setAdminCashOperations(d.adminCashOperations ?? []);
+    setExpenseCategories((d.expenseCategories ?? []).filter((c: any) => !c.deleted));
     console.log(`[Sync] Applied server data: clients=${(d.clients||[]).length}, sessions=${(d.sessions||[]).length}, shifts=${(d.shifts||[]).length}, users=${(serverUsers||[]).length}`);
   }, []);
 
@@ -130,6 +136,9 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
           if (data.deletedClientIds) setDeletedClientIds(data.deletedClientIds);
           if (data.scheduledShifts) setScheduledShifts(data.scheduledShifts);
           if (data.actionLogs) setActionLogs(data.actionLogs);
+          if (data.adminExpenses) setAdminExpenses(data.adminExpenses);
+          if (data.adminCashOperations) setAdminCashOperations(data.adminCashOperations);
+          if (data.expenseCategories) setExpenseCategories(data.expenseCategories);
           if (data.users) {
             setUsers(data.users);
           }
@@ -1128,7 +1137,22 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       description: `Снятие из кассы: ${amount} ₽${notes ? ` — ${notes}` : ''}`,
     });
 
-    logAction('withdrawal', 'Снятие из кассы', `${amount} ₽${notes ? ` — ${notes}` : ''}`, withdrawal.id, 'withdrawal');
+    const adminOp: AdminCashOperation = {
+      id: generateId(),
+      type: 'cash_withdrawal_from_manager',
+      amount,
+      method: 'cash',
+      description: `Снятие наличных с кассы менеджера${notes ? `: ${notes}` : ''}`,
+      sourceManagerId: activeShift?.operatorId,
+      sourceManagerName: activeShift?.operatorName,
+      operatorId: currentUser?.id ?? 'unknown',
+      operatorName: currentUser?.name ?? 'Неизвестно',
+      date: now,
+      updatedAt: now,
+    };
+    setAdminCashOperations(prev => [adminOp, ...prev]);
+
+    logAction('admin_withdrawal', 'Снятие наличных с кассы менеджера', `${amount} ₽${notes ? ` — ${notes}` : ''}, менеджер: ${activeShift?.operatorName ?? '—'}`, withdrawal.id, 'withdrawal');
     schedulePush();
     console.log(`[Withdrawal] ${amount} ₽ withdrawn by ${currentUser?.name}`);
     return withdrawal;
@@ -1300,6 +1324,178 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     console.log(`[Expense] Added expense ${expense.id}: ${amount} ₽ - ${description}`);
     return expense;
   }, [shifts, currentUser, schedulePush, logAction]);
+
+  const addAdminExpense = useCallback((amount: number, category: string, description: string, method: PaymentMethod): AdminExpense => {
+    const now = new Date().toISOString();
+    const expense: AdminExpense = {
+      id: generateId(),
+      amount,
+      category,
+      description,
+      method,
+      operatorId: currentUser?.id ?? 'unknown',
+      operatorName: currentUser?.name ?? 'Неизвестно',
+      date: now,
+      updatedAt: now,
+    };
+    setAdminExpenses(prev => [expense, ...prev]);
+
+    const adminOp: AdminCashOperation = {
+      id: generateId(),
+      type: 'admin_expense',
+      amount,
+      method,
+      description: `Расход админа: ${category} — ${description}`,
+      operatorId: currentUser?.id ?? 'unknown',
+      operatorName: currentUser?.name ?? 'Неизвестно',
+      date: now,
+      updatedAt: now,
+    };
+    setAdminCashOperations(prev => [adminOp, ...prev]);
+
+    addTransaction({
+      clientId: '',
+      carId: '',
+      type: 'admin_expense',
+      amount,
+      method,
+      date: now,
+      description: `Расход админа: ${amount} ₽ — ${category}: ${description} (${method === 'cash' ? 'нал' : 'безнал'})`,
+    });
+
+    logAction('admin_expense_add', 'Расход администратора', `${amount} ₽ — ${category}: ${description} (${method === 'cash' ? 'нал' : 'безнал'})`, expense.id, 'admin_expense');
+    schedulePush();
+    console.log(`[AdminExpense] Added: ${amount} ₽ - ${category}: ${description}`);
+    return expense;
+  }, [currentUser, schedulePush, logAction, addTransaction]);
+
+  const addExpenseCategory = useCallback((name: string, ownerType: 'admin' | 'manager'): ExpenseCategory => {
+    const now = new Date().toISOString();
+    const cat: ExpenseCategory = {
+      id: generateId(),
+      name,
+      ownerType,
+      updatedAt: now,
+    };
+    setExpenseCategories(prev => [...prev, cat]);
+    logAction('expense_category_add', 'Добавлена категория расходов', `${name} (${ownerType === 'admin' ? 'админ' : 'менеджер'})`, cat.id, 'expense_category');
+    schedulePush();
+    console.log(`[ExpenseCategory] Added: ${name} for ${ownerType}`);
+    return cat;
+  }, [schedulePush, logAction]);
+
+  const updateExpenseCategory = useCallback((id: string, name: string) => {
+    const now = new Date().toISOString();
+    setExpenseCategories(prev => prev.map(c =>
+      c.id === id ? { ...c, name, updatedAt: now } : c
+    ));
+    logAction('expense_category_edit', 'Изменена категория расходов', `ID: ${id}, новое имя: ${name}`, id, 'expense_category');
+    schedulePush();
+  }, [schedulePush, logAction]);
+
+  const deleteExpenseCategory = useCallback((id: string) => {
+    const now = new Date().toISOString();
+    setExpenseCategories(prev => prev.map(c =>
+      c.id === id ? { ...c, deleted: true, updatedAt: now } : c
+    ));
+    logAction('expense_category_delete', 'Удалена категория расходов', `ID: ${id}`, id, 'expense_category');
+    schedulePush();
+  }, [schedulePush, logAction]);
+
+  const getManagerCategories = useMemo(() =>
+    expenseCategories.filter(c => c.ownerType === 'manager' && !c.deleted),
+  [expenseCategories]);
+
+  const getAdminCategories = useMemo(() =>
+    expenseCategories.filter(c => c.ownerType === 'admin' && !c.deleted),
+  [expenseCategories]);
+
+  const getManagerCashRegister = useCallback((from?: Date, to?: Date) => {
+    const filterByPeriod = <T extends { date: string }>(items: T[]): T[] => {
+      if (!from && !to) return items;
+      return items.filter(item => {
+        const d = new Date(item.date);
+        if (from && d < from) return false;
+        if (to && d > to) return false;
+        return true;
+      });
+    };
+
+    const periodTx = filterByPeriod(transactions);
+    const paymentTx = periodTx.filter(t =>
+      (t.type === 'payment' || t.type === 'debt_payment') && t.amount > 0
+    );
+    const cancelTx = periodTx.filter(t => t.type === 'cancel_payment');
+    const refundTx = periodTx.filter(t => t.type === 'refund');
+
+    const cashIncome = paymentTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0)
+      - cancelTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0)
+      - refundTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0);
+
+    const cardIncome = paymentTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0)
+      - cancelTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0)
+      - refundTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0);
+
+    const periodExpenses = filterByPeriod(expenses);
+    const totalExpenses = periodExpenses.reduce((s, e) => s + e.amount, 0);
+
+    const periodWithdrawals = filterByPeriod(withdrawals);
+    const totalWithdrawals = periodWithdrawals.reduce((s, w) => s + w.amount, 0);
+
+    const balance = cashIncome - totalExpenses - totalWithdrawals;
+
+    return {
+      cashIncome,
+      cardIncome,
+      totalExpenses,
+      totalWithdrawals,
+      balance,
+      expenses: periodExpenses,
+      withdrawals: periodWithdrawals,
+    };
+  }, [transactions, expenses, withdrawals]);
+
+  const getAdminCashRegister = useCallback((from?: Date, to?: Date) => {
+    const filterByPeriod = <T extends { date: string }>(items: T[]): T[] => {
+      if (!from && !to) return items;
+      return items.filter(item => {
+        const d = new Date(item.date);
+        if (from && d < from) return false;
+        if (to && d > to) return false;
+        return true;
+      });
+    };
+
+    const periodTx = filterByPeriod(transactions);
+    const paymentTx = periodTx.filter(t =>
+      (t.type === 'payment' || t.type === 'debt_payment') && t.amount > 0
+    );
+    const cancelTx = periodTx.filter(t => t.type === 'cancel_payment');
+    const refundTx = periodTx.filter(t => t.type === 'refund');
+
+    const cardIncome = paymentTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0)
+      - cancelTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0)
+      - refundTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0);
+
+    const periodWithdrawals = filterByPeriod(withdrawals);
+    const cashFromManager = periodWithdrawals.reduce((s, w) => s + w.amount, 0);
+
+    const periodAdminExpenses = filterByPeriod(adminExpenses);
+    const totalAdminExpenses = periodAdminExpenses.reduce((s, e) => s + e.amount, 0);
+
+    const balance = cardIncome + cashFromManager - totalAdminExpenses;
+
+    const periodOps = filterByPeriod(adminCashOperations);
+
+    return {
+      cardIncome,
+      cashFromManager,
+      totalAdminExpenses,
+      balance,
+      adminExpenses: periodAdminExpenses,
+      operations: periodOps,
+    };
+  }, [transactions, withdrawals, adminExpenses, adminCashOperations]);
 
   const expiringSubscriptions = useMemo(() => {
     return subscriptions.filter(s => {
@@ -1625,6 +1821,9 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         deletedClientIds: latestDataRef.current.deletedClientIds,
         scheduledShifts: latestDataRef.current.scheduledShifts,
         actionLogs: latestDataRef.current.actionLogs,
+        adminExpenses: latestDataRef.current.adminExpenses,
+        adminCashOperations: latestDataRef.current.adminCashOperations,
+        expenseCategories: latestDataRef.current.expenseCategories,
       },
     };
     logAction('backup_create', 'Создана резервная копия', `Клиентов: ${backupData.data.clients.length}, машин: ${backupData.data.cars.length}`);
@@ -1662,6 +1861,9 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       setDeletedClientIds(d.deletedClientIds ?? []);
       setScheduledShifts(d.scheduledShifts ?? []);
       setActionLogs(d.actionLogs ?? []);
+      setAdminExpenses(d.adminExpenses ?? []);
+      setAdminCashOperations(d.adminCashOperations ?? []);
+      setExpenseCategories(d.expenseCategories ?? []);
 
       const restorePayload = {
         clients: d.clients ?? [],
@@ -1679,6 +1881,9 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         deletedClientIds: d.deletedClientIds ?? [],
         scheduledShifts: d.scheduledShifts ?? [],
         actionLogs: d.actionLogs ?? [],
+        adminExpenses: d.adminExpenses ?? [],
+        adminCashOperations: d.adminCashOperations ?? [],
+        expenseCategories: d.expenseCategories ?? [],
       };
 
       try {
@@ -1746,6 +1951,9 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     setScheduledShifts([]);
     setActionLogs([resetLog]);
     setUsers(adminUsers);
+    setAdminExpenses([]);
+    setAdminCashOperations([]);
+    setExpenseCategories([]);
 
     const resetPayload = {
       clients: [] as any[],
@@ -1763,6 +1971,9 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       deletedClientIds: [] as string[],
       scheduledShifts: [] as any[],
       actionLogs: [resetLog],
+      adminExpenses: [] as any[],
+      adminCashOperations: [] as any[],
+      expenseCategories: [] as any[],
     };
 
     try {
@@ -1861,6 +2072,17 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     logAction,
     deleteScheduledShift,
     earlyExitWithRefund,
+    adminExpenses,
+    adminCashOperations,
+    expenseCategories,
+    addAdminExpense,
+    addExpenseCategory,
+    updateExpenseCategory,
+    deleteExpenseCategory,
+    getManagerCategories,
+    getAdminCategories,
+    getManagerCashRegister,
+    getAdminCashRegister,
   }), [
     clients, cars, activeClients, activeCars, isClientDeleted,
     sessions, subscriptions, payments, debts, transactions, tariffs,
@@ -1876,5 +2098,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     updateAdminProfile, validateLogin, resetAllData, createBackup, restoreBackup,
     addScheduledShift, updateScheduledShift, deleteScheduledShift, logAction,
     earlyExitWithRefund,
+    adminExpenses, adminCashOperations, expenseCategories,
+    addAdminExpense, addExpenseCategory, updateExpenseCategory, deleteExpenseCategory,
+    getManagerCategories, getAdminCategories, getManagerCashRegister, getAdminCashRegister,
   ]);
 });

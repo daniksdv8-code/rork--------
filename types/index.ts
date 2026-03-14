@@ -1,7 +1,7 @@
 export type PaymentMethod = 'cash' | 'card';
 export type ServiceType = 'monthly' | 'onetime';
 export type SessionStatus = 'active' | 'completed';
-export type TransactionType = 'payment' | 'debt' | 'exit' | 'debt_payment' | 'entry' | 'cancel_entry' | 'cancel_exit' | 'cancel_payment' | 'withdrawal' | 'client_deleted' | 'refund';
+export type TransactionType = 'payment' | 'debt' | 'exit' | 'debt_payment' | 'entry' | 'cancel_entry' | 'cancel_exit' | 'cancel_payment' | 'withdrawal' | 'client_deleted' | 'refund' | 'admin_withdrawal' | 'admin_expense';
 export type UserRole = 'admin' | 'manager';
 
 export interface User {
@@ -149,6 +149,42 @@ export interface Expense {
   operatorName: string;
   date: string;
   shiftId: string | null;
+  method?: PaymentMethod;
+}
+
+export interface AdminExpense {
+  id: string;
+  amount: number;
+  category: string;
+  description: string;
+  method: PaymentMethod;
+  operatorId: string;
+  operatorName: string;
+  date: string;
+  updatedAt?: string;
+}
+
+export interface AdminCashOperation {
+  id: string;
+  type: 'card_income' | 'cash_withdrawal_from_manager' | 'admin_expense';
+  amount: number;
+  method: PaymentMethod;
+  description: string;
+  sourceManagerId?: string;
+  sourceManagerName?: string;
+  relatedPaymentId?: string;
+  operatorId: string;
+  operatorName: string;
+  date: string;
+  updatedAt?: string;
+}
+
+export interface ExpenseCategory {
+  id: string;
+  name: string;
+  ownerType: 'admin' | 'manager';
+  deleted?: boolean;
+  updatedAt?: string;
 }
 
 export interface CashWithdrawal {
@@ -203,7 +239,12 @@ export type ActionType =
   | 'data_reset'
   | 'backup_create'
   | 'backup_restore'
-  | 'refund';
+  | 'refund'
+  | 'admin_withdrawal'
+  | 'admin_expense_add'
+  | 'expense_category_add'
+  | 'expense_category_edit'
+  | 'expense_category_delete';
 
 export interface ActionLog {
   id: string;
@@ -232,6 +273,9 @@ export interface AppData {
   withdrawals: CashWithdrawal[];
   scheduledShifts: ScheduledShift[];
   actionLogs: ActionLog[];
+  adminExpenses: AdminExpense[];
+  adminCashOperations: AdminCashOperation[];
+  expenseCategories: ExpenseCategory[];
   deletedClientIds?: string[];
   restoreEpoch?: number;
 }

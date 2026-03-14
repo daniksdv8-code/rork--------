@@ -16,4 +16,7 @@ export const EMPTY_DATA: AppData = {
   withdrawals: [],
   scheduledShifts: [],
   actionLogs: [],
+  adminExpenses: [],
+  adminCashOperations: [],
+  expenseCategories: [],
 };
