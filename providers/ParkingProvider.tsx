@@ -806,7 +806,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       p.clientId === session.clientId &&
       p.carId === session.carId &&
       p.serviceType === 'monthly' &&
-      !p.cancelled
+      !p.cancelled &&
+      p.amount > 0
     ).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
     const lastPayment = activePayments[0];
@@ -814,7 +815,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       return { refundAmount: 0, daysUsed: 0, dailyRate: 0, paidAmount: 0 };
     }
 
-    const paidAmount = lastPayment.amount;
+    const paidAmount = lastPayment.originalAmount ?? lastPayment.amount;
     const paymentMethod = lastPayment.method;
     const dailyRate = paymentMethod === 'cash' ? tariffs.monthlyCash : tariffs.monthlyCard;
 
@@ -852,21 +853,19 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         description: `Возврат за досрочный выезд: ${refundAmount} ₽ (оплачено ${paidAmount} ₽, использовано ${daysUsed} дн. × ${dailyRate} ₽ = ${usedAmount} ₽, ${refundMethod === 'cash' ? 'наличные' : 'безнал'})`,
       });
 
-      const refundPayment: Payment = {
-        id: generateId(),
-        clientId: session.clientId,
-        carId: session.carId,
-        amount: -refundAmount,
-        method: refundMethod,
-        date: now,
-        serviceType: 'monthly',
-        operatorId: currentUser?.id ?? 'unknown',
-        operatorName: currentUser?.name ?? 'Неизвестно',
-        description: `Возврат за досрочный выезд: ${refundAmount} ₽ (${daysUsed} дн. использовано из ${paidAmount} ₽)`,
-        shiftId: activeShift?.id ?? null,
-        updatedAt: now,
-      };
-      setPayments(prev => [...prev, refundPayment]);
+      setPayments(prev => prev.map(p =>
+        p.id === lastPayment.id ? {
+          ...p,
+          originalAmount: paidAmount,
+          amount: usedAmount,
+          refundAmount,
+          refundDate: now,
+          refundMethod,
+          refundReason: `Досрочный выезд: ${daysUsed} дн. × ${dailyRate} ₽ = ${usedAmount} ₽, возврат ${refundAmount} ₽`,
+          description: `${p.description} → Корректировка: ${usedAmount} ₽ (${daysUsed} дн.), возврат ${refundAmount} ₽`,
+          updatedAt: now,
+        } : p
+      ));
 
       if (refundMethod === 'cash' && activeShift) {
         updateShiftExpected(activeShift.id, -refundAmount);
@@ -880,11 +879,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     }
 
     const carObj = cars.find(c => c.id === session.carId);
-    logAction('refund', 'Досрочный выезд с возвратом', `${carObj?.plateNumber ?? session.carId}, ${daysUsed} дн., возврат ${refundAmount} ₽ (${refundMethod === 'cash' ? 'нал' : 'безнал'})`, sessionId, 'session');
+    logAction('refund', 'Досрочный выезд с возвратом', `${carObj?.plateNumber ?? session.carId}, ${daysUsed} дн., возврат ${refundAmount} ₽ (${refundMethod === 'cash' ? 'нал' : 'безнал'}), оплата скорректирована: ${paidAmount} → ${usedAmount} ₽`, sessionId, 'session');
     schedulePush();
-    console.log(`[EarlyExit] Refund: ${refundAmount} ₽, days used: ${daysUsed}, paid: ${paidAmount}, daily: ${dailyRate}`);
+    console.log(`[EarlyExit] Refund: ${refundAmount} ₽, days used: ${daysUsed}, original paid: ${paidAmount}, adjusted to: ${usedAmount}, daily: ${dailyRate}`);
     return { refundAmount, daysUsed, dailyRate, paidAmount };
-  }, [sessions, subscriptions, payments, tariffs, shifts, cars, currentUser, addTransaction, schedulePush, logAction, updateShiftExpected]);
+  }, [sessions, subscriptions, payments, tariffs, shifts, cars, addTransaction, schedulePush, logAction, updateShiftExpected]);
 
   const cancelCheckIn = useCallback((sessionId: string) => {
     const session = sessions.find(s => s.id === sessionId && s.status === 'active');

@@ -77,6 +77,11 @@ export interface Payment {
   shiftId?: string | null;
   cancelled?: boolean;
   updatedAt?: string;
+  originalAmount?: number;
+  refundAmount?: number;
+  refundDate?: string;
+  refundMethod?: PaymentMethod;
+  refundReason?: string;
 }
 
 export interface Debt {
