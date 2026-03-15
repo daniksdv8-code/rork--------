@@ -9,6 +9,7 @@ import {
 } from '@/types';
 import { EMPTY_DATA } from '@/mocks/initialData';
 import { generateId } from '@/utils/id';
+import { roundMoney } from '@/utils/money';
 import { calculateDays, addMonths, isExpired, isToday, daysUntil, getMonthlyAmount } from '@/utils/date';
 import { formatPlateNumber } from '@/utils/plate';
 import { useAuth } from './AuthProvider';
@@ -466,7 +467,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     return newCar;
   }, [schedulePush, logAction]);
 
-  const checkIn = useCallback((carId: string, clientId: string, serviceType: ServiceType, plannedDepartureTime?: string, paymentAtEntry?: { method: PaymentMethod; amount: number; days?: number }) => {
+  const checkIn = useCallback((carId: string, clientId: string, serviceType: ServiceType, plannedDepartureTime?: string, paymentAtEntry?: { method: PaymentMethod; amount: number; days?: number; paidUntilDate?: string }, debtAtEntry?: { amount: number; description?: string }) => {
     const activeShift = shifts.find(s => s.status === 'open');
     const sessionNow = new Date().toISOString();
     const session: ParkingSession = {
@@ -532,17 +533,21 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       }
 
       if (serviceType === 'monthly') {
+        const paidUntil = paymentAtEntry.paidUntilDate ?? ((() => {
+          const existing = subscriptions.find(s => s.carId === carId && s.clientId === clientId);
+          if (existing && !isExpired(existing.paidUntil)) return addMonths(existing.paidUntil, 1);
+          return addMonths(sessionNow, 1);
+        })());
         setSubscriptions(prev => {
           const existing = prev.find(s => s.carId === carId && s.clientId === clientId);
           if (existing) {
-            const newPaidUntil = isExpired(existing.paidUntil) ? addMonths(sessionNow, 1) : addMonths(existing.paidUntil, 1);
-            return prev.map(s => s.id === existing.id ? { ...s, paidUntil: newPaidUntil, updatedAt: sessionNow } : s);
+            return prev.map(s => s.id === existing.id ? { ...s, paidUntil, updatedAt: sessionNow } : s);
           } else {
             const newSub: MonthlySubscription = {
               id: generateId(),
               carId,
               clientId,
-              paidUntil: addMonths(sessionNow, 1),
+              paidUntil,
               updatedAt: sessionNow,
             };
             return [...prev, newSub];
@@ -553,14 +558,41 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       console.log(`[CheckIn] Payment at entry: ${paymentAtEntry.amount} ₽ (${paymentAtEntry.method})`);
     }
 
+    if (debtAtEntry && debtAtEntry.amount > 0) {
+      const debtAmount = roundMoney(debtAtEntry.amount);
+      const debtId = generateId();
+      const newDebt: Debt = {
+        id: debtId,
+        clientId,
+        carId,
+        totalAmount: debtAmount,
+        remainingAmount: debtAmount,
+        createdAt: sessionNow,
+        updatedAt: sessionNow,
+        description: debtAtEntry.description ?? `Постановка без оплаты: ${debtAmount} ₽`,
+      };
+      setDebts(prev => [...prev, newDebt]);
+      addTransaction({
+        clientId,
+        carId,
+        type: 'debt',
+        amount: debtAmount,
+        method: null,
+        date: sessionNow,
+        description: `Долг при постановке: ${debtAmount} ₽`,
+      });
+      console.log(`[CheckIn] Debt at entry: ${debtAmount} ₽`);
+    }
+
     const car = cars.find(c => c.id === carId);
     const client = clients.find(c => c.id === clientId);
     const payInfo = paymentAtEntry && paymentAtEntry.amount > 0 ? `, оплата ${paymentAtEntry.amount} ₽` : '';
-    logAction('checkin', 'Заезд', `${car?.plateNumber ?? carId} (${client?.name ?? clientId}), ${serviceType === 'monthly' ? 'месяц' : 'разово'}${payInfo}`, session.id, 'session');
+    const debtInfo = debtAtEntry && debtAtEntry.amount > 0 ? `, долг ${debtAtEntry.amount} ₽` : '';
+    logAction('checkin', 'Заезд', `${car?.plateNumber ?? carId} (${client?.name ?? clientId}), ${serviceType === 'monthly' ? 'месяц' : 'разово'}${payInfo}${debtInfo}`, session.id, 'session');
     schedulePush();
     console.log(`[CheckIn] Session created for car ${carId}, planned departure: ${plannedDepartureTime ?? 'not set'}`);
     return session;
-  }, [addTransaction, schedulePush, currentUser, shifts, cars, clients, logAction, updateShiftExpected]);
+  }, [addTransaction, schedulePush, currentUser, shifts, cars, clients, logAction, updateShiftExpected, subscriptions]);
 
   const checkOut = useCallback((sessionId: string, paymentAtExit?: { method: PaymentMethod; amount: number }): { debtId: string | null; amount: number; days: number; paid: number } => {
     const session = sessions.find(s => s.id === sessionId);
@@ -1428,21 +1460,25 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     const cancelTx = periodTx.filter(t => t.type === 'cancel_payment');
     const refundTx = periodTx.filter(t => t.type === 'refund');
 
-    const cashIncome = paymentTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0)
+    const cashIncome = roundMoney(
+      paymentTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0)
       - cancelTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0)
-      - refundTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0);
+      - refundTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0)
+    );
 
-    const cardIncome = paymentTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0)
+    const cardIncome = roundMoney(
+      paymentTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0)
       - cancelTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0)
-      - refundTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0);
+      - refundTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0)
+    );
 
     const periodExpenses = filterByPeriod(expenses);
-    const totalExpenses = periodExpenses.reduce((s, e) => s + e.amount, 0);
+    const totalExpenses = roundMoney(periodExpenses.reduce((s, e) => s + e.amount, 0));
 
     const periodWithdrawals = filterByPeriod(withdrawals);
-    const totalWithdrawals = periodWithdrawals.reduce((s, w) => s + w.amount, 0);
+    const totalWithdrawals = roundMoney(periodWithdrawals.reduce((s, w) => s + w.amount, 0));
 
-    const balance = cashIncome - totalExpenses - totalWithdrawals;
+    const balance = roundMoney(cashIncome - totalExpenses - totalWithdrawals);
 
     return {
       cashIncome,
@@ -1473,17 +1509,19 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     const cancelTx = periodTx.filter(t => t.type === 'cancel_payment');
     const refundTx = periodTx.filter(t => t.type === 'refund');
 
-    const cardIncome = paymentTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0)
+    const cardIncome = roundMoney(
+      paymentTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0)
       - cancelTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0)
-      - refundTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0);
+      - refundTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0)
+    );
 
     const periodWithdrawals = filterByPeriod(withdrawals);
-    const cashFromManager = periodWithdrawals.reduce((s, w) => s + w.amount, 0);
+    const cashFromManager = roundMoney(periodWithdrawals.reduce((s, w) => s + w.amount, 0));
 
     const periodAdminExpenses = filterByPeriod(adminExpenses);
-    const totalAdminExpenses = periodAdminExpenses.reduce((s, e) => s + e.amount, 0);
+    const totalAdminExpenses = roundMoney(periodAdminExpenses.reduce((s, e) => s + e.amount, 0));
 
-    const balance = cardIncome + cashFromManager - totalAdminExpenses;
+    const balance = roundMoney(cardIncome + cashFromManager - totalAdminExpenses);
 
     const periodOps = filterByPeriod(adminCashOperations);
 

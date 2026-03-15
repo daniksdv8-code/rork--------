@@ -1,20 +1,22 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Alert, TextInput } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Clock, Wallet, Check, AlertTriangle, Calendar, CreditCard, Banknote, RotateCcw } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useParking } from '@/providers/ParkingProvider';
 import { useAuth } from '@/providers/AuthProvider';
 import { formatDateTime, calculateDays, formatDate, isExpired, getMonthlyAmount } from '@/utils/date';
+import { roundMoney } from '@/utils/money';
 import { PaymentMethod } from '@/types';
 
 export default function ExitModal() {
   const router = useRouter();
   const { sessionId } = useLocalSearchParams<{ sessionId: string }>();
-  const { sessions, cars, clients, tariffs, subscriptions, payments, checkOut, needsShiftCheck, earlyExitWithRefund } = useParking();
+  const { sessions, cars, clients, tariffs, subscriptions, payments, checkOut, needsShiftCheck, earlyExitWithRefund, getClientTotalDebt } = useParking();
   const { isAdmin } = useAuth();
   const [method, setMethod] = useState<PaymentMethod>('cash');
   const [refundMethod, setRefundMethod] = useState<PaymentMethod>('cash');
+  const [partialAmount, setPartialAmount] = useState<string>('');
 
   const shiftRequired = needsShiftCheck();
 
@@ -33,6 +35,11 @@ export default function ExitModal() {
   }, [session, subscriptions]);
 
   const hasActiveSub = sub ? !isExpired(sub.paidUntil) : false;
+
+  const existingDebt = useMemo(() => {
+    if (!session) return 0;
+    return getClientTotalDebt(session.clientId);
+  }, [session, getClientTotalDebt]);
 
   const onetimeAmountCash = tariffs.onetimeCash * days;
   const onetimeAmountCard = tariffs.onetimeCard * days;
@@ -127,6 +134,29 @@ export default function ExitModal() {
     }
     router.back();
   }, [session, checkOut, router, shiftRequired]);
+
+  const handlePartialPayAndExit = useCallback(() => {
+    if (shiftRequired) {
+      Alert.alert('Смена не открыта', 'Откройте смену, чтобы оформить выезд.');
+      return;
+    }
+    if (!session) return;
+    const partial = roundMoney(Number(partialAmount) || 0);
+    if (partial <= 0) {
+      Alert.alert('Ошибка', 'Укажите сумму оплаты');
+      return;
+    }
+    const totalRequired = isMonthly && !hasActiveSub ? monthlyAmount : remainingAmount;
+    const actualPay = Math.min(partial, totalRequired);
+    const exitResult = checkOut(session.id, { method, amount: actualPay });
+    const debtAmount = exitResult.amount;
+    let msg = `Выезд зафиксирован.\nОплачено: ${actualPay} ₽`;
+    if (debtAmount > 0) {
+      msg += `\nДолг: ${debtAmount} ₽`;
+    }
+    Alert.alert('Готово', msg);
+    router.back();
+  }, [session, partialAmount, method, checkOut, router, shiftRequired, isMonthly, hasActiveSub, monthlyAmount, remainingAmount]);
 
   const handleExitFree = useCallback(() => {
     if (shiftRequired) {
@@ -425,6 +455,23 @@ export default function ExitModal() {
                 </View>
               </View>
 
+              {existingDebt > 0 && (
+                <View style={styles.existingDebtNotice}>
+                  <AlertTriangle size={14} color={Colors.warning} />
+                  <Text style={styles.existingDebtText}>Текущий долг клиента: {existingDebt} ₽</Text>
+                </View>
+              )}
+
+              {remainingAmount > 0 && (
+                <View style={styles.scenarioCard}>
+                  <Text style={styles.scenarioTitle}>Итого к оплате</Text>
+                  <Text style={styles.scenarioTotal}>{remainingAmount + existingDebt} ₽</Text>
+                  {existingDebt > 0 && (
+                    <Text style={styles.scenarioBreakdown}>Парковка: {remainingAmount} ₽ + Долг: {existingDebt} ₽</Text>
+                  )}
+                </View>
+              )}
+
               {remainingAmount > 0 && (
                 <TouchableOpacity
                   style={[styles.payExitBtn, shiftRequired && styles.exitBtnDisabled]}
@@ -448,14 +495,39 @@ export default function ExitModal() {
               )}
 
               {remainingAmount > 0 && (
-                <TouchableOpacity
-                  style={[styles.debtExitBtn, shiftRequired && styles.exitBtnDisabled]}
-                  onPress={handleExitWithDebt}
-                  activeOpacity={0.7}
-                >
-                  <AlertTriangle size={18} color={Colors.danger} />
-                  <Text style={styles.debtExitBtnText}>Выезд в долг ({remainingAmount} ₽)</Text>
-                </TouchableOpacity>
+                <>
+                  <View style={styles.partialPaySection}>
+                    <Text style={styles.partialPayLabel}>Частичная оплата</Text>
+                    <View style={styles.partialPayRow}>
+                      <TextInput
+                        style={styles.partialPayInput}
+                        value={partialAmount}
+                        onChangeText={setPartialAmount}
+                        keyboardType="numeric"
+                        placeholder="Сумма"
+                        placeholderTextColor={Colors.textMuted}
+                        testID="partial-amount-input"
+                      />
+                      <TouchableOpacity
+                        style={[styles.partialPayBtn, shiftRequired && styles.exitBtnDisabled]}
+                        onPress={handlePartialPayAndExit}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.partialPayBtnText}>Оплатить часть + выезд</Text>
+                      </TouchableOpacity>
+                    </View>
+                    <Text style={styles.partialPayHint}>Остаток будет записан как долг</Text>
+                  </View>
+
+                  <TouchableOpacity
+                    style={[styles.debtExitBtn, shiftRequired && styles.exitBtnDisabled]}
+                    onPress={handleExitWithDebt}
+                    activeOpacity={0.7}
+                  >
+                    <AlertTriangle size={18} color={Colors.danger} />
+                    <Text style={styles.debtExitBtnText}>Выезд полностью в долг ({remainingAmount} ₽)</Text>
+                  </TouchableOpacity>
+                </>
               )}
             </>
           )}
@@ -505,6 +577,13 @@ export default function ExitModal() {
                 </View>
               </View>
 
+              {existingDebt > 0 && (
+                <View style={styles.existingDebtNotice}>
+                  <AlertTriangle size={14} color={Colors.warning} />
+                  <Text style={styles.existingDebtText}>Текущий долг клиента: {existingDebt} ₽</Text>
+                </View>
+              )}
+
               <TouchableOpacity
                 style={[styles.payExitBtn, shiftRequired && styles.exitBtnDisabled]}
                 onPress={handlePayAndExit}
@@ -513,6 +592,29 @@ export default function ExitModal() {
                 <Wallet size={20} color={Colors.white} />
                 <Text style={styles.payExitBtnText}>Оплатить {monthlyAmount} ₽ и выезд</Text>
               </TouchableOpacity>
+
+              <View style={styles.partialPaySection}>
+                <Text style={styles.partialPayLabel}>Частичная оплата</Text>
+                <View style={styles.partialPayRow}>
+                  <TextInput
+                    style={styles.partialPayInput}
+                    value={partialAmount}
+                    onChangeText={setPartialAmount}
+                    keyboardType="numeric"
+                    placeholder="Сумма"
+                    placeholderTextColor={Colors.textMuted}
+                    testID="partial-amount-monthly-input"
+                  />
+                  <TouchableOpacity
+                    style={[styles.partialPayBtn, shiftRequired && styles.exitBtnDisabled]}
+                    onPress={handlePartialPayAndExit}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.partialPayBtnText}>Оплатить часть + выезд</Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={styles.partialPayHint}>Остаток будет записан как долг</Text>
+              </View>
 
               <TouchableOpacity
                 style={styles.payMonthlyCustomBtn}
@@ -529,7 +631,7 @@ export default function ExitModal() {
                 activeOpacity={0.7}
               >
                 <AlertTriangle size={18} color={Colors.danger} />
-                <Text style={styles.debtExitBtnText}>Выезд в долг ({monthlyAmountCash} ₽)</Text>
+                <Text style={styles.debtExitBtnText}>Выезд полностью в долг ({monthlyAmountCash} ₽)</Text>
               </TouchableOpacity>
             </>
           )}
@@ -916,5 +1018,95 @@ const styles = StyleSheet.create({
     color: Colors.white,
     fontSize: 16,
     fontWeight: '600' as const,
+  },
+  existingDebtNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: Colors.warningLight,
+    padding: 12,
+    borderRadius: 10,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: Colors.warning + '30',
+  },
+  existingDebtText: {
+    fontSize: 13,
+    fontWeight: '600' as const,
+    color: Colors.warning,
+    flex: 1,
+  },
+  scenarioCard: {
+    backgroundColor: Colors.card,
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: Colors.cardBorder,
+    marginBottom: 16,
+    alignItems: 'center',
+  },
+  scenarioTitle: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    marginBottom: 4,
+  },
+  scenarioTotal: {
+    fontSize: 26,
+    fontWeight: '800' as const,
+    color: Colors.text,
+  },
+  scenarioBreakdown: {
+    fontSize: 12,
+    color: Colors.textMuted,
+    marginTop: 4,
+  },
+  partialPaySection: {
+    backgroundColor: Colors.card,
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: Colors.cardBorder,
+    marginBottom: 10,
+  },
+  partialPayLabel: {
+    fontSize: 13,
+    fontWeight: '600' as const,
+    color: Colors.textSecondary,
+    marginBottom: 8,
+  },
+  partialPayRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+  },
+  partialPayInput: {
+    flex: 1,
+    height: 44,
+    backgroundColor: Colors.inputBg,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    fontSize: 16,
+    fontWeight: '600' as const,
+    color: Colors.text,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  partialPayBtn: {
+    height: 44,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    backgroundColor: Colors.info,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  partialPayBtnText: {
+    fontSize: 13,
+    fontWeight: '600' as const,
+    color: Colors.white,
+  },
+  partialPayHint: {
+    fontSize: 11,
+    color: Colors.textMuted,
+    marginTop: 6,
   },
 });

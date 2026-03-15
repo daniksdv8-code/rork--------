@@ -1,12 +1,13 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert, KeyboardAvoidingView, Platform } from 'react-native';
-import { Search, UserPlus, LogIn as LogInIcon, AlertCircle, Car, Check, Clock, Plus, Wallet, ChevronDown, ChevronUp } from 'lucide-react-native';
+import { Search, UserPlus, LogIn as LogInIcon, AlertCircle, Car, Check, Clock, Plus, Wallet, AlertTriangle, Banknote, CreditCard } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/providers/AuthProvider';
 import { useParking } from '@/providers/ParkingProvider';
 import ShiftGuard from '@/components/ShiftGuard';
 import { formatPlateNumber } from '@/utils/plate';
-import { isExpired, getMonthlyAmount } from '@/utils/date';
+import { isExpired, getMonthlyAmount, toDateString } from '@/utils/date';
+import { roundMoney } from '@/utils/money';
 import { ServiceType, PaymentMethod } from '@/types';
 
 export default function CheckinScreen() {
@@ -23,9 +24,11 @@ export default function CheckinScreen() {
   const [plannedDeparture, setPlannedDeparture] = useState<string>('');
   const [showDropdown, setShowDropdown] = useState<boolean>(false);
 
-  const [payAtEntry, setPayAtEntry] = useState<boolean>(false);
+  const [paymentStatus, setPaymentStatus] = useState<'pay_now' | 'in_debt'>('pay_now');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
   const [payDays, setPayDays] = useState<string>('1');
+  const [monthlyMonths, setMonthlyMonths] = useState<string>('1');
+  const [monthlyStartDate, setMonthlyStartDate] = useState<string>(toDateString(new Date()));
 
   const shiftRequired = needsShiftCheck();
 
@@ -57,15 +60,31 @@ export default function CheckinScreen() {
     }).slice(0, 5);
   }, [showNewForm, activeClients, newName, newPhone]);
 
+  const monthlyCalc = useMemo(() => {
+    const months = Math.max(1, parseInt(monthlyMonths, 10) || 1);
+    const dailyRate = paymentMethod === 'cash' ? tariffs.monthlyCash : tariffs.monthlyCard;
+    const parts = monthlyStartDate.split('-').map(Number);
+    const startDate = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date();
+    startDate.setHours(0, 0, 0, 0);
+
+    const endDate = new Date(startDate);
+    endDate.setMonth(endDate.getMonth() + months);
+
+    const totalDays = Math.max(1, Math.floor((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)));
+    const price30 = dailyRate * 30;
+    const totalPrice = roundMoney((price30 / 30) * totalDays);
+    const paidUntil = endDate.toISOString();
+
+    return { months, dailyRate, startDate, endDate, totalDays, price30, totalPrice, paidUntil };
+  }, [monthlyMonths, monthlyStartDate, paymentMethod, tariffs]);
+
   const paymentAmount = useMemo(() => {
-    if (!payAtEntry) return 0;
     if (serviceType === 'onetime') {
       const d = Math.max(1, parseInt(payDays, 10) || 1);
       return paymentMethod === 'cash' ? tariffs.onetimeCash * d : tariffs.onetimeCard * d;
     }
-    const dailyRate = paymentMethod === 'cash' ? tariffs.monthlyCash : tariffs.monthlyCard;
-    return getMonthlyAmount(dailyRate);
-  }, [payAtEntry, serviceType, payDays, paymentMethod, tariffs]);
+    return monthlyCalc.totalPrice;
+  }, [serviceType, payDays, paymentMethod, tariffs, monthlyCalc]);
 
   const resetForm = useCallback(() => {
     setPlateInput('');
@@ -78,9 +97,11 @@ export default function CheckinScreen() {
     setNewCarModel('');
     setServiceType('onetime');
     setPlannedDeparture('');
-    setPayAtEntry(false);
+    setPaymentStatus('pay_now');
     setPaymentMethod('cash');
     setPayDays('1');
+    setMonthlyMonths('1');
+    setMonthlyStartDate(toDateString(new Date()));
   }, []);
 
   const handlePlateChange = useCallback((text: string) => {
@@ -148,11 +169,22 @@ export default function CheckinScreen() {
     return !!sub && !isExpired(sub.paidUntil);
   }, [foundClient, getSubscription]);
 
-  const buildPaymentAtEntry = useCallback(() => {
-    if (!payAtEntry || paymentAmount <= 0) return undefined;
-    const d = serviceType === 'onetime' ? Math.max(1, parseInt(payDays, 10) || 1) : undefined;
-    return { method: paymentMethod, amount: paymentAmount, days: d };
-  }, [payAtEntry, paymentAmount, paymentMethod, serviceType, payDays]);
+  const buildPaymentAtEntry = useCallback((): { method: PaymentMethod; amount: number; days?: number; paidUntilDate?: string } | undefined => {
+    if (paymentStatus !== 'pay_now' || paymentAmount <= 0) return undefined;
+    if (serviceType === 'onetime') {
+      const d = Math.max(1, parseInt(payDays, 10) || 1);
+      return { method: paymentMethod, amount: paymentAmount, days: d };
+    }
+    return { method: paymentMethod, amount: paymentAmount, paidUntilDate: monthlyCalc.paidUntil };
+  }, [paymentStatus, paymentAmount, paymentMethod, serviceType, payDays, monthlyCalc]);
+
+  const buildDebtAtEntry = useCallback((): { amount: number; description?: string } | undefined => {
+    if (paymentStatus !== 'in_debt' || paymentAmount <= 0) return undefined;
+    const desc = serviceType === 'onetime'
+      ? `Парковка без оплаты: ${Math.max(1, parseInt(payDays, 10) || 1)} сут. × ${paymentMethod === 'cash' ? tariffs.onetimeCash : tariffs.onetimeCard} ₽`
+      : `Месячный абонемент без оплаты: ${paymentAmount} ₽`;
+    return { amount: paymentAmount, description: desc };
+  }, [paymentStatus, paymentAmount, serviceType, payDays, paymentMethod, tariffs]);
 
   const handleCheckin = useCallback(() => {
     if (shiftRequired) {
@@ -162,12 +194,14 @@ export default function CheckinScreen() {
     if (!foundClient) return;
     const finalServiceType: ServiceType = foundClientHasActiveSub ? 'monthly' : serviceType;
     const payment = buildPaymentAtEntry();
-    checkIn(foundClient.carId, foundClient.clientId, finalServiceType, plannedDeparture.trim() || undefined, payment);
+    const debt = buildDebtAtEntry();
+    checkIn(foundClient.carId, foundClient.clientId, finalServiceType, plannedDeparture.trim() || undefined, payment, debt);
     const typeLabel = foundClientHasActiveSub ? 'месяц (абонемент)' : (finalServiceType === 'monthly' ? 'месяц' : 'разово');
     const payLabel = payment ? `\nОплата: ${payment.amount} ₽` : '';
-    Alert.alert('Готово', `Заезд зафиксирован (${typeLabel}): ${formatPlateNumber(plateInput)}${payLabel}`);
+    const debtLabel = debt ? `\nВ долг: ${debt.amount} ₽` : '';
+    Alert.alert('Готово', `Заезд зафиксирован (${typeLabel}): ${formatPlateNumber(plateInput)}${payLabel}${debtLabel}`);
     resetForm();
-  }, [foundClient, foundClientHasActiveSub, serviceType, checkIn, plateInput, resetForm, shiftRequired, plannedDeparture, buildPaymentAtEntry]);
+  }, [foundClient, foundClientHasActiveSub, serviceType, checkIn, plateInput, resetForm, shiftRequired, plannedDeparture, buildPaymentAtEntry, buildDebtAtEntry]);
 
   const handleAddAndCheckin = useCallback(() => {
     if (shiftRequired) {
@@ -185,12 +219,14 @@ export default function CheckinScreen() {
     const formatted = formatPlateNumber(plateInput);
     const { client, car } = addClient(newName.trim(), newPhone.trim(), formatted, newNotes.trim(), newCarModel.trim());
     const payment = buildPaymentAtEntry();
-    checkIn(car.id, client.id, serviceType, plannedDeparture.trim() || undefined, payment);
+    const debt = buildDebtAtEntry();
+    checkIn(car.id, client.id, serviceType, plannedDeparture.trim() || undefined, payment, debt);
     const typeLabel = serviceType === 'monthly' ? 'месяц' : 'разово';
     const payLabel = payment ? `\nОплата: ${payment.amount} ₽` : '';
-    Alert.alert('Готово', `Клиент добавлен, заезд зафиксирован (${typeLabel}): ${formatted}${payLabel}`);
+    const debtLabel = debt ? `\nВ долг: ${debt.amount} ₽` : '';
+    Alert.alert('Готово', `Клиент добавлен, заезд зафиксирован (${typeLabel}): ${formatted}${payLabel}${debtLabel}`);
     resetForm();
-  }, [newName, newPhone, newNotes, newCarModel, plateInput, addClient, checkIn, serviceType, resetForm, shiftRequired, plannedDeparture, buildPaymentAtEntry]);
+  }, [newName, newPhone, newNotes, newCarModel, plateInput, addClient, checkIn, serviceType, resetForm, shiftRequired, plannedDeparture, buildPaymentAtEntry, buildDebtAtEntry]);
 
   const handleAddCarToExistingAndCheckin = useCallback((existingClientId: string, existingClientName: string) => {
     if (shiftRequired) {
@@ -205,12 +241,14 @@ export default function CheckinScreen() {
     }
     const car = addCarToClient(existingClientId, formatted, newCarModel.trim());
     const payment = buildPaymentAtEntry();
-    checkIn(car.id, existingClientId, serviceType, plannedDeparture.trim() || undefined, payment);
+    const debt = buildDebtAtEntry();
+    checkIn(car.id, existingClientId, serviceType, plannedDeparture.trim() || undefined, payment, debt);
     const typeLabel = serviceType === 'monthly' ? 'месяц' : 'разово';
     const payLabel = payment ? `\nОплата: ${payment.amount} ₽` : '';
-    Alert.alert('Готово', `Авто привязано к ${existingClientName}, заезд зафиксирован (${typeLabel})${payLabel}`);
+    const debtLabel = debt ? `\nВ долг: ${debt.amount} ₽` : '';
+    Alert.alert('Готово', `Авто привязано к ${existingClientName}, заезд зафиксирован (${typeLabel})${payLabel}${debtLabel}`);
     resetForm();
-  }, [plateInput, newCarModel, activeCars, addCarToClient, checkIn, serviceType, resetForm, shiftRequired, plannedDeparture, buildPaymentAtEntry]);
+  }, [plateInput, newCarModel, activeCars, addCarToClient, checkIn, serviceType, resetForm, shiftRequired, plannedDeparture, buildPaymentAtEntry, buildDebtAtEntry]);
 
   if (!currentUser) {
     return (
@@ -277,93 +315,149 @@ export default function CheckinScreen() {
 
     return (
       <View style={styles.paymentSection}>
-        <TouchableOpacity
-          style={styles.payToggle}
-          onPress={() => setPayAtEntry(!payAtEntry)}
-          activeOpacity={0.7}
-        >
-          <View style={styles.payToggleLeft}>
-            <Wallet size={18} color={payAtEntry ? Colors.success : Colors.textSecondary} />
-            <Text style={[styles.payToggleText, payAtEntry && styles.payToggleTextActive]}>
-              Принять оплату при постановке
+        <Text style={styles.payLabel}>Способ оплаты</Text>
+        <View style={styles.methodRow}>
+          <TouchableOpacity
+            style={[styles.methodBtn, paymentMethod === 'cash' && styles.methodBtnActive]}
+            onPress={() => setPaymentMethod('cash')}
+          >
+            <Banknote size={16} color={paymentMethod === 'cash' ? Colors.white : Colors.textSecondary} />
+            <Text style={[styles.methodBtnText, paymentMethod === 'cash' && styles.methodBtnTextActive]}>Наличные</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.methodBtn, paymentMethod === 'card' && styles.methodBtnActive]}
+            onPress={() => setPaymentMethod('card')}
+          >
+            <CreditCard size={16} color={paymentMethod === 'card' ? Colors.white : Colors.textSecondary} />
+            <Text style={[styles.methodBtnText, paymentMethod === 'card' && styles.methodBtnTextActive]}>Безнал</Text>
+          </TouchableOpacity>
+        </View>
+
+        {serviceType === 'onetime' && (
+          <>
+            <Text style={styles.payLabel}>Количество суток</Text>
+            <View style={styles.daysRow}>
+              <TouchableOpacity
+                style={styles.dayAdjustBtn}
+                onPress={() => {
+                  const d = Math.max(1, (parseInt(payDays, 10) || 1) - 1);
+                  setPayDays(String(d));
+                }}
+              >
+                <Text style={styles.dayAdjustText}>−</Text>
+              </TouchableOpacity>
+              <TextInput
+                style={styles.daysInput}
+                value={payDays}
+                onChangeText={(t) => setPayDays(t.replace(/[^0-9]/g, '') || '1')}
+                keyboardType="number-pad"
+                textAlign="center"
+                testID="pay-days-input"
+              />
+              <TouchableOpacity
+                style={styles.dayAdjustBtn}
+                onPress={() => {
+                  const d = (parseInt(payDays, 10) || 1) + 1;
+                  setPayDays(String(d));
+                }}
+              >
+                <Text style={styles.dayAdjustText}>+</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
+
+        {serviceType === 'monthly' && (
+          <>
+            <Text style={styles.payLabel}>Дата начала (ГГГГ-ММ-ДД)</Text>
+            <TextInput
+              style={styles.formInput}
+              value={monthlyStartDate}
+              onChangeText={setMonthlyStartDate}
+              placeholder="2025-03-01"
+              placeholderTextColor={Colors.textMuted}
+              testID="monthly-start-date"
+            />
+            <Text style={styles.payLabel}>Количество месяцев</Text>
+            <View style={styles.daysRow}>
+              <TouchableOpacity
+                style={styles.dayAdjustBtn}
+                onPress={() => {
+                  const m = Math.max(1, (parseInt(monthlyMonths, 10) || 1) - 1);
+                  setMonthlyMonths(String(m));
+                }}
+              >
+                <Text style={styles.dayAdjustText}>−</Text>
+              </TouchableOpacity>
+              <TextInput
+                style={styles.daysInput}
+                value={monthlyMonths}
+                onChangeText={(t) => setMonthlyMonths(t.replace(/[^0-9]/g, '') || '1')}
+                keyboardType="number-pad"
+                textAlign="center"
+                testID="monthly-months-input"
+              />
+              <TouchableOpacity
+                style={styles.dayAdjustBtn}
+                onPress={() => {
+                  const m = (parseInt(monthlyMonths, 10) || 1) + 1;
+                  setMonthlyMonths(String(m));
+                }}
+              >
+                <Text style={styles.dayAdjustText}>+</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
+
+        <View style={styles.payAmountCard}>
+          <Text style={styles.payAmountLabel}>
+            {serviceType === 'onetime'
+              ? `${Math.max(1, parseInt(payDays, 10) || 1)} сут. × ${paymentMethod === 'cash' ? tariffs.onetimeCash : tariffs.onetimeCard} ₽`
+              : `${monthlyCalc.totalDays} дн. × ${monthlyCalc.dailyRate} ₽/день`
+            }
+          </Text>
+          <Text style={styles.payAmountValue}>{paymentAmount} ₽</Text>
+        </View>
+
+        <Text style={[styles.payLabel, { marginTop: 16 }]}>Статус оплаты</Text>
+        <View style={styles.statusRow}>
+          <TouchableOpacity
+            style={[styles.statusBtn, paymentStatus === 'pay_now' && styles.statusBtnPayActive]}
+            onPress={() => setPaymentStatus('pay_now')}
+            activeOpacity={0.7}
+          >
+            <Wallet size={16} color={paymentStatus === 'pay_now' ? Colors.white : Colors.success} />
+            <Text style={[styles.statusBtnText, paymentStatus === 'pay_now' && styles.statusBtnTextActive]}>Оплатить сейчас</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.statusBtn, paymentStatus === 'in_debt' && styles.statusBtnDebtActive]}
+            onPress={() => setPaymentStatus('in_debt')}
+            activeOpacity={0.7}
+          >
+            <AlertTriangle size={16} color={paymentStatus === 'in_debt' ? Colors.white : Colors.danger} />
+            <Text style={[styles.statusBtnText, paymentStatus === 'in_debt' && styles.statusBtnDebtTextActive]}>В долг</Text>
+          </TouchableOpacity>
+        </View>
+
+        {paymentStatus === 'in_debt' && (
+          <View style={styles.debtNotice}>
+            <AlertTriangle size={14} color={Colors.danger} />
+            <Text style={styles.debtNoticeText}>
+              Сумма {paymentAmount} ₽ будет записана как долг клиента. Оплата не принимается.
             </Text>
           </View>
-          {payAtEntry ? <ChevronUp size={18} color={Colors.success} /> : <ChevronDown size={18} color={Colors.textSecondary} />}
-        </TouchableOpacity>
+        )}
 
-        {payAtEntry && (
-          <View style={styles.paymentBody}>
-            <Text style={styles.payLabel}>Способ оплаты</Text>
-            <View style={styles.methodRow}>
-              <TouchableOpacity
-                style={[styles.methodBtn, paymentMethod === 'cash' && styles.methodBtnActive]}
-                onPress={() => setPaymentMethod('cash')}
-              >
-                <Text style={[styles.methodBtnText, paymentMethod === 'cash' && styles.methodBtnTextActive]}>Наличные</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.methodBtn, paymentMethod === 'card' && styles.methodBtnActive]}
-                onPress={() => setPaymentMethod('card')}
-              >
-                <Text style={[styles.methodBtnText, paymentMethod === 'card' && styles.methodBtnTextActive]}>Безнал</Text>
-              </TouchableOpacity>
-            </View>
-
-            {serviceType === 'onetime' && (
-              <>
-                <Text style={styles.payLabel}>Количество суток</Text>
-                <View style={styles.daysRow}>
-                  <TouchableOpacity
-                    style={styles.dayAdjustBtn}
-                    onPress={() => {
-                      const d = Math.max(1, (parseInt(payDays, 10) || 1) - 1);
-                      setPayDays(String(d));
-                    }}
-                  >
-                    <Text style={styles.dayAdjustText}>−</Text>
-                  </TouchableOpacity>
-                  <TextInput
-                    style={styles.daysInput}
-                    value={payDays}
-                    onChangeText={(t) => setPayDays(t.replace(/[^0-9]/g, '') || '1')}
-                    keyboardType="number-pad"
-                    textAlign="center"
-                    testID="pay-days-input"
-                  />
-                  <TouchableOpacity
-                    style={styles.dayAdjustBtn}
-                    onPress={() => {
-                      const d = (parseInt(payDays, 10) || 1) + 1;
-                      setPayDays(String(d));
-                    }}
-                  >
-                    <Text style={styles.dayAdjustText}>+</Text>
-                  </TouchableOpacity>
-                </View>
-              </>
-            )}
-
-            <View style={styles.payAmountCard}>
-              <Text style={styles.payAmountLabel}>
-                {serviceType === 'onetime'
-                  ? `${Math.max(1, parseInt(payDays, 10) || 1)} сут. × ${paymentMethod === 'cash' ? tariffs.onetimeCash : tariffs.onetimeCard} ₽`
-                  : `1 мес. × ${paymentMethod === 'cash' ? tariffs.monthlyCash : tariffs.monthlyCard} ₽/день`
-                }
-              </Text>
-              <Text style={styles.payAmountValue}>{paymentAmount} ₽</Text>
-            </View>
-
-            {serviceType === 'onetime' && (
-              <Text style={styles.payHint}>
-                Если клиент задержится дольше, разница будет начислена как долг при выезде.
-              </Text>
-            )}
-            {serviceType === 'monthly' && (
-              <Text style={styles.payHint}>
-                Будет оформлена подписка на 1 месяц от текущей даты.
-              </Text>
-            )}
-          </View>
+        {serviceType === 'onetime' && paymentStatus === 'pay_now' && (
+          <Text style={styles.payHint}>
+            Если клиент задержится дольше, разница будет начислена как долг при выезде.
+          </Text>
+        )}
+        {serviceType === 'monthly' && paymentStatus === 'pay_now' && (
+          <Text style={styles.payHint}>
+            Будет оформлена подписка на {monthlyCalc.totalDays} дней.
+          </Text>
         )}
       </View>
     );
@@ -458,8 +552,10 @@ export default function CheckinScreen() {
             <TouchableOpacity style={[styles.checkinBtn, shiftRequired && styles.checkinBtnDisabled]} onPress={handleCheckin} activeOpacity={0.7}>
               <LogInIcon size={20} color={Colors.white} />
               <Text style={styles.checkinBtnText}>
-                {payAtEntry && paymentAmount > 0
+                {paymentStatus === 'pay_now' && paymentAmount > 0
                   ? `Заезд + оплата ${paymentAmount} ₽`
+                  : paymentStatus === 'in_debt' && paymentAmount > 0
+                  ? `Заезд (в долг ${paymentAmount} ₽)`
                   : 'Зафиксировать заезд'
                 }
               </Text>
@@ -558,8 +654,10 @@ export default function CheckinScreen() {
             <TouchableOpacity style={[styles.checkinBtn, shiftRequired && styles.checkinBtnDisabled]} onPress={handleAddAndCheckin} activeOpacity={0.7}>
               <UserPlus size={20} color={Colors.white} />
               <Text style={styles.checkinBtnText}>
-                {payAtEntry && paymentAmount > 0
+                {paymentStatus === 'pay_now' && paymentAmount > 0
                   ? `Добавить + заезд + оплата ${paymentAmount} ₽`
+                  : paymentStatus === 'in_debt' && paymentAmount > 0
+                  ? `Добавить + заезд (в долг ${paymentAmount} ₽)`
                   : 'Добавить и зафиксировать заезд'
                 }
               </Text>
@@ -960,36 +1058,62 @@ const styles = StyleSheet.create({
     marginTop: 16,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: Colors.success + '30',
-    backgroundColor: Colors.successLight,
-    overflow: 'hidden' as const,
+    borderColor: Colors.cardBorder,
+    backgroundColor: Colors.card,
+    padding: 14,
   },
-  payToggle: {
+  statusRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingVertical: 14,
+    gap: 8,
+    marginTop: 4,
   },
-  payToggleLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
+  statusBtn: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: Colors.inputBg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    gap: 6,
   },
-  payToggleText: {
-    fontSize: 14,
+  statusBtnPayActive: {
+    backgroundColor: Colors.success,
+    borderColor: Colors.success,
+  },
+  statusBtnDebtActive: {
+    backgroundColor: Colors.danger,
+    borderColor: Colors.danger,
+  },
+  statusBtnText: {
+    fontSize: 13,
     fontWeight: '600' as const,
     color: Colors.textSecondary,
   },
-  payToggleTextActive: {
-    color: Colors.success,
+  statusBtnTextActive: {
+    color: Colors.white,
   },
-  paymentBody: {
-    paddingHorizontal: 14,
-    paddingBottom: 14,
-    borderTopWidth: 1,
-    borderTopColor: Colors.success + '20',
+  statusBtnDebtTextActive: {
+    color: Colors.white,
+  },
+  debtNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: Colors.dangerLight,
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: Colors.danger + '20',
+  },
+  debtNoticeText: {
+    fontSize: 12,
+    color: Colors.danger,
+    flex: 1,
+    lineHeight: 16,
   },
   payLabel: {
     fontSize: 12,

@@ -12,6 +12,7 @@ import Colors from '@/constants/colors';
 import { useParking } from '@/providers/ParkingProvider';
 import { useAuth } from '@/providers/AuthProvider';
 import { formatDateTime } from '@/utils/date';
+import { formatMoney } from '@/utils/money';
 import { PaymentMethod } from '@/types';
 
 type FinanceTab = 'dashboard' | 'admin_register' | 'manager_register';
@@ -325,7 +326,7 @@ export default function FinanceScreen() {
     { key: 'all', label: 'Всё' },
   ];
 
-  const fmtAmount = (n: number) => n.toFixed(2).replace(/\.00$/, '');
+  const fmtAmount = (n: number) => formatMoney(n);
 
   return (
     <View style={styles.container}>
@@ -652,7 +653,10 @@ export default function FinanceScreen() {
                 }
 
                 return (
-                  <View key={op.id} style={styles.opRow}>
+                  <View key={op.id} style={[
+                    styles.opRow,
+                    isCard && styles.opRowTransit,
+                  ]}>
                     <View style={[styles.opIcon, { backgroundColor: iconBg }]}>
                       {isIncome && <Banknote size={16} color={iconColor} />}
                       {isCard && <CreditCard size={16} color={iconColor} />}
@@ -680,6 +684,9 @@ export default function FinanceScreen() {
                           </View>
                         )}
                       </View>
+                      {isCard && (
+                        <Text style={styles.transitHint}>Безнал, передан Администратору, не влияет на наличный остаток</Text>
+                      )}
                     </View>
                     <Text style={[styles.opAmount, { color: amountColor }]}>
                       {prefix}{fmtAmount(op.amount)} ₽
@@ -1170,6 +1177,17 @@ const styles = StyleSheet.create({
   opRowExpense: {
     borderLeftWidth: 3,
     borderLeftColor: Colors.danger,
+  },
+  opRowTransit: {
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.info,
+    backgroundColor: Colors.infoLight + '40',
+  },
+  transitHint: {
+    fontSize: 10,
+    color: Colors.info,
+    marginTop: 2,
+    fontStyle: 'italic' as const,
   },
   opIcon: {
     width: 36,
