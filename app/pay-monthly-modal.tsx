@@ -4,6 +4,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Wallet, Check, Calendar, ChevronLeft, ChevronRight, AlertTriangle } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useParking } from '@/providers/ParkingProvider';
+import { useAuth } from '@/providers/AuthProvider';
 import { PaymentMethod } from '@/types';
 import { formatDate, isExpired, daysBetween, calculateProRataAmount, getMonthlyAmount } from '@/utils/date';
 
@@ -11,6 +12,7 @@ export default function PayMonthlyModal() {
   const router = useRouter();
   const { clientId, carId } = useLocalSearchParams<{ clientId: string; carId: string }>();
   const { clients, cars, tariffs, subscriptions, debts, payMonthly, payDebt, needsShiftCheck } = useParking();
+  const { isAdmin } = useAuth();
   const shiftRequired = needsShiftCheck();
   const [method, setMethod] = useState<PaymentMethod>('cash');
 
@@ -90,7 +92,7 @@ export default function PayMonthlyModal() {
   }, [endDate]);
 
   const handlePay = useCallback(() => {
-    if (shiftRequired) {
+    if (!isAdmin && shiftRequired) {
       Alert.alert('Смена не открыта', 'Откройте смену, чтобы принять оплату.');
       return;
     }
@@ -112,7 +114,7 @@ export default function PayMonthlyModal() {
     const debtMsg = totalDebtAmount > 0 ? `\nДолг ${totalDebtAmount} ₽ закрыт.` : '';
     Alert.alert('Готово', `Оплата ${amount} ₽ за ${days} дн. принята.\nОплачено до ${formatDate(paidUntilStr)}${debtMsg}`);
     router.back();
-  }, [clientId, carId, method, days, amount, payMonthly, payDebt, router, shiftRequired, paidUntilStr, clientDebts, totalDebtAmount]);
+  }, [clientId, carId, method, days, amount, payMonthly, payDebt, router, shiftRequired, paidUntilStr, clientDebts, totalDebtAmount, isAdmin]);
 
   const calendarDays = useMemo(() => {
     const year = calendarMonth.getFullYear();
@@ -380,7 +382,7 @@ export default function PayMonthlyModal() {
         </View>
       </View>
 
-      <TouchableOpacity style={[styles.payBtn, shiftRequired && { opacity: 0.5 }]} onPress={handlePay} activeOpacity={0.7}>
+      <TouchableOpacity style={[styles.payBtn, (!isAdmin && shiftRequired) && { opacity: 0.5 }]} onPress={handlePay} activeOpacity={0.7}>
         <Check size={20} color={Colors.white} />
         <Text style={styles.payBtnText}>Оплатить {amount} ₽</Text>
       </TouchableOpacity>

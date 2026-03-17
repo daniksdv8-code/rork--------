@@ -122,6 +122,7 @@ export interface CashShift {
   id: string;
   operatorId: string;
   operatorName: string;
+  operatorRole?: 'admin' | 'manager';
   openedAt: string;
   closedAt: string | null;
   status: ShiftStatus;
@@ -244,7 +245,8 @@ export type ActionType =
   | 'admin_expense_add'
   | 'expense_category_add'
   | 'expense_category_edit'
-  | 'expense_category_delete';
+  | 'expense_category_delete'
+  | 'admin_edit';
 
 export interface ActionLog {
   id: string;

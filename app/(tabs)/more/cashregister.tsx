@@ -21,7 +21,7 @@ export default function CashRegisterScreen() {
   const { currentUser, isAdmin, logout } = useAuth();
   const {
     shifts, expenses, transactions, withdrawals,
-    openShift, closeShift, getActiveShift, getActiveManagerShift, addExpense, withdrawCash,
+    openShift, closeShift, getActiveShift, getActiveManagerShift, getActiveAdminShift, addExpense, withdrawCash,
   } = useParking();
 
   const [tab, setTab] = useState<CashTab>('current');
@@ -42,7 +42,17 @@ export default function CashRegisterScreen() {
 
   const [expandedShiftId, setExpandedShiftId] = useState<string | null>(null);
 
-  const activeShift = getActiveShift();
+  const activeShift = useMemo(() => {
+    if (isAdmin) {
+      return getActiveAdminShift();
+    }
+    return getActiveManagerShift() ?? getActiveShift();
+  }, [isAdmin, getActiveAdminShift, getActiveManagerShift, getActiveShift]);
+
+  const _managerShiftActive = useMemo(() => {
+    if (!isAdmin) return false;
+    return !!getActiveManagerShift();
+  }, [isAdmin, getActiveManagerShift]);
 
   const handleOpenShift = useCallback(() => {
     if (!currentUser) return;
@@ -56,13 +66,14 @@ export default function CashRegisterScreen() {
         return;
       }
     }
+    const operatorRole = currentUser.role === 'admin' ? 'admin' as const : 'manager' as const;
     const closedShifts = shifts
-      .filter(s => s.status === 'closed' && s.closedAt)
+      .filter(s => s.status === 'closed' && s.closedAt && (s.operatorRole ?? 'manager') === operatorRole)
       .sort((a, b) => new Date(b.closedAt!).getTime() - new Date(a.closedAt!).getTime());
     const lastClosed = closedShifts[0] ?? null;
     const carryOver = lastClosed?.actualCash ?? 0;
-    openShift(currentUser.id, currentUser.name, carryOver);
-    console.log('[CashRegister] Shift opened');
+    openShift(currentUser.id, currentUser.name, carryOver, operatorRole);
+    console.log(`[CashRegister] ${operatorRole} shift opened`);
   }, [currentUser, shifts, openShift, getActiveManagerShift]);
 
   const handleCloseShift = useCallback(async () => {
@@ -72,16 +83,21 @@ export default function CashRegisterScreen() {
     setShowCloseModal(false);
     setActualCash('');
     setCloseNotes('');
-    Alert.alert('Смена закрыта', 'Вы будете перенаправлены на экран входа.', [
-      {
-        text: 'OK',
-        onPress: async () => {
-          await logout();
-          console.log('[CashRegister] Shift closed, user logged out');
+    if (isAdmin) {
+      Alert.alert('Смена закрыта', 'Смена администратора закрыта.');
+      console.log('[CashRegister] Admin shift closed');
+    } else {
+      Alert.alert('Смена закрыта', 'Вы будете перенаправлены на экран входа.', [
+        {
+          text: 'OK',
+          onPress: async () => {
+            await logout();
+            console.log('[CashRegister] Shift closed, user logged out');
+          },
         },
-      },
-    ]);
-  }, [activeShift, actualCash, closeNotes, closeShift, logout]);
+      ]);
+    }
+  }, [activeShift, actualCash, closeNotes, closeShift, logout, isAdmin]);
 
   const handleAddExpense = useCallback(() => {
     const amount = Number(expenseAmount);
@@ -317,8 +333,14 @@ export default function CashRegisterScreen() {
             {!activeShift ? (
               <View style={styles.noShiftCard}>
                 <StopCircle size={40} color={Colors.textMuted} />
-                <Text style={styles.noShiftTitle}>Смена не открыта</Text>
-                <Text style={styles.noShiftDesc}>Откройте смену для начала работы с кассой</Text>
+                <Text style={styles.noShiftTitle}>
+                  {isAdmin ? 'Смена администратора не открыта' : 'Смена не открыта'}
+                </Text>
+                <Text style={styles.noShiftDesc}>
+                  {isAdmin
+                    ? 'Откройте свою смену для работы с кассой администратора (независимо от менеджера)'
+                    : 'Откройте смену для начала работы с кассой'}
+                </Text>
                 <TouchableOpacity style={styles.openShiftBtn} onPress={handleOpenShift} activeOpacity={0.7}>
                   <PlayCircle size={20} color={Colors.white} />
                   <Text style={styles.openShiftBtnText}>Открыть смену</Text>
@@ -330,7 +352,9 @@ export default function CashRegisterScreen() {
                   <View style={styles.shiftStatusRow}>
                     <View style={styles.shiftStatusBadge}>
                       <View style={styles.shiftStatusDot} />
-                      <Text style={styles.shiftStatusText}>Смена открыта</Text>
+                      <Text style={styles.shiftStatusText}>
+                        {isAdmin ? 'Смена администратора' : 'Смена открыта'}
+                      </Text>
                     </View>
                   </View>
                   <View style={styles.shiftInfoRow}>

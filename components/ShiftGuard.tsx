@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { ShieldAlert, PlayCircle } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useParking } from '@/providers/ParkingProvider';
+import { useAuth } from '@/providers/AuthProvider';
 
 interface ShiftGuardProps {
   children: React.ReactNode;
@@ -13,7 +14,12 @@ interface ShiftGuardProps {
 export default function ShiftGuard({ children, allowView = false }: ShiftGuardProps) {
   const router = useRouter();
   const { needsShiftCheck } = useParking();
+  const { isAdmin } = useAuth();
   const shiftRequired = needsShiftCheck();
+
+  if (isAdmin) {
+    return <>{children}</>;
+  }
 
   if (!shiftRequired) {
     return <>{children}</>;

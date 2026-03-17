@@ -18,7 +18,7 @@ export default function ClientCardScreen() {
     clients, cars, sessions, subscriptions, debts, transactions, payments,
     getCarsByClient, getClientTotalDebt, deleteCar, deleteClient, addCarToClient,
     checkIn, checkOut, getSubscription, cancelCheckIn, cancelCheckOut, cancelPayment,
-    needsShiftCheck, updateClient, updateCar, tariffs,
+    needsShiftCheck, updateClient, updateCar, tariffs, logAction,
   } = useParking();
 
   const [showAddCar, setShowAddCar] = useState<boolean>(false);
@@ -112,6 +112,16 @@ export default function ClientCardScreen() {
       Alert.alert('Ошибка', 'Телефон не может быть пустым');
       return;
     }
+    if (isAdmin) {
+      const changes: string[] = [];
+      if (editName.trim() !== client.name) changes.push(`имя: ${client.name} → ${editName.trim()}`);
+      if (editPhone.trim() !== client.phone) changes.push(`тел: ${client.phone} → ${editPhone.trim()}`);
+      if ((editPhone2.trim() || '') !== (client.phone2 || '')) changes.push(`тел2: ${client.phone2 || '—'} → ${editPhone2.trim() || '—'}`);
+      if (editNotes.trim() !== client.notes) changes.push(`заметки изменены`);
+      if (changes.length > 0) {
+        logAction('admin_edit', '[ADMIN] Редактирование клиента', `Клиент ${client.name} | ${changes.join(', ')}`, clientId, 'client');
+      }
+    }
     updateClient(clientId, {
       name: editName.trim(),
       phone: editPhone.trim(),
@@ -120,7 +130,7 @@ export default function ClientCardScreen() {
     });
     setIsEditing(false);
     Alert.alert('Готово', 'Данные клиента обновлены');
-  }, [clientId, client, editName, editPhone, editPhone2, editNotes, updateClient]);
+  }, [clientId, client, editName, editPhone, editPhone2, editNotes, updateClient, isAdmin, logAction]);
 
   const startEditCar = useCallback((carId: string) => {
     const car = clientCars.find(c => c.id === carId);
@@ -142,13 +152,24 @@ export default function ClientCardScreen() {
       Alert.alert('Ошибка', `Автомобиль ${formatted} уже зарегистрирован`);
       return;
     }
+    if (isAdmin) {
+      const oldCar = clientCars.find(c => c.id === editingCarId);
+      if (oldCar) {
+        const changes: string[] = [];
+        if (formatted !== oldCar.plateNumber) changes.push(`номер: ${oldCar.plateNumber} → ${formatted}`);
+        if (editCarModel.trim() !== (oldCar.carModel ?? '')) changes.push(`модель: ${oldCar.carModel || '—'} → ${editCarModel.trim() || '—'}`);
+        if (changes.length > 0) {
+          logAction('admin_edit', '[ADMIN] Редактирование авто', `Клиент ${client?.name ?? '—'} | ${changes.join(', ')}`, editingCarId, 'car');
+        }
+      }
+    }
     updateCar(editingCarId, {
       plateNumber: editCarPlate.trim(),
       carModel: editCarModel.trim(),
     });
     setEditingCarId(null);
     Alert.alert('Готово', 'Данные автомобиля обновлены');
-  }, [editingCarId, editCarPlate, editCarModel, cars, updateCar]);
+  }, [editingCarId, editCarPlate, editCarModel, cars, updateCar, isAdmin, clientCars, client, logAction]);
 
   const handleDeleteCar = useCallback((carId: string) => {
     const car = clientCars.find(c => c.id === carId);
@@ -247,7 +268,7 @@ export default function ClientCardScreen() {
   }, []);
 
   const handleCheckIn = useCallback(() => {
-    if (shiftRequired) {
+    if (!isAdmin && shiftRequired) {
       Alert.alert('Смена не открыта', 'Откройте смену, чтобы начать работу.');
       return;
     }
@@ -268,10 +289,10 @@ export default function ClientCardScreen() {
     Alert.alert('Готово', `Въезд зафиксирован: ${car?.plateNumber ?? ''} (${label})${payLabel}${debtLabel}`);
     resetCheckInForm();
     console.log(`[ClientCard] Secondary check-in: ${car?.plateNumber}, payment=${payment?.amount ?? 0}, debt=${debt?.amount ?? 0}`);
-  }, [checkInCarId, clientId, clientCars, checkInServiceType, checkIn, hasActiveSubscription, shiftRequired, checkInPlannedDeparture, buildCheckInPayment, buildCheckInDebt, resetCheckInForm]);
+  }, [checkInCarId, clientId, clientCars, checkInServiceType, checkIn, hasActiveSubscription, shiftRequired, checkInPlannedDeparture, buildCheckInPayment, buildCheckInDebt, resetCheckInForm, isAdmin]);
 
   const handleCheckOut = useCallback((sessionId: string) => {
-    if (shiftRequired) {
+    if (!isAdmin && shiftRequired) {
       Alert.alert('Смена не открыта', 'Откройте смену, чтобы оформить выезд.');
       return;
     }
@@ -301,7 +322,7 @@ export default function ClientCardScreen() {
         },
       },
     ]);
-  }, [clientActiveSessions, cars, clientId, getSubscription, checkOut, shiftRequired]);
+  }, [clientActiveSessions, cars, clientId, getSubscription, checkOut, shiftRequired, isAdmin]);
 
   const handleCancelCheckIn = useCallback((sessionId: string) => {
     const session = clientActiveSessions.find(s => s.id === sessionId);
@@ -481,10 +502,10 @@ export default function ClientCardScreen() {
           style={[
             styles.actionBtn,
             styles.checkInBtn,
-            (carsWithoutActiveSession.length === 0 || shiftRequired) && styles.actionBtnDisabled,
+            (carsWithoutActiveSession.length === 0 || (!isAdmin && shiftRequired)) && styles.actionBtnDisabled,
           ]}
           onPress={() => {
-            if (shiftRequired) {
+            if (!isAdmin && shiftRequired) {
               Alert.alert('Смена не открыта', 'Откройте смену, чтобы начать работу.');
               return;
             }
@@ -512,9 +533,9 @@ export default function ClientCardScreen() {
 
         {clientActiveSessions.length > 0 && (
           <TouchableOpacity
-            style={[styles.actionBtn, styles.checkOutBtn, shiftRequired && styles.actionBtnDisabled]}
+            style={[styles.actionBtn, styles.checkOutBtn, (!isAdmin && shiftRequired) && styles.actionBtnDisabled]}
             onPress={() => {
-              if (shiftRequired) {
+              if (!isAdmin && shiftRequired) {
                 Alert.alert('Смена не открыта', 'Откройте смену, чтобы оформить выезд.');
                 return;
               }

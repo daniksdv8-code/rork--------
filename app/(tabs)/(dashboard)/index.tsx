@@ -108,7 +108,7 @@ export default function DashboardScreen() {
         </View>
       )}
 
-      {shiftRequired && (
+      {(!currentUser || (currentUser.role !== 'admin' && shiftRequired)) && (
         <TouchableOpacity
           style={styles.shiftBanner}
           onPress={() => router.push('/(tabs)/more/cashregister' as any)}

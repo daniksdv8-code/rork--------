@@ -345,10 +345,24 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   }, [shifts]);
 
   const getActiveManagerShift = useCallback((): CashShift | null => {
+    const openManagerShifts = shifts.filter(s => s.status === 'open' && s.operatorRole !== 'admin');
+    if (openManagerShifts.length === 0) {
+      const openShiftItem = shifts.find(s => s.status === 'open');
+      if (!openShiftItem) return null;
+      const shiftUser = users.find(u => u.id === openShiftItem.operatorId);
+      if (shiftUser && shiftUser.role === 'manager') return openShiftItem;
+      return null;
+    }
+    return openManagerShifts[0];
+  }, [shifts, users]);
+
+  const getActiveAdminShift = useCallback((): CashShift | null => {
+    const adminShift = shifts.find(s => s.status === 'open' && s.operatorRole === 'admin');
+    if (adminShift) return adminShift;
     const openShiftItem = shifts.find(s => s.status === 'open');
     if (!openShiftItem) return null;
     const shiftUser = users.find(u => u.id === openShiftItem.operatorId);
-    if (shiftUser && shiftUser.role === 'manager') return openShiftItem;
+    if (shiftUser && shiftUser.role === 'admin') return openShiftItem;
     return null;
   }, [shifts, users]);
 
@@ -356,15 +370,27 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     return shifts.some(s => s.status === 'open');
   }, [shifts]);
 
+  const isAdminShiftOpen = useCallback((): boolean => {
+    return !!getActiveAdminShift();
+  }, [getActiveAdminShift]);
+
   const needsShiftCheck = useCallback((): boolean => {
     if (!currentUser) return true;
+    if (currentUser.role === 'admin') return false;
     return !isShiftOpen();
   }, [currentUser, isShiftOpen]);
 
   const addTransaction = useCallback((
     tx: Omit<Transaction, 'id' | 'operatorId' | 'operatorName' | 'shiftId'>
   ): Transaction => {
-    const activeShift = shifts.find(s => s.status === 'open');
+    let activeShift: CashShift | undefined;
+    if (currentUser?.role === 'admin') {
+      activeShift = shifts.find(s => s.status === 'open' && s.operatorRole === 'admin')
+        ?? shifts.find(s => s.status === 'open');
+    } else {
+      activeShift = shifts.find(s => s.status === 'open' && s.operatorRole !== 'admin')
+        ?? shifts.find(s => s.status === 'open');
+    }
     const newTx: Transaction = {
       ...tx,
       id: generateId(),
@@ -1249,10 +1275,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     };
   }, [transactions, activeDebts, activeSessions, debtors]);
 
-  const openShift = useCallback((operatorId: string, operatorName: string, carryOver: number = 0): CashShift => {
-    const existingOpen = shifts.find(s => s.status === 'open');
+  const openShift = useCallback((operatorId: string, operatorName: string, carryOver: number = 0, role?: 'admin' | 'manager'): CashShift => {
+    const operatorRole = role ?? (currentUser?.role === 'admin' ? 'admin' : 'manager');
+    const existingOpen = shifts.find(s => s.status === 'open' && (s.operatorRole ?? 'manager') === operatorRole);
     if (existingOpen) {
-      console.log(`[Shift] Already have open shift ${existingOpen.id}, returning existing`);
+      console.log(`[Shift] Already have open ${operatorRole} shift ${existingOpen.id}, returning existing`);
       return existingOpen;
     }
     const shiftNow = new Date().toISOString();
@@ -1260,6 +1287,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       id: generateId(),
       operatorId,
       operatorName,
+      operatorRole,
       openedAt: shiftNow,
       closedAt: null,
       status: 'open',
@@ -1270,11 +1298,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       updatedAt: shiftNow,
     };
     setShifts(prev => [shift, ...prev]);
-    logAction('shift_open', 'Открытие смены', `${operatorName}, перенос: ${carryOver} ₽`, shift.id, 'shift');
+    logAction('shift_open', 'Открытие смены', `${operatorName} (${operatorRole === 'admin' ? 'админ' : 'менеджер'}), перенос: ${carryOver} ₽`, shift.id, 'shift');
     schedulePush();
-    console.log(`[Shift] Opened shift ${shift.id} by ${operatorName}`);
+    console.log(`[Shift] Opened ${operatorRole} shift ${shift.id} by ${operatorName}`);
     return shift;
-  }, [shifts, schedulePush, logAction]);
+  }, [shifts, schedulePush, logAction, currentUser]);
 
   const closeShift = useCallback((shiftId: string, actualCash: number, notes: string = '') => {
     const shift = shifts.find(s => s.id === shiftId);
@@ -2096,7 +2124,9 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     closeShift,
     getActiveShift,
     getActiveManagerShift,
+    getActiveAdminShift,
     isShiftOpen,
+    isAdminShiftOpen,
     needsShiftCheck,
     addExpense,
     addManagedUser,
@@ -2135,7 +2165,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     addClient, addCarToClient, checkIn, checkOut,
     cancelCheckIn, cancelCheckOut, cancelPayment,
     payMonthly, payDebt, withdrawCash, searchClients, updateTariffs, deleteCar, deleteClient, findMatchingClients,
-    openShift, closeShift, getActiveShift, getActiveManagerShift, isShiftOpen, needsShiftCheck, addExpense,
+    openShift, closeShift, getActiveShift, getActiveManagerShift, getActiveAdminShift, isShiftOpen, isAdminShiftOpen, needsShiftCheck, addExpense,
     addManagedUser, removeManagedUser, updateManagedUserPassword, toggleManagedUserActive,
     updateAdminProfile, validateLogin, resetAllData, createBackup, restoreBackup,
     addScheduledShift, updateScheduledShift, deleteScheduledShift, logAction,

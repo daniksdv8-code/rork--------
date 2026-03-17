@@ -4,6 +4,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Wallet, Check } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useParking } from '@/providers/ParkingProvider';
+import { useAuth } from '@/providers/AuthProvider';
 import { PaymentMethod } from '@/types';
 
 export default function PayDebtModal() {
@@ -14,6 +15,7 @@ export default function PayDebtModal() {
     totalDebt: string;
   }>();
   const { payDebt, debts, needsShiftCheck } = useParking();
+  const { isAdmin } = useAuth();
   const shiftRequired = needsShiftCheck();
   const [amount, setAmount] = useState<string>(totalDebt ?? '0');
   const [method, setMethod] = useState<PaymentMethod>('cash');
@@ -21,7 +23,7 @@ export default function PayDebtModal() {
   const debt = debts.find(d => d.id === debtId);
 
   const handlePay = useCallback(() => {
-    if (shiftRequired) {
+    if (!isAdmin && shiftRequired) {
       Alert.alert('Смена не открыта', 'Откройте смену, чтобы принять оплату.');
       return;
     }
@@ -39,7 +41,7 @@ export default function PayDebtModal() {
       Alert.alert('Готово', `Оплачено ${numAmount} ₽. Остаток: ${remaining} ₽`);
     }
     router.back();
-  }, [amount, method, debtId, payDebt, debt, router, shiftRequired]);
+  }, [amount, method, debtId, payDebt, debt, router, shiftRequired, isAdmin]);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>

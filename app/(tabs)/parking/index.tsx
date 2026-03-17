@@ -46,7 +46,7 @@ export default function ParkingScreen() {
   }, [sessionData, searchQuery]);
 
   const handleExit = useCallback((session: ParkingSession) => {
-    if (shiftRequired) {
+    if (!isAdmin && shiftRequired) {
       Alert.alert('Смена не открыта', 'Откройте смену, чтобы оформить выезд.');
       return;
     }
@@ -54,7 +54,7 @@ export default function ParkingScreen() {
       pathname: '/exit-modal',
       params: { sessionId: session.id },
     });
-  }, [router, shiftRequired]);
+  }, [router, shiftRequired, isAdmin]);
 
   const handleCancelCheckIn = useCallback((session: ParkingSession) => {
     const car = cars.find(c => c.id === session.carId);

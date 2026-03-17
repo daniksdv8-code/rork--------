@@ -13,6 +13,7 @@ import { ServiceType, PaymentMethod } from '@/types';
 export default function CheckinScreen() {
   const { currentUser } = useAuth();
   const { getClientByCar, addClient, addCarToClient, checkIn, tariffs, activeClients, activeCars, getSubscription, needsShiftCheck } = useParking();
+  const { isAdmin } = useAuth();
   const [plateInput, setPlateInput] = useState<string>('');
   const [foundClient, setFoundClient] = useState<{ name: string; phone: string; carId: string; clientId: string } | null>(null);
   const [showNewForm, setShowNewForm] = useState<boolean>(false);
@@ -187,7 +188,7 @@ export default function CheckinScreen() {
   }, [paymentStatus, paymentAmount, serviceType, payDays, paymentMethod, tariffs]);
 
   const handleCheckin = useCallback(() => {
-    if (shiftRequired) {
+    if (!isAdmin && shiftRequired) {
       Alert.alert('Смена не открыта', 'Откройте смену, чтобы начать работу.');
       return;
     }
@@ -201,10 +202,10 @@ export default function CheckinScreen() {
     const debtLabel = debt ? `\nВ долг: ${debt.amount} ₽` : '';
     Alert.alert('Готово', `Заезд зафиксирован (${typeLabel}): ${formatPlateNumber(plateInput)}${payLabel}${debtLabel}`);
     resetForm();
-  }, [foundClient, foundClientHasActiveSub, serviceType, checkIn, plateInput, resetForm, shiftRequired, plannedDeparture, buildPaymentAtEntry, buildDebtAtEntry]);
+  }, [foundClient, foundClientHasActiveSub, serviceType, checkIn, plateInput, resetForm, shiftRequired, plannedDeparture, buildPaymentAtEntry, buildDebtAtEntry, isAdmin]);
 
   const handleAddAndCheckin = useCallback(() => {
-    if (shiftRequired) {
+    if (!isAdmin && shiftRequired) {
       Alert.alert('Смена не открыта', 'Откройте смену, чтобы начать работу.');
       return;
     }
@@ -226,10 +227,10 @@ export default function CheckinScreen() {
     const debtLabel = debt ? `\nВ долг: ${debt.amount} ₽` : '';
     Alert.alert('Готово', `Клиент добавлен, заезд зафиксирован (${typeLabel}): ${formatted}${payLabel}${debtLabel}`);
     resetForm();
-  }, [newName, newPhone, newNotes, newCarModel, plateInput, addClient, checkIn, serviceType, resetForm, shiftRequired, plannedDeparture, buildPaymentAtEntry, buildDebtAtEntry]);
+  }, [newName, newPhone, newNotes, newCarModel, plateInput, addClient, checkIn, serviceType, resetForm, shiftRequired, plannedDeparture, buildPaymentAtEntry, buildDebtAtEntry, isAdmin]);
 
   const handleAddCarToExistingAndCheckin = useCallback((existingClientId: string, existingClientName: string) => {
-    if (shiftRequired) {
+    if (!isAdmin && shiftRequired) {
       Alert.alert('Смена не открыта', 'Откройте смену, чтобы начать работу.');
       return;
     }
@@ -248,7 +249,7 @@ export default function CheckinScreen() {
     const debtLabel = debt ? `\nВ долг: ${debt.amount} ₽` : '';
     Alert.alert('Готово', `Авто привязано к ${existingClientName}, заезд зафиксирован (${typeLabel})${payLabel}${debtLabel}`);
     resetForm();
-  }, [plateInput, newCarModel, activeCars, addCarToClient, checkIn, serviceType, resetForm, shiftRequired, plannedDeparture, buildPaymentAtEntry, buildDebtAtEntry]);
+  }, [plateInput, newCarModel, activeCars, addCarToClient, checkIn, serviceType, resetForm, shiftRequired, plannedDeparture, buildPaymentAtEntry, buildDebtAtEntry, isAdmin]);
 
   if (!currentUser) {
     return (
@@ -467,7 +468,7 @@ export default function CheckinScreen() {
     <ShiftGuard>
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        {shiftRequired && (
+        {!isAdmin && shiftRequired && (
           <View style={styles.shiftWarning}>
             <AlertCircle size={18} color={Colors.danger} />
             <Text style={styles.shiftWarningText}>Откройте смену в кассе, чтобы начать принимать автомобили</Text>
@@ -549,7 +550,7 @@ export default function CheckinScreen() {
 
             {renderPlannedDepartureInput()}
 
-            <TouchableOpacity style={[styles.checkinBtn, shiftRequired && styles.checkinBtnDisabled]} onPress={handleCheckin} activeOpacity={0.7}>
+            <TouchableOpacity style={[styles.checkinBtn, (!isAdmin && shiftRequired) && styles.checkinBtnDisabled]} onPress={handleCheckin} activeOpacity={0.7}>
               <LogInIcon size={20} color={Colors.white} />
               <Text style={styles.checkinBtnText}>
                 {paymentStatus === 'pay_now' && paymentAmount > 0
@@ -651,7 +652,7 @@ export default function CheckinScreen() {
             {renderPaymentAtEntry()}
             {renderPlannedDepartureInput()}
 
-            <TouchableOpacity style={[styles.checkinBtn, shiftRequired && styles.checkinBtnDisabled]} onPress={handleAddAndCheckin} activeOpacity={0.7}>
+            <TouchableOpacity style={[styles.checkinBtn, (!isAdmin && shiftRequired) && styles.checkinBtnDisabled]} onPress={handleAddAndCheckin} activeOpacity={0.7}>
               <UserPlus size={20} color={Colors.white} />
               <Text style={styles.checkinBtnText}>
                 {paymentStatus === 'pay_now' && paymentAmount > 0

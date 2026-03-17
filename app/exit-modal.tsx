@@ -99,7 +99,7 @@ export default function ExitModal() {
   }, [session, isMonthly, hasActiveSub, sub, payments, tariffs]);
 
   const handlePayAndExit = useCallback(() => {
-    if (shiftRequired) {
+    if (!isAdmin && shiftRequired) {
       Alert.alert('Смена не открыта', 'Откройте смену, чтобы оформить выезд.');
       return;
     }
@@ -118,10 +118,10 @@ export default function ExitModal() {
       }
       router.back();
     }
-  }, [session, checkOut, method, remainingAmount, monthlyAmount, isMonthly, hasActiveSub, router, shiftRequired]);
+  }, [session, checkOut, method, remainingAmount, monthlyAmount, isMonthly, hasActiveSub, router, shiftRequired, isAdmin]);
 
   const handleExitWithDebt = useCallback(() => {
-    if (shiftRequired) {
+    if (!isAdmin && shiftRequired) {
       Alert.alert('Смена не открыта', 'Откройте смену, чтобы оформить выезд.');
       return;
     }
@@ -133,10 +133,10 @@ export default function ExitModal() {
       Alert.alert('Готово', 'Выезд зафиксирован');
     }
     router.back();
-  }, [session, checkOut, router, shiftRequired]);
+  }, [session, checkOut, router, shiftRequired, isAdmin]);
 
   const handlePartialPayAndExit = useCallback(() => {
-    if (shiftRequired) {
+    if (!isAdmin && shiftRequired) {
       Alert.alert('Смена не открыта', 'Откройте смену, чтобы оформить выезд.');
       return;
     }
@@ -156,10 +156,10 @@ export default function ExitModal() {
     }
     Alert.alert('Готово', msg);
     router.back();
-  }, [session, partialAmount, method, checkOut, router, shiftRequired, isMonthly, hasActiveSub, monthlyAmount, remainingAmount]);
+  }, [session, partialAmount, method, checkOut, router, shiftRequired, isMonthly, hasActiveSub, monthlyAmount, remainingAmount, isAdmin]);
 
   const handleExitFree = useCallback(() => {
-    if (shiftRequired) {
+    if (!isAdmin && shiftRequired) {
       Alert.alert('Смена не открыта', 'Откройте смену, чтобы оформить выезд.');
       return;
     }
@@ -167,19 +167,19 @@ export default function ExitModal() {
     checkOut(session.id);
     Alert.alert('Готово', 'Выезд зафиксирован');
     router.back();
-  }, [session, checkOut, router, shiftRequired]);
+  }, [session, checkOut, router, shiftRequired, isAdmin]);
 
   const handlePayMonthlyAtExit = useCallback(() => {
     if (!session) return;
-    if (shiftRequired) {
+    if (!isAdmin && shiftRequired) {
       Alert.alert('Смена не открыта', 'Откройте смену, чтобы принять оплату.');
       return;
     }
     router.push(`/pay-monthly-modal?clientId=${session.clientId}&carId=${session.carId}`);
-  }, [session, router, shiftRequired]);
+  }, [session, router, shiftRequired, isAdmin]);
 
   const handleEarlyExitWithRefund = useCallback(() => {
-    if (shiftRequired) {
+    if (!isAdmin && shiftRequired) {
       Alert.alert('Смена не открыта', 'Откройте смену, чтобы оформить возврат.');
       return;
     }
@@ -204,7 +204,7 @@ export default function ExitModal() {
         },
       ]
     );
-  }, [session, refundCalc, refundMethod, earlyExitWithRefund, router, shiftRequired]);
+  }, [session, refundCalc, refundMethod, earlyExitWithRefund, router, shiftRequired, isAdmin]);
 
   if (!session || !car || !client) {
     return (
@@ -289,7 +289,7 @@ export default function ExitModal() {
         )}
       </View>
 
-      {shiftRequired && (
+      {!isAdmin && shiftRequired && (
         <View style={styles.shiftWarning}>
           <AlertTriangle size={16} color={Colors.danger} />
           <Text style={styles.shiftWarningText}>Откройте смену, чтобы оформить выезд</Text>
@@ -309,7 +309,7 @@ export default function ExitModal() {
           </View>
 
           <TouchableOpacity
-            style={[styles.exitBtn, shiftRequired && styles.exitBtnDisabled]}
+            style={[styles.exitBtn, (!isAdmin && shiftRequired) && styles.exitBtnDisabled]}
             onPress={handleExitFree}
             activeOpacity={0.7}
           >
@@ -387,7 +387,7 @@ export default function ExitModal() {
                 </View>
 
                 <TouchableOpacity
-                  style={[styles.refundBtn, shiftRequired && styles.exitBtnDisabled]}
+                  style={[styles.refundBtn, (!isAdmin && shiftRequired) && styles.exitBtnDisabled]}
                   onPress={handleEarlyExitWithRefund}
                   activeOpacity={0.7}
                 >
@@ -474,7 +474,7 @@ export default function ExitModal() {
 
               {remainingAmount > 0 && (
                 <TouchableOpacity
-                  style={[styles.payExitBtn, shiftRequired && styles.exitBtnDisabled]}
+                  style={[styles.payExitBtn, (!isAdmin && shiftRequired) && styles.exitBtnDisabled]}
                   onPress={handlePayAndExit}
                   activeOpacity={0.7}
                 >
@@ -485,7 +485,7 @@ export default function ExitModal() {
 
               {remainingAmount === 0 && (
                 <TouchableOpacity
-                  style={[styles.exitBtn, shiftRequired && styles.exitBtnDisabled]}
+                  style={[styles.exitBtn, (!isAdmin && shiftRequired) && styles.exitBtnDisabled]}
                   onPress={handlePayAndExit}
                   activeOpacity={0.7}
                 >
@@ -509,7 +509,7 @@ export default function ExitModal() {
                         testID="partial-amount-input"
                       />
                       <TouchableOpacity
-                        style={[styles.partialPayBtn, shiftRequired && styles.exitBtnDisabled]}
+                        style={[styles.partialPayBtn, (!isAdmin && shiftRequired) && styles.exitBtnDisabled]}
                         onPress={handlePartialPayAndExit}
                         activeOpacity={0.7}
                       >
@@ -520,7 +520,7 @@ export default function ExitModal() {
                   </View>
 
                   <TouchableOpacity
-                    style={[styles.debtExitBtn, shiftRequired && styles.exitBtnDisabled]}
+                    style={[styles.debtExitBtn, (!isAdmin && shiftRequired) && styles.exitBtnDisabled]}
                     onPress={handleExitWithDebt}
                     activeOpacity={0.7}
                   >
@@ -585,7 +585,7 @@ export default function ExitModal() {
               )}
 
               <TouchableOpacity
-                style={[styles.payExitBtn, shiftRequired && styles.exitBtnDisabled]}
+                style={[styles.payExitBtn, (!isAdmin && shiftRequired) && styles.exitBtnDisabled]}
                 onPress={handlePayAndExit}
                 activeOpacity={0.7}
               >
@@ -606,7 +606,7 @@ export default function ExitModal() {
                     testID="partial-amount-monthly-input"
                   />
                   <TouchableOpacity
-                    style={[styles.partialPayBtn, shiftRequired && styles.exitBtnDisabled]}
+                    style={[styles.partialPayBtn, (!isAdmin && shiftRequired) && styles.exitBtnDisabled]}
                     onPress={handlePartialPayAndExit}
                     activeOpacity={0.7}
                   >
@@ -626,7 +626,7 @@ export default function ExitModal() {
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.debtExitBtn, shiftRequired && styles.exitBtnDisabled]}
+                style={[styles.debtExitBtn, (!isAdmin && shiftRequired) && styles.exitBtnDisabled]}
                 onPress={handleExitWithDebt}
                 activeOpacity={0.7}
               >
