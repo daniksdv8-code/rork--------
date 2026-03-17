@@ -1,17 +1,23 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, RefreshControl } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Search, Car, Wallet, AlertTriangle, Users, Clock, ChevronRight, LogOut, UserPlus, BarChart3, LogIn, Banknote, PlayCircle } from 'lucide-react-native';
+import { Search, Car, Wallet, AlertTriangle, Users, Clock, ChevronRight, LogOut, UserPlus, BarChart3, LogIn, Banknote, PlayCircle, HandCoins } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/providers/AuthProvider';
 import { useParking } from '@/providers/ParkingProvider';
 import ShiftGuard from '@/components/ShiftGuard';
 import { Client } from '@/types';
+import { isToday } from '@/utils/date';
 
 export default function DashboardScreen() {
   const router = useRouter();
   const { currentUser, logout } = useAuth();
-  const { todayStats, searchClients, cars, expiringSubscriptions, needsShiftCheck } = useParking();
+  const { todayStats, searchClients, cars, expiringSubscriptions, needsShiftCheck, transactions } = useParking();
+
+  const debtPaymentsToday = useMemo(() => {
+    return transactions.filter(t => isToday(t.date) && t.type === 'debt_payment' && t.amount > 0)
+      .reduce((s, t) => s + t.amount, 0);
+  }, [transactions]);
   const shiftRequired = needsShiftCheck();
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [searchResults, setSearchResults] = useState<Client[]>([]);
@@ -126,45 +132,80 @@ export default function DashboardScreen() {
       )}
 
       <View style={styles.statsGrid}>
-        <View style={[styles.statCard, styles.statCardWide]}>
+        <TouchableOpacity
+          style={[styles.statCard, styles.statCardWide]}
+          activeOpacity={0.7}
+          onPress={() => router.push('/(tabs)/(dashboard)/parked-now' as any)}
+        >
           <View style={[styles.statIcon, { backgroundColor: Colors.infoLight }]}>
             <Car size={22} color={Colors.info} />
           </View>
-          <Text style={styles.statValue}>{todayStats.carsOnParking}</Text>
-          <Text style={styles.statLabel}>Сейчас на парковке</Text>
-        </View>
+          <View style={styles.statCardWideContent}>
+            <Text style={styles.statValue}>{todayStats.carsOnParking}</Text>
+            <Text style={styles.statLabel}>Сейчас на парковке</Text>
+          </View>
+          <ChevronRight size={18} color={Colors.textMuted} />
+        </TouchableOpacity>
 
-        <View style={styles.statCard}>
+        <TouchableOpacity
+          style={styles.statCard}
+          activeOpacity={0.7}
+          onPress={() => router.push('/(tabs)/(dashboard)/cash-today' as any)}
+        >
           <View style={[styles.statIcon, { backgroundColor: Colors.successLight }]}>
             <Wallet size={20} color={Colors.success} />
           </View>
           <Text style={styles.statValue}>{todayStats.cashToday} ₽</Text>
           <Text style={styles.statLabel}>Наличные сегодня</Text>
-        </View>
+        </TouchableOpacity>
 
-        <View style={styles.statCard}>
+        <TouchableOpacity
+          style={styles.statCard}
+          activeOpacity={0.7}
+          onPress={() => router.push('/(tabs)/(dashboard)/card-today' as any)}
+        >
           <View style={[styles.statIcon, { backgroundColor: Colors.infoLight }]}>
             <Wallet size={20} color={Colors.info} />
           </View>
           <Text style={styles.statValue}>{todayStats.cardToday} ₽</Text>
           <Text style={styles.statLabel}>Безнал сегодня</Text>
-        </View>
+        </TouchableOpacity>
 
-        <View style={styles.statCard}>
+        <TouchableOpacity
+          style={styles.statCard}
+          activeOpacity={0.7}
+          onPress={() => router.push('/(tabs)/(dashboard)/debtors-list' as any)}
+        >
           <View style={[styles.statIcon, { backgroundColor: Colors.dangerLight }]}>
             <AlertTriangle size={20} color={Colors.danger} />
           </View>
           <Text style={[styles.statValue, { color: Colors.danger }]}>{todayStats.debtorsCount}</Text>
           <Text style={styles.statLabel}>Должников</Text>
-        </View>
+        </TouchableOpacity>
 
-        <View style={styles.statCard}>
+        <TouchableOpacity
+          style={styles.statCard}
+          activeOpacity={0.7}
+          onPress={() => router.push('/(tabs)/(dashboard)/debts-list' as any)}
+        >
           <View style={[styles.statIcon, { backgroundColor: Colors.dangerLight }]}>
             <Wallet size={20} color={Colors.danger} />
           </View>
           <Text style={[styles.statValue, { color: Colors.danger }]}>{todayStats.totalDebt} ₽</Text>
           <Text style={styles.statLabel}>Общий долг</Text>
-        </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.statCard}
+          activeOpacity={0.7}
+          onPress={() => router.push('/(tabs)/(dashboard)/debt-payments' as any)}
+        >
+          <View style={[styles.statIcon, { backgroundColor: Colors.successLight }]}>
+            <HandCoins size={20} color={Colors.success} />
+          </View>
+          <Text style={[styles.statValue, { color: Colors.success }]}>{debtPaymentsToday} ₽</Text>
+          <Text style={styles.statLabel}>Оплат по долгам</Text>
+        </TouchableOpacity>
       </View>
 
       <Text style={styles.sectionTitle}>Быстрый доступ</Text>
@@ -342,6 +383,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
+  },
+  statCardWideContent: {
+    flex: 1,
   },
   statIcon: {
     width: 42,
