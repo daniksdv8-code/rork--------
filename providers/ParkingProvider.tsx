@@ -467,7 +467,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     return newCar;
   }, [schedulePush, logAction]);
 
-  const checkIn = useCallback((carId: string, clientId: string, serviceType: ServiceType, plannedDepartureTime?: string, paymentAtEntry?: { method: PaymentMethod; amount: number; days?: number; paidUntilDate?: string }, debtAtEntry?: { amount: number; description?: string }) => {
+  const checkIn = useCallback((carId: string, clientId: string, serviceType: ServiceType, plannedDepartureTime?: string, paymentAtEntry?: { method: PaymentMethod; amount: number; days?: number; paidUntilDate?: string }, debtAtEntry?: { amount: number; description?: string }, isSecondary?: boolean) => {
     const activeShift = shifts.find(s => s.status === 'open');
     const sessionNow = new Date().toISOString();
     const session: ParkingSession = {
@@ -588,7 +588,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     const client = clients.find(c => c.id === clientId);
     const payInfo = paymentAtEntry && paymentAtEntry.amount > 0 ? `, оплата ${paymentAtEntry.amount} ₽` : '';
     const debtInfo = debtAtEntry && debtAtEntry.amount > 0 ? `, долг ${debtAtEntry.amount} ₽` : '';
-    logAction('checkin', 'Заезд', `${car?.plateNumber ?? carId} (${client?.name ?? clientId}), ${serviceType === 'monthly' ? 'месяц' : 'разово'}${payInfo}${debtInfo}`, session.id, 'session');
+    const entryLabel = isSecondary ? 'Вторичная постановка авто' : 'Заезд';
+    logAction('checkin', entryLabel, `${car?.plateNumber ?? carId} (${client?.name ?? clientId}), ${serviceType === 'monthly' ? 'месяц' : 'разово'}${payInfo}${debtInfo}`, session.id, 'session');
+    if (isSecondary && debtAtEntry && debtAtEntry.amount > 0) {
+      logAction('checkin', 'Создан долг по вторичной постановке', `${car?.plateNumber ?? carId} (${client?.name ?? clientId}), сумма: ${debtAtEntry.amount} ₽`, session.id, 'session');
+    }
     schedulePush();
     console.log(`[CheckIn] Session created for car ${carId}, planned departure: ${plannedDepartureTime ?? 'not set'}`);
     return session;
