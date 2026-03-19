@@ -19,6 +19,7 @@ export default function ClientCardScreen() {
     getCarsByClient, getClientTotalDebt, deleteCar, deleteClient, addCarToClient,
     checkIn, checkOut, getSubscription, cancelCheckIn, cancelCheckOut, cancelPayment,
     needsShiftCheck, updateClient, updateCar, tariffs, logAction,
+    addManualDebt, deleteManualDebt, getClientDebtInfo,
   } = useParking();
 
   const [showAddCar, setShowAddCar] = useState<boolean>(false);
@@ -44,13 +45,19 @@ export default function ClientCardScreen() {
   const [editCarPlate, setEditCarPlate] = useState<string>('');
   const [editCarModel, setEditCarModel] = useState<string>('');
 
+  const [showAddDebt, setShowAddDebt] = useState<boolean>(false);
+  const [newDebtAmount, setNewDebtAmount] = useState<string>('');
+  const [newDebtDate, setNewDebtDate] = useState<string>(toDateString(new Date()));
+  const [newDebtComment, setNewDebtComment] = useState<string>('');
+
   const shiftRequired = needsShiftCheck();
 
   const client = useMemo(() => clients.find(c => c.id === clientId), [clients, clientId]);
   const isDeleted = !!client?.deleted;
   const clientCars = useMemo(() => clientId ? getCarsByClient(clientId) : [], [clientId, getCarsByClient]);
   const totalDebt = useMemo(() => clientId ? getClientTotalDebt(clientId) : 0, [clientId, getClientTotalDebt]);
-  const clientDebts = useMemo(() => debts.filter(d => d.clientId === clientId), [debts, clientId]);
+  const clientDebts = useMemo(() => debts.filter(d => d.clientId === clientId && d.remainingAmount > 0), [debts, clientId]);
+  const clientDebtInfo = useMemo(() => clientId ? getClientDebtInfo(clientId) : null, [clientId, getClientDebtInfo]);
 
   const clientActiveSessions = useMemo(() =>
     sessions.filter(s => s.clientId === clientId && s.status === 'active'),
@@ -372,6 +379,55 @@ export default function ClientCardScreen() {
       },
     ]);
   }, [clientPayments, cancelPayment]);
+
+  const handleAddManualDebt = useCallback(() => {
+    if (!clientId) return;
+    const amount = Number(newDebtAmount);
+    if (!amount || amount <= 0) {
+      Alert.alert('Ошибка', 'Введите корректную сумму долга');
+      return;
+    }
+    addManualDebt(clientId, amount, newDebtDate, newDebtComment.trim());
+    Alert.alert('Готово', `Долг ${amount} ₽ добавлен`);
+    setShowAddDebt(false);
+    setNewDebtAmount('');
+    setNewDebtDate(toDateString(new Date()));
+    setNewDebtComment('');
+    console.log(`[ClientCard] Manual debt added: ${amount} for client ${clientId}`);
+  }, [clientId, newDebtAmount, newDebtDate, newDebtComment, addManualDebt]);
+
+  const handleDeleteDebt = useCallback((debtId: string) => {
+    const debt = clientDebts.find(d => d.id === debtId);
+    if (!debt) return;
+    Alert.alert(
+      'Удаление долга',
+      `Удалить долг ${debt.remainingAmount} ₽?\n${debt.description}`,
+      [
+        { text: 'Отмена', style: 'cancel' },
+        {
+          text: 'Удалить',
+          style: 'destructive',
+          onPress: () => {
+            deleteManualDebt(debtId);
+            Alert.alert('Готово', 'Долг удалён');
+          },
+        },
+      ]
+    );
+  }, [clientDebts, deleteManualDebt]);
+
+  const handlePayClientDebt = useCallback(() => {
+    if (!clientId) return;
+    router.push({
+      pathname: '/pay-debt-modal',
+      params: {
+        clientId,
+        clientName: client?.name ?? '',
+        totalDebt: String(totalDebt),
+        mode: 'client_debt',
+      },
+    });
+  }, [clientId, client, totalDebt, router]);
 
   const handleAddCar = useCallback(() => {
     if (!newPlate.trim()) {
@@ -1054,9 +1110,21 @@ export default function ClientCardScreen() {
         )}
       </View>
 
-      {clientDebts.length > 0 && (
+      {(clientDebts.length > 0 || (clientDebtInfo && clientDebtInfo.totalAmount > 0)) && (
         <>
-          <Text style={styles.sectionTitle}>Задолженности</Text>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Задолженности</Text>
+            {totalDebt > 0 && (
+              <TouchableOpacity
+                style={styles.payAllDebtBtn}
+                onPress={handlePayClientDebt}
+                activeOpacity={0.7}
+              >
+                <Wallet size={13} color={Colors.danger} />
+                <Text style={styles.payAllDebtBtnText}>Погасить ({totalDebt} ₽)</Text>
+              </TouchableOpacity>
+            )}
+          </View>
           <View style={styles.card}>
             {clientDebts.map(debt => (
               <View key={debt.id} style={styles.debtRow}>
@@ -1078,9 +1146,91 @@ export default function ClientCardScreen() {
                 >
                   <Text style={styles.payDebtBtnText}>Погасить</Text>
                 </TouchableOpacity>
+                {isAdmin && (
+                  <TouchableOpacity
+                    style={styles.deleteDebtBtn}
+                    onPress={() => handleDeleteDebt(debt.id)}
+                    activeOpacity={0.7}
+                  >
+                    <Trash2 size={13} color={Colors.danger} />
+                  </TouchableOpacity>
+                )}
               </View>
             ))}
+            {clientDebtInfo && clientDebtInfo.totalAmount > 0 && (
+              <View style={styles.debtRow}>
+                <View style={styles.debtInfo}>
+                  <Text style={styles.debtDesc}>Начисленный долг (ежедневный)</Text>
+                  <Text style={styles.debtDate}>{formatDate(clientDebtInfo.lastUpdate)}</Text>
+                </View>
+                <Text style={styles.debtAmount}>{clientDebtInfo.totalAmount} ₽</Text>
+              </View>
+            )}
           </View>
+        </>
+      )}
+
+      {isAdmin && !isDeleted && (
+        <>
+          {!showAddDebt ? (
+            <TouchableOpacity
+              style={styles.addDebtBtn}
+              onPress={() => setShowAddDebt(true)}
+              activeOpacity={0.7}
+            >
+              <Plus size={16} color={Colors.danger} />
+              <Text style={styles.addDebtBtnText}>Добавить долг</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.addDebtCard}>
+              <Text style={styles.addDebtTitle}>Добавить долг вручную</Text>
+              <Text style={styles.addDebtLabel}>Сумма (₽)</Text>
+              <TextInput
+                style={styles.addDebtInput}
+                value={newDebtAmount}
+                onChangeText={(t) => setNewDebtAmount(t.replace(/[^0-9.]/g, ''))}
+                keyboardType="numeric"
+                placeholder="0"
+                placeholderTextColor={Colors.textMuted}
+                autoFocus
+              />
+              <Text style={styles.addDebtLabel}>Дата возникновения (ГГГГ-ММ-ДД)</Text>
+              <TextInput
+                style={styles.addDebtInput}
+                value={newDebtDate}
+                onChangeText={setNewDebtDate}
+                placeholder="2026-03-19"
+                placeholderTextColor={Colors.textMuted}
+              />
+              <Text style={styles.addDebtLabel}>Комментарий</Text>
+              <TextInput
+                style={[styles.addDebtInput, styles.addDebtInputMultiline]}
+                value={newDebtComment}
+                onChangeText={setNewDebtComment}
+                placeholder="Причина долга (необязательно)"
+                placeholderTextColor={Colors.textMuted}
+                multiline
+                numberOfLines={2}
+              />
+              <View style={styles.addDebtActions}>
+                <TouchableOpacity
+                  style={styles.addDebtConfirmBtn}
+                  onPress={handleAddManualDebt}
+                  activeOpacity={0.7}
+                >
+                  <Check size={16} color={Colors.white} />
+                  <Text style={styles.addDebtConfirmText}>Добавить долг{newDebtAmount ? ` ${newDebtAmount} ₽` : ''}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.addDebtCancelBtn}
+                  onPress={() => { setShowAddDebt(false); setNewDebtAmount(''); setNewDebtComment(''); }}
+                  activeOpacity={0.7}
+                >
+                  <X size={16} color={Colors.textSecondary} />
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
         </>
       )}
 
@@ -2160,6 +2310,114 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 8,
+    backgroundColor: Colors.inputBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  payAllDebtBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    backgroundColor: Colors.dangerLight,
+  },
+  payAllDebtBtnText: {
+    fontSize: 12,
+    fontWeight: '600' as const,
+    color: Colors.danger,
+  },
+  deleteDebtBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    backgroundColor: Colors.dangerLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addDebtBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: Colors.dangerLight,
+    borderWidth: 1,
+    borderColor: Colors.danger + '25',
+    marginBottom: 20,
+  },
+  addDebtBtnText: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+    color: Colors.danger,
+  },
+  addDebtCard: {
+    backgroundColor: Colors.card,
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: Colors.danger + '30',
+    marginBottom: 20,
+    gap: 8,
+  },
+  addDebtTitle: {
+    fontSize: 15,
+    fontWeight: '700' as const,
+    color: Colors.text,
+    marginBottom: 4,
+  },
+  addDebtLabel: {
+    fontSize: 11,
+    fontWeight: '600' as const,
+    color: Colors.textSecondary,
+    textTransform: 'uppercase' as const,
+    letterSpacing: 0.5,
+    marginTop: 4,
+  },
+  addDebtInput: {
+    backgroundColor: Colors.inputBg,
+    borderRadius: 10,
+    height: 42,
+    paddingHorizontal: 14,
+    fontSize: 15,
+    color: Colors.text,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  addDebtInputMultiline: {
+    height: 60,
+    paddingTop: 10,
+    textAlignVertical: 'top' as const,
+  },
+  addDebtActions: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+    marginTop: 6,
+  },
+  addDebtConfirmBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 42,
+    borderRadius: 10,
+    backgroundColor: Colors.danger,
+    gap: 6,
+  },
+  addDebtConfirmText: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+    color: Colors.white,
+  },
+  addDebtCancelBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 10,
     backgroundColor: Colors.inputBg,
     alignItems: 'center',
     justifyContent: 'center',

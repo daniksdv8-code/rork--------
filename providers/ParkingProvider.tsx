@@ -1567,20 +1567,46 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
   const payClientDebt = useCallback((clientId: string, amount: number, method: PaymentMethod) => {
     const now = new Date().toISOString();
+
+    const clientOldDebts = debts.filter(d => d.clientId === clientId && d.remainingAmount > 0)
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
     const cd = clientDebts.find(c => c.clientId === clientId);
-    if (!cd || cd.totalAmount <= 0) return;
+    const oldDebtsTotal = clientOldDebts.reduce((s, d) => s + d.remainingAmount, 0);
+    const clientDebtTotal = cd ? cd.totalAmount : 0;
+    const grandTotal = roundMoney(oldDebtsTotal + clientDebtTotal);
 
-    const actualAmount = roundMoney(Math.min(amount, cd.totalAmount));
-    const newTotal = roundMoney(cd.totalAmount - actualAmount);
+    if (grandTotal <= 0) return;
 
-    setClientDebts(prev => prev.map(c =>
-      c.clientId === clientId ? {
-        ...c,
-        totalAmount: newTotal,
-        frozenAmount: roundMoney(Math.max(0, c.frozenAmount - actualAmount)),
-        lastUpdate: now,
-      } : c
-    ));
+    const actualAmount = roundMoney(Math.min(amount, grandTotal));
+    let remaining = actualAmount;
+
+    const updatedDebtIds: string[] = [];
+    if (clientOldDebts.length > 0 && remaining > 0) {
+      setDebts(prev => prev.map(d => {
+        if (d.clientId !== clientId || d.remainingAmount <= 0 || remaining <= 0) return d;
+        const idx = clientOldDebts.findIndex(od => od.id === d.id);
+        if (idx === -1) return d;
+        const payForThis = roundMoney(Math.min(remaining, d.remainingAmount));
+        remaining = roundMoney(remaining - payForThis);
+        updatedDebtIds.push(d.id);
+        return { ...d, remainingAmount: roundMoney(d.remainingAmount - payForThis), updatedAt: now };
+      }));
+    }
+
+    if (remaining > 0 && cd && cd.totalAmount > 0) {
+      const payForCd = roundMoney(Math.min(remaining, cd.totalAmount));
+      remaining = roundMoney(remaining - payForCd);
+      setClientDebts(prev => prev.map(c =>
+        c.clientId === clientId ? {
+          ...c,
+          totalAmount: roundMoney(Math.max(0, c.totalAmount - payForCd)),
+          frozenAmount: roundMoney(Math.max(0, c.frozenAmount - payForCd)),
+          lastUpdate: now,
+        } : c
+      ));
+    }
+
+    const newRemainingTotal = roundMoney(grandTotal - actualAmount);
 
     const newPayment: Payment = {
       id: generateId(),
@@ -1592,7 +1618,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       serviceType: 'onetime',
       operatorId: currentUser?.id ?? 'unknown',
       operatorName: currentUser?.name ?? 'Неизвестно',
-      description: `Погашение долга клиента: ${actualAmount} ₽${newTotal > 0 ? ` (остаток: ${newTotal} ₽)` : ' (полностью)'}`,
+      description: `Погашение долга клиента: ${actualAmount} ₽${newRemainingTotal > 0 ? ` (остаток: ${newRemainingTotal} ₽)` : ' (полностью)'}`,
       shiftId: shifts.find(s => s.status === 'open')?.id ?? null,
       updatedAt: now,
     };
@@ -1605,7 +1631,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       amount: actualAmount,
       method,
       date: now,
-      description: `Погашение долга клиента: ${actualAmount} ₽${newTotal > 0 ? ` (остаток: ${newTotal} ₽)` : ' (полностью)'}`,
+      description: `Погашение долга клиента: ${actualAmount} ₽${newRemainingTotal > 0 ? ` (остаток: ${newRemainingTotal} ₽)` : ' (полностью)'}`,
     });
 
     const cdActiveShift = shifts.find(s => s.status === 'open');
@@ -1618,17 +1644,17 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       type: 'debt_payment_income',
       amount: actualAmount,
       category: 'Погашение долга клиента',
-      description: `Погашение долга клиента: ${actualAmount} ₽${newTotal > 0 ? ` (остаток: ${newTotal} ₽)` : ' (полностью)'}`,
+      description: `Погашение долга клиента: ${actualAmount} ₽${newRemainingTotal > 0 ? ` (остаток: ${newRemainingTotal} ₽)` : ' (полностью)'}`,
       method,
       shiftId: cdActiveShift?.id ?? null,
       balanceBefore: cdBalBefore,
       balanceAfter: method === 'cash' ? roundMoney(cdBalBefore + actualAmount) : cdBalBefore,
     });
 
-    logAction('debt_payment', 'Погашение долга клиента', `${actualAmount} ₽ (${method === 'cash' ? 'нал' : 'безнал'}), остаток: ${newTotal > 0 ? newTotal + ' ₽' : 'полностью'}`, clientId, 'client_debt');
+    logAction('debt_payment', 'Погашение долга клиента', `${actualAmount} ₽ (${method === 'cash' ? 'нал' : 'безнал'}), остаток: ${newRemainingTotal > 0 ? newRemainingTotal + ' ₽' : 'полностью'}`, clientId, 'client_debt');
     schedulePush();
-    console.log(`[PayClientDebt] Paid ${actualAmount} for client ${clientId}, remaining: ${newTotal}`);
-  }, [clientDebts, currentUser, shifts, addTransaction, updateShiftExpected, logAction, schedulePush, addCashOperation, getShiftCashBalance]);
+    console.log(`[PayClientDebt] FIFO paid ${actualAmount} for client ${clientId}, old debts touched: ${updatedDebtIds.length}, remaining: ${newRemainingTotal}`);
+  }, [debts, clientDebts, currentUser, shifts, addTransaction, updateShiftExpected, logAction, schedulePush, addCashOperation, getShiftCashBalance]);
 
   const withdrawCash = useCallback((amount: number, notes: string): CashWithdrawal => {
     const activeShift = shifts.find(s => s.status === 'open');
@@ -1693,6 +1719,65 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     console.log(`[Withdrawal] ${amount} ₽ withdrawn by ${currentUser?.name}, balance: ${balanceBefore} → ${balanceAfter}`);
     return withdrawal;
   }, [shifts, currentUser, schedulePush, updateShiftExpected, addTransaction, addCashOperation, getShiftCashBalance, logAction]);
+
+  const addManualDebt = useCallback((clientId: string, amount: number, date: string, comment: string) => {
+    if (amount <= 0) return;
+    const now = new Date().toISOString();
+    const debtDate = date || now;
+
+    const newDebt: Debt = {
+      id: generateId(),
+      clientId,
+      carId: '',
+      totalAmount: roundMoney(amount),
+      remainingAmount: roundMoney(amount),
+      createdAt: debtDate,
+      updatedAt: now,
+      description: comment || `Ручное добавление долга: ${amount} ₽`,
+      status: 'active',
+    };
+    setDebts(prev => [...prev, newDebt]);
+
+    addTransaction({
+      clientId,
+      carId: '',
+      type: 'debt',
+      amount: roundMoney(amount),
+      method: null,
+      date: now,
+      description: `Ручное добавление долга: ${amount} ₽${comment ? ` — ${comment}` : ''}`,
+    });
+
+    const client = clients.find(c => c.id === clientId);
+    logAction('manual_debt_add', '[ADMIN] Ручное добавление долга', `Клиент: ${client?.name ?? clientId}, сумма: ${amount} ₽, дата: ${debtDate.split('T')[0]}${comment ? `, комментарий: ${comment}` : ''}`, newDebt.id, 'debt');
+    schedulePush();
+    console.log(`[ManualDebt] Added ${amount} ₽ debt for client ${clientId}`);
+  }, [clients, addTransaction, logAction, schedulePush]);
+
+  const deleteManualDebt = useCallback((debtId: string) => {
+    const debt = debts.find(d => d.id === debtId);
+    if (!debt) return;
+    const now = new Date().toISOString();
+
+    setDebts(prev => prev.map(d =>
+      d.id === debtId ? { ...d, remainingAmount: 0, status: 'paid' as const, updatedAt: now } : d
+    ));
+
+    addTransaction({
+      clientId: debt.clientId,
+      carId: debt.carId,
+      type: 'debt_payment',
+      amount: debt.remainingAmount,
+      method: null,
+      date: now,
+      description: `Удаление долга администратором: ${debt.remainingAmount} ₽ — ${debt.description}`,
+    });
+
+    const client = clients.find(c => c.id === debt.clientId);
+    logAction('manual_debt_delete', '[ADMIN] Удаление долга', `Клиент: ${client?.name ?? debt.clientId}, сумма: ${debt.remainingAmount} ₽, описание: ${debt.description}`, debtId, 'debt');
+    schedulePush();
+    console.log(`[ManualDebt] Deleted debt ${debtId}, amount: ${debt.remainingAmount}`);
+  }, [debts, clients, addTransaction, logAction, schedulePush]);
 
   const activeDebts = useMemo(() => debts.filter(d => d.remainingAmount > 0), [debts]);
 
@@ -2915,6 +3000,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     getCurrentMonthViolations,
     addViolation,
     deleteViolation,
+    addManualDebt,
+    deleteManualDebt,
   }), [
     clients, cars, activeClients, activeCars, isClientDeleted,
     sessions, subscriptions, payments, debts, transactions, tariffs,
@@ -2936,5 +3023,6 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     dailyDebtAccruals, clientDebts, payClientDebt, getClientDebtInfo, runDebtAccrual,
     cashOperations, getShiftCashBalance, addCashOperation,
     teamViolations, getCurrentMonthViolations, addViolation, deleteViolation,
+    addManualDebt, deleteManualDebt,
   ]);
 });

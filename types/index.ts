@@ -293,7 +293,9 @@ export type ActionType =
   | 'debt_accrual'
   | 'debt_freeze'
   | 'violation_add'
-  | 'violation_delete';
+  | 'violation_delete'
+  | 'manual_debt_add'
+  | 'manual_debt_delete';
 
 export interface ActionLog {
   id: string;
