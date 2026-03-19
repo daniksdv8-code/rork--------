@@ -171,7 +171,12 @@ export default function SettingsScreen() {
       setShowRestoreModal(false);
 
       if (restoreResult.success) {
-        Alert.alert('Готово', 'Данные успешно восстановлены из резервной копии');
+        const msgs = ['Данные успешно восстановлены из резервной копии.'];
+        msgs.push('Авто-бэкап предыдущих данных сохранён на случай отката.');
+        if (restoreResult.error) {
+          msgs.push(`\nПредупреждение: ${restoreResult.error}`);
+        }
+        Alert.alert('Готово', msgs.join('\n'));
       } else {
         Alert.alert('Ошибка', restoreResult.error ?? 'Не удалось восстановить данные');
       }
@@ -693,7 +698,10 @@ export default function SettingsScreen() {
             </View>
             <Text style={styles.modalTitle}>Восстановление из бэкапа</Text>
             <Text style={styles.modalDesc}>
-              Все текущие данные будут заменены данными из резервной копии. Это действие необратимо.
+              Все текущие данные будут заменены данными из резервной копии.
+            </Text>
+            <Text style={[styles.modalDesc, { color: Colors.success }]}>
+              Перед загрузкой автоматически создаётся бэкап текущих данных — при необходимости можно откатить.
             </Text>
             <Text style={styles.modalDesc}>
               Убедитесь, что вы выбираете правильный файл бэкапа.

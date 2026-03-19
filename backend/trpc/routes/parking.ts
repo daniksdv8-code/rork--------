@@ -109,6 +109,13 @@ function initDefaultAdmin() {
     deletedClientIds: [],
     scheduledShifts: [],
     actionLogs: [],
+    adminExpenses: [],
+    adminCashOperations: [],
+    expenseCategories: [],
+    dailyDebtAccruals: [],
+    clientDebts: [],
+    cashOperations: [],
+    teamViolations: [],
   };
   version = 1;
   restoreEpoch = 0;
@@ -454,6 +461,13 @@ const dataSchema = z.object({
   deletedClientIds: z.array(z.string()).optional(),
   scheduledShifts: z.array(z.any()).optional(),
   actionLogs: z.array(z.any()).optional(),
+  adminExpenses: z.array(z.any()).optional(),
+  adminCashOperations: z.array(z.any()).optional(),
+  expenseCategories: z.array(z.any()).optional(),
+  dailyDebtAccruals: z.array(z.any()).optional(),
+  clientDebts: z.array(z.any()).optional(),
+  cashOperations: z.array(z.any()).optional(),
+  teamViolations: z.array(z.any()).optional(),
 });
 
 export const parkingRouter = createTRPCRouter({
@@ -744,6 +758,13 @@ export const parkingRouter = createTRPCRouter({
       deletedClientIds: input.deletedClientIds ?? [],
       scheduledShifts: input.scheduledShifts ?? [],
       actionLogs: (input.actionLogs ?? []).slice(0, MAX_ACTION_LOGS),
+      adminExpenses: (input as any).adminExpenses ?? [],
+      adminCashOperations: (input as any).adminCashOperations ?? [],
+      expenseCategories: (input as any).expenseCategories ?? [],
+      dailyDebtAccruals: (input as any).dailyDebtAccruals ?? [],
+      clientDebts: (input as any).clientDebts ?? [],
+      cashOperations: (input as any).cashOperations ?? [],
+      teamViolations: (input as any).teamViolations ?? [],
     };
     version++;
     restoreEpoch++;
@@ -883,6 +904,30 @@ export const parkingRouter = createTRPCRouter({
         });
       }
 
+      const adminExpensesMerged = existingData
+        ? unionById((existingData as any).adminExpenses ?? [], (input as any).adminExpenses ?? [])
+        : ((input as any).adminExpenses ?? []);
+      const adminCashOpsMerged = existingData
+        ? unionById((existingData as any).adminCashOperations ?? [], (input as any).adminCashOperations ?? [])
+        : ((input as any).adminCashOperations ?? []);
+      const expenseCatsMerged = existingData
+        ? mergeArraysById((existingData as any).expenseCategories ?? [], (input as any).expenseCategories ?? [])
+        : ((input as any).expenseCategories ?? []);
+      const dailyDebtAccrualsMerged = existingData
+        ? unionById((existingData as any).dailyDebtAccruals ?? [], (input as any).dailyDebtAccruals ?? [])
+        : ((input as any).dailyDebtAccruals ?? []);
+      const clientDebtsMerged = existingData
+        ? mergeArraysById((existingData as any).clientDebts ?? [], (input as any).clientDebts ?? []).filter(
+            (cd: any) => !deletedSet.has(cd.clientId)
+          )
+        : ((input as any).clientDebts ?? []).filter((cd: any) => !deletedSet.has(cd.clientId));
+      const cashOpsMerged = existingData
+        ? unionById((existingData as any).cashOperations ?? [], (input as any).cashOperations ?? [])
+        : ((input as any).cashOperations ?? []);
+      const teamViolationsMerged = existingData
+        ? mergeArraysById((existingData as any).teamViolations ?? [], (input as any).teamViolations ?? [])
+        : ((input as any).teamViolations ?? []);
+
       store = {
         clients,
         cars,
@@ -899,6 +944,13 @@ export const parkingRouter = createTRPCRouter({
         deletedClientIds,
         scheduledShifts,
         actionLogs,
+        adminExpenses: adminExpensesMerged,
+        adminCashOperations: adminCashOpsMerged,
+        expenseCategories: expenseCatsMerged,
+        dailyDebtAccruals: dailyDebtAccrualsMerged,
+        clientDebts: clientDebtsMerged,
+        cashOperations: cashOpsMerged,
+        teamViolations: teamViolationsMerged,
       };
       version++;
       saveToDisk();

@@ -2575,43 +2575,55 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     return JSON.stringify(backupData);
   }, [currentUser, logAction]);
 
-  const restoreBackup = useCallback(async (jsonString: string): Promise<{ success: boolean; error?: string }> => {
+  const getPreRestoreBackup = useCallback((): string => {
+    const backupData = {
+      version: 1,
+      createdAt: new Date().toISOString(),
+      createdBy: currentUser?.name ?? 'system',
+      isPreRestore: true,
+      data: { ...latestDataRef.current },
+    };
+    return JSON.stringify(backupData);
+  }, [currentUser]);
+
+  const restoreBackup = useCallback(async (jsonString: string): Promise<{ success: boolean; error?: string; preRestoreBackup?: string }> => {
     try {
-      const parsed = JSON.parse(jsonString);
+      let parsed: any;
+      try {
+        parsed = JSON.parse(jsonString);
+      } catch {
+        return { success: false, error: 'Файл не является валидным JSON' };
+      }
+
       if (!parsed.data || !parsed.version) {
-        return { success: false, error: 'Неверный формат файла резервной копии' };
+        return { success: false, error: 'Неверный формат файла резервной копии (отсутствует data или version)' };
       }
       const d = parsed.data;
-      if (!Array.isArray(d.clients) || !Array.isArray(d.cars) || !Array.isArray(d.users)) {
-        return { success: false, error: 'Файл повреждён или не содержит необходимых данных' };
+
+      if (!Array.isArray(d.clients)) {
+        return { success: false, error: 'Файл повреждён: отсутствует массив clients' };
+      }
+      if (!Array.isArray(d.cars)) {
+        return { success: false, error: 'Файл повреждён: отсутствует массив cars' };
+      }
+      if (!d.tariffs || typeof d.tariffs !== 'object') {
+        return { success: false, error: 'Файл повреждён: отсутствуют тарифы' };
+      }
+
+      const preRestoreBackupJson = getPreRestoreBackup();
+      console.log('[Restore] Pre-restore backup created');
+
+      try {
+        await AsyncStorage.setItem(STORAGE_KEY + '_pre_restore', preRestoreBackupJson);
+        console.log('[Restore] Pre-restore backup saved to AsyncStorage');
+      } catch (e) {
+        console.log('[Restore] Failed to save pre-restore backup:', e);
       }
 
       if (pushTimerRef.current) { clearTimeout(pushTimerRef.current); pushTimerRef.current = null; }
       if (pushRetryTimerRef.current) { clearTimeout(pushRetryTimerRef.current); pushRetryTimerRef.current = null; }
       localDirtyRef.current = false;
-
-      setClients(d.clients ?? []);
-      setCars(d.cars ?? []);
-      setSessions(d.sessions ?? []);
-      setSubscriptions(d.subscriptions ?? []);
-      setPayments(d.payments ?? []);
-      setDebts(d.debts ?? []);
-      setTransactions(d.transactions ?? []);
-      if (d.tariffs) setTariffs(d.tariffs);
-      setShifts(d.shifts ?? []);
-      setExpenses(d.expenses ?? []);
-      setWithdrawals(d.withdrawals ?? []);
-      if (d.users && d.users.length > 0) setUsers(d.users.filter((u: any) => !u.deleted));
-      setDeletedClientIds(d.deletedClientIds ?? []);
-      setScheduledShifts(d.scheduledShifts ?? []);
-      setActionLogs(d.actionLogs ?? []);
-      setAdminExpenses(d.adminExpenses ?? []);
-      setAdminCashOperations(d.adminCashOperations ?? []);
-      setExpenseCategories(d.expenseCategories ?? []);
-      setDailyDebtAccruals(d.dailyDebtAccruals ?? []);
-      setClientDebts(d.clientDebts ?? []);
-      setCashOperations(d.cashOperations ?? []);
-      setTeamViolations(d.teamViolations ?? []);
+      pushingRef.current = false;
 
       const restorePayload = {
         clients: d.clients ?? [],
@@ -2638,19 +2650,14 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         teamViolations: d.teamViolations ?? [],
       };
 
-      try {
-        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(restorePayload));
-      } catch (e) {
-        console.log('[Restore] AsyncStorage save failed:', e);
-      }
-
+      let serverResetSuccess = false;
       try {
         const result = await vanillaTrpc.parking.resetData.mutate(restorePayload as any) as any;
         lastSyncedVersionRef.current = result.version;
         restoreEpochRef.current = result.restoreEpoch;
         localDirtyRef.current = false;
+        serverResetSuccess = true;
         console.log(`[Restore] Server reset with backup data, version: ${result.version}, epoch: ${result.restoreEpoch}`);
-        void utils.parking.getData.invalidate();
       } catch (e) {
         console.log('[Restore] Server reset failed, trying pushData as fallback:', e);
         try {
@@ -2658,23 +2665,74 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
           lastSyncedVersionRef.current = fallbackResult.version;
           restoreEpochRef.current = fallbackResult.restoreEpoch ?? restoreEpochRef.current;
           localDirtyRef.current = false;
+          serverResetSuccess = true;
           console.log(`[Restore] Fallback push done, version: ${fallbackResult.version}`);
-          void utils.parking.getData.invalidate();
         } catch (e2) {
-          console.log('[Restore] Fallback push also failed, scheduling retry:', e2);
-          localDirtyRef.current = true;
-          schedulePush();
+          console.log('[Restore] Fallback push also failed:', e2);
         }
       }
 
-      logAction('backup_restore', 'Восстановление из резервной копии', `Дата бэкапа: ${parsed.createdAt ?? '—'}, автор: ${parsed.createdBy ?? '—'}`);
-      console.log('[Restore] Backup restored successfully');
-      return { success: true };
+      setClients(restorePayload.clients);
+      setCars(restorePayload.cars);
+      setSessions(restorePayload.sessions);
+      setSubscriptions(restorePayload.subscriptions);
+      setPayments(restorePayload.payments);
+      setDebts(restorePayload.debts);
+      setTransactions(restorePayload.transactions);
+      setTariffs(restorePayload.tariffs);
+      setShifts(restorePayload.shifts);
+      setExpenses(restorePayload.expenses);
+      setWithdrawals(restorePayload.withdrawals);
+      if (restorePayload.users.length > 0) setUsers(restorePayload.users.filter((u: any) => !u.deleted));
+      setDeletedClientIds(restorePayload.deletedClientIds);
+      setScheduledShifts(restorePayload.scheduledShifts);
+      setActionLogs(restorePayload.actionLogs);
+      setAdminExpenses(restorePayload.adminExpenses);
+      setAdminCashOperations(restorePayload.adminCashOperations);
+      setExpenseCategories(restorePayload.expenseCategories);
+      setDailyDebtAccruals(restorePayload.dailyDebtAccruals);
+      setClientDebts(restorePayload.clientDebts);
+      setCashOperations(restorePayload.cashOperations);
+      setTeamViolations(restorePayload.teamViolations);
+
+      try {
+        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(restorePayload));
+        console.log('[Restore] AsyncStorage updated with restored data');
+      } catch (e) {
+        console.log('[Restore] AsyncStorage save failed:', e);
+      }
+
+      void utils.parking.getData.invalidate();
+
+      const stats = {
+        clients: restorePayload.clients.length,
+        cars: restorePayload.cars.length,
+        sessions: restorePayload.sessions.length,
+        payments: restorePayload.payments.length,
+      };
+      logAction('backup_restore', 'Восстановление из резервной копии',
+        `Дата бэкапа: ${parsed.createdAt ?? '—'}, автор: ${parsed.createdBy ?? '—'}, ` +
+        `клиентов: ${stats.clients}, машин: ${stats.cars}, заездов: ${stats.sessions}, ` +
+        `оплат: ${stats.payments}, сервер: ${serverResetSuccess ? 'ОК' : 'ОШИБКА'}`);
+
+      console.log(`[Restore] Backup restored successfully. Stats: ${JSON.stringify(stats)}, serverOk: ${serverResetSuccess}`);
+
+      if (!serverResetSuccess) {
+        localDirtyRef.current = true;
+        schedulePush();
+        return {
+          success: true,
+          error: 'Данные восстановлены локально, но синхронизация с сервером не удалась. Будет повторная попытка.',
+          preRestoreBackup: preRestoreBackupJson,
+        };
+      }
+
+      return { success: true, preRestoreBackup: preRestoreBackupJson };
     } catch (e) {
       console.log('[Restore] Failed to parse backup:', e);
       return { success: false, error: 'Не удалось прочитать файл резервной копии' };
     }
-  }, [schedulePush, utils, logAction]);
+  }, [schedulePush, utils, logAction, getPreRestoreBackup]);
 
   const resetAllData = useCallback(async () => {
     const adminUsers = users.filter(u => u.role === 'admin');
