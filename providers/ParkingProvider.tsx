@@ -667,6 +667,65 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     return () => clearInterval(interval);
   }, [isLoaded, isServerSynced, runDebtAccrual]);
 
+  const getShiftCashBalance = useCallback((shift: CashShift): number => {
+    const openTime = new Date(shift.openedAt).getTime();
+    const closeTime = shift.closedAt ? new Date(shift.closedAt).getTime() : Date.now();
+    const cashIncome = transactions.filter(t =>
+      (t.type === 'payment' || t.type === 'debt_payment') &&
+      t.method === 'cash' && t.amount > 0 &&
+      new Date(t.date).getTime() >= openTime &&
+      new Date(t.date).getTime() <= closeTime
+    ).reduce((s, t) => s + t.amount, 0);
+    const cancelled = transactions.filter(t =>
+      t.type === 'cancel_payment' && t.method === 'cash' &&
+      new Date(t.date).getTime() >= openTime &&
+      new Date(t.date).getTime() <= closeTime
+    ).reduce((s, t) => s + t.amount, 0);
+    const refunded = transactions.filter(t =>
+      t.type === 'refund' && t.method === 'cash' &&
+      new Date(t.date).getTime() >= openTime &&
+      new Date(t.date).getTime() <= closeTime
+    ).reduce((s, t) => s + t.amount, 0);
+    const expenseTotal = expenses.filter(e => e.shiftId === shift.id).reduce((s, e) => s + e.amount, 0);
+    const withdrawalTotal = withdrawals.filter(w => w.shiftId === shift.id).reduce((s, w) => s + w.amount, 0);
+    return roundMoney(shift.carryOver + cashIncome - cancelled - refunded - expenseTotal - withdrawalTotal);
+  }, [transactions, expenses, withdrawals]);
+
+  const addCashOperation = useCallback((params: {
+    type: CashOperation['type'];
+    amount: number;
+    category: string;
+    description: string;
+    method: PaymentMethod;
+    shiftId: string | null;
+    balanceBefore: number;
+    balanceAfter: number;
+    relatedEntityId?: string;
+    relatedEntityType?: string;
+  }): CashOperation => {
+    const now = new Date().toISOString();
+    const op: CashOperation = {
+      id: generateId(),
+      userId: currentUser?.id ?? 'unknown',
+      userName: currentUser?.name ?? 'Неизвестно',
+      userRole: currentUser?.role ?? 'manager',
+      shiftId: params.shiftId,
+      type: params.type,
+      amount: params.amount,
+      category: params.category,
+      description: params.description,
+      method: params.method,
+      balanceBefore: params.balanceBefore,
+      balanceAfter: params.balanceAfter,
+      date: now,
+      relatedEntityId: params.relatedEntityId,
+      relatedEntityType: params.relatedEntityType,
+    };
+    setCashOperations(prev => [op, ...prev]);
+    console.log(`[CashOp] ${params.type}: ${params.amount} ₽, balance: ${params.balanceBefore} → ${params.balanceAfter}`);
+    return op;
+  }, [currentUser]);
+
   const checkIn = useCallback((carId: string, clientId: string, serviceType: ServiceType, plannedDepartureTime?: string, paymentAtEntry?: { method: PaymentMethod; amount: number; days?: number; paidUntilDate?: string }, debtAtEntry?: { amount: number; description?: string }, isSecondary?: boolean) => {
     const activeShift = shifts.find(s => s.status === 'open');
     const sessionNow = new Date().toISOString();
@@ -733,6 +792,18 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       if (paymentAtEntry.method === 'cash' && activeShift) {
         updateShiftExpected(activeShift.id, paymentAtEntry.amount);
       }
+
+      const entryBalanceBefore = activeShift ? getShiftCashBalance(activeShift) : 0;
+      addCashOperation({
+        type: 'income',
+        amount: paymentAtEntry.amount,
+        category: serviceType === 'monthly' ? 'Оплата месяца' : 'Оплата разовая',
+        description: payDesc,
+        method: paymentAtEntry.method,
+        shiftId: activeShift?.id ?? null,
+        balanceBefore: paymentAtEntry.method === 'cash' ? entryBalanceBefore : entryBalanceBefore,
+        balanceAfter: paymentAtEntry.method === 'cash' ? roundMoney(entryBalanceBefore + paymentAtEntry.amount) : entryBalanceBefore,
+      });
 
       if (serviceType === 'monthly') {
         const paidUntil = paymentAtEntry.paidUntilDate ?? ((() => {
@@ -801,7 +872,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     schedulePush();
     console.log(`[CheckIn] Session created for car ${carId}, status=${sessionStatus}, planned departure: ${plannedDepartureTime ?? 'not set'}`);
     return session;
-  }, [addTransaction, schedulePush, currentUser, shifts, cars, clients, logAction, updateShiftExpected, subscriptions, tariffs, updateClientDebt]);
+  }, [addTransaction, schedulePush, currentUser, shifts, cars, clients, logAction, updateShiftExpected, subscriptions, tariffs, updateClientDebt, addCashOperation, getShiftCashBalance]);
 
   const checkOut = useCallback((sessionId: string, paymentAtExit?: { method: PaymentMethod; amount: number }, releaseInDebt?: boolean): { debtId: string | null; amount: number; days: number; paid: number } => {
     const session = sessions.find(s => s.id === sessionId);
@@ -887,6 +958,19 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         if (paymentAtExit.method === 'cash' && activeShift) {
           updateShiftExpected(activeShift.id, paidAmount);
         }
+
+        const debtExitBalBefore = activeShift ? getShiftCashBalance(activeShift) : 0;
+        addCashOperation({
+          type: 'income',
+          amount: paidAmount,
+          category: 'Оплата долга при выезде',
+          description: payDesc,
+          method: paymentAtExit.method,
+          shiftId: activeShift?.id ?? null,
+          balanceBefore: debtExitBalBefore,
+          balanceAfter: paymentAtExit.method === 'cash' ? roundMoney(debtExitBalBefore + paidAmount) : debtExitBalBefore,
+        });
+
         updateClientDebt(session.clientId, -paidAmount);
       }
 
@@ -1145,7 +1229,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       console.log('[CheckOut] Monthly exit, subscription active');
       return { debtId: null, amount: 0, days: 0, paid: 0 };
     }
-  }, [sessions, tariffs, subscriptions, addTransaction, schedulePush, cars, logAction, currentUser, shifts, updateShiftExpected, dailyDebtAccruals, updateClientDebt]);
+  }, [sessions, tariffs, subscriptions, addTransaction, schedulePush, cars, logAction, currentUser, shifts, updateShiftExpected, dailyDebtAccruals, updateClientDebt, addCashOperation, getShiftCashBalance]);
 
   const earlyExitWithRefund = useCallback((sessionId: string, refundMethod: PaymentMethod): { refundAmount: number; daysUsed: number; dailyRate: number; paidAmount: number } => {
     const session = sessions.find(s => s.id === sessionId);
@@ -1417,11 +1501,24 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     if (method === 'cash' && activeShift) {
       updateShiftExpected(activeShift.id, amount);
     }
+
+    const pmBalBefore = activeShift ? getShiftCashBalance(activeShift) : 0;
+    addCashOperation({
+      type: 'income',
+      amount,
+      category: 'Оплата месяца',
+      description: `Оплата месяца: ${amount} ₽ (${method === 'cash' ? 'наличные' : 'безнал'})`,
+      method,
+      shiftId: activeShift?.id ?? null,
+      balanceBefore: pmBalBefore,
+      balanceAfter: method === 'cash' ? roundMoney(pmBalBefore + amount) : pmBalBefore,
+    });
+
     const pmCar = cars.find(c => c.id === carId);
     const pmClient = clients.find(c => c.id === clientId);
     logAction('payment', 'Оплата месяца', `${pmClient?.name ?? clientId}, ${pmCar?.plateNumber ?? carId}, ${amount} ₽ (${method === 'cash' ? 'нал' : 'безнал'})`, newPayment.id, 'payment');
     schedulePush();
-  }, [tariffs, currentUser, addTransaction, schedulePush, shifts, updateShiftExpected, cars, clients, logAction]);
+  }, [tariffs, currentUser, addTransaction, schedulePush, shifts, updateShiftExpected, cars, clients, logAction, addCashOperation, getShiftCashBalance]);
 
   const payDebt = useCallback((debtId: string, amount: number, method: PaymentMethod) => {
     const debt = debts.find(d => d.id === debtId);
@@ -1444,15 +1541,26 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       date: now,
       description: `Погашение долга: ${actualAmount} ₽${newRemaining > 0 ? ` (остаток: ${newRemaining} ₽)` : ' (полностью)'}`,
     });
-    if (method === 'cash') {
-      const activeShift = shifts.find(s => s.status === 'open');
-      if (activeShift) {
-        updateShiftExpected(activeShift.id, actualAmount);
-      }
+    const debtActiveShift = shifts.find(s => s.status === 'open');
+    if (method === 'cash' && debtActiveShift) {
+      updateShiftExpected(debtActiveShift.id, actualAmount);
     }
+
+    const debtBalBefore = debtActiveShift ? getShiftCashBalance(debtActiveShift) : 0;
+    addCashOperation({
+      type: 'debt_payment_income',
+      amount: actualAmount,
+      category: 'Погашение долга',
+      description: `Погашение долга: ${actualAmount} ₽${newRemaining > 0 ? ` (остаток: ${newRemaining} ₽)` : ' (полностью)'}`,
+      method,
+      shiftId: debtActiveShift?.id ?? null,
+      balanceBefore: debtBalBefore,
+      balanceAfter: method === 'cash' ? roundMoney(debtBalBefore + actualAmount) : debtBalBefore,
+    });
+
     logAction('debt_payment', 'Погашение долга', `${actualAmount} ₽ (${method === 'cash' ? 'нал' : 'безнал'}), остаток: ${newRemaining > 0 ? newRemaining + ' ₽' : 'полностью'}`, debtId, 'debt');
     schedulePush();
-  }, [debts, addTransaction, schedulePush, shifts, updateShiftExpected, logAction]);
+  }, [debts, addTransaction, schedulePush, shifts, updateShiftExpected, logAction, addCashOperation, getShiftCashBalance]);
 
   const payClientDebt = useCallback((clientId: string, amount: number, method: PaymentMethod) => {
     const now = new Date().toISOString();
@@ -1497,76 +1605,27 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       description: `Погашение долга клиента: ${actualAmount} ₽${newTotal > 0 ? ` (остаток: ${newTotal} ₽)` : ' (полностью)'}`,
     });
 
-    if (method === 'cash') {
-      const activeShift = shifts.find(s => s.status === 'open');
-      if (activeShift) {
-        updateShiftExpected(activeShift.id, actualAmount);
-      }
+    const cdActiveShift = shifts.find(s => s.status === 'open');
+    if (method === 'cash' && cdActiveShift) {
+      updateShiftExpected(cdActiveShift.id, actualAmount);
     }
+
+    const cdBalBefore = cdActiveShift ? getShiftCashBalance(cdActiveShift) : 0;
+    addCashOperation({
+      type: 'debt_payment_income',
+      amount: actualAmount,
+      category: 'Погашение долга клиента',
+      description: `Погашение долга клиента: ${actualAmount} ₽${newTotal > 0 ? ` (остаток: ${newTotal} ₽)` : ' (полностью)'}`,
+      method,
+      shiftId: cdActiveShift?.id ?? null,
+      balanceBefore: cdBalBefore,
+      balanceAfter: method === 'cash' ? roundMoney(cdBalBefore + actualAmount) : cdBalBefore,
+    });
 
     logAction('debt_payment', 'Погашение долга клиента', `${actualAmount} ₽ (${method === 'cash' ? 'нал' : 'безнал'}), остаток: ${newTotal > 0 ? newTotal + ' ₽' : 'полностью'}`, clientId, 'client_debt');
     schedulePush();
     console.log(`[PayClientDebt] Paid ${actualAmount} for client ${clientId}, remaining: ${newTotal}`);
-  }, [clientDebts, currentUser, shifts, addTransaction, updateShiftExpected, logAction, schedulePush]);
-
-  const getShiftCashBalance = useCallback((shift: CashShift): number => {
-    const openTime = new Date(shift.openedAt).getTime();
-    const closeTime = shift.closedAt ? new Date(shift.closedAt).getTime() : Date.now();
-    const cashIncome = transactions.filter(t =>
-      (t.type === 'payment' || t.type === 'debt_payment') &&
-      t.method === 'cash' && t.amount > 0 &&
-      new Date(t.date).getTime() >= openTime &&
-      new Date(t.date).getTime() <= closeTime
-    ).reduce((s, t) => s + t.amount, 0);
-    const cancelled = transactions.filter(t =>
-      t.type === 'cancel_payment' && t.method === 'cash' &&
-      new Date(t.date).getTime() >= openTime &&
-      new Date(t.date).getTime() <= closeTime
-    ).reduce((s, t) => s + t.amount, 0);
-    const refunded = transactions.filter(t =>
-      t.type === 'refund' && t.method === 'cash' &&
-      new Date(t.date).getTime() >= openTime &&
-      new Date(t.date).getTime() <= closeTime
-    ).reduce((s, t) => s + t.amount, 0);
-    const expenseTotal = expenses.filter(e => e.shiftId === shift.id).reduce((s, e) => s + e.amount, 0);
-    const withdrawalTotal = withdrawals.filter(w => w.shiftId === shift.id).reduce((s, w) => s + w.amount, 0);
-    return roundMoney(shift.carryOver + cashIncome - cancelled - refunded - expenseTotal - withdrawalTotal);
-  }, [transactions, expenses, withdrawals]);
-
-  const addCashOperation = useCallback((params: {
-    type: CashOperation['type'];
-    amount: number;
-    category: string;
-    description: string;
-    method: PaymentMethod;
-    shiftId: string | null;
-    balanceBefore: number;
-    balanceAfter: number;
-    relatedEntityId?: string;
-    relatedEntityType?: string;
-  }): CashOperation => {
-    const now = new Date().toISOString();
-    const op: CashOperation = {
-      id: generateId(),
-      userId: currentUser?.id ?? 'unknown',
-      userName: currentUser?.name ?? 'Неизвестно',
-      userRole: currentUser?.role ?? 'manager',
-      shiftId: params.shiftId,
-      type: params.type,
-      amount: params.amount,
-      category: params.category,
-      description: params.description,
-      method: params.method,
-      balanceBefore: params.balanceBefore,
-      balanceAfter: params.balanceAfter,
-      date: now,
-      relatedEntityId: params.relatedEntityId,
-      relatedEntityType: params.relatedEntityType,
-    };
-    setCashOperations(prev => [op, ...prev]);
-    console.log(`[CashOp] ${params.type}: ${params.amount} ₽, balance: ${params.balanceBefore} → ${params.balanceAfter}`);
-    return op;
-  }, [currentUser]);
+  }, [clientDebts, currentUser, shifts, addTransaction, updateShiftExpected, logAction, schedulePush, addCashOperation, getShiftCashBalance]);
 
   const withdrawCash = useCallback((amount: number, notes: string): CashWithdrawal => {
     const activeShift = shifts.find(s => s.status === 'open');
@@ -1792,76 +1851,87 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   }, [shifts, transactions, expenses, withdrawals, schedulePush, logAction]);
 
   const addExpense = useCallback((amount: number, category: string, description: string): { success: boolean; error?: string; expense?: Expense } => {
-    const isUserAdmin = currentUser?.role === 'admin';
-    let targetShift: CashShift | undefined;
+    try {
+      const isUserAdmin = currentUser?.role === 'admin';
+      let targetShift: CashShift | undefined;
 
-    if (isUserAdmin) {
-      targetShift = shifts.find(s => s.status === 'open' && s.operatorRole === 'admin')
-        ?? shifts.find(s => s.status === 'open');
-    } else {
-      targetShift = shifts.find(s => s.status === 'open' && s.operatorRole !== 'admin')
-        ?? shifts.find(s => s.status === 'open');
-      if (!targetShift) {
-        console.log('[Expense] Manager tried to add expense without open shift');
-        return { success: false, error: 'Нет открытой смены. Откройте смену для проведения расхода.' };
+      if (isUserAdmin) {
+        targetShift = shifts.find(s => s.status === 'open' && s.operatorRole === 'admin')
+          ?? shifts.find(s => s.status === 'open');
+        console.log(`[Expense] Admin mode, targetShift: ${targetShift?.id ?? 'none'}`);
+      } else {
+        targetShift = shifts.find(s => s.status === 'open' && s.operatorRole !== 'admin')
+          ?? shifts.find(s => s.status === 'open');
+        if (!targetShift) {
+          console.log('[Expense] Manager tried to add expense without open shift');
+          return { success: false, error: 'Нет открытой смены. Откройте смену для проведения расхода.' };
+        }
       }
+
+      const now = new Date().toISOString();
+      const balanceBefore = targetShift ? getShiftCashBalance(targetShift) : 0;
+
+      if (!isUserAdmin && targetShift && balanceBefore < amount) {
+        console.log(`[Expense] Insufficient funds: balance=${balanceBefore}, expense=${amount}`);
+        return { success: false, error: `Недостаточно средств в кассе. Баланс: ${balanceBefore} ₽, расход: ${amount} ₽` };
+      }
+
+      const balanceAfter = roundMoney(balanceBefore - amount);
+
+      const expense: Expense = {
+        id: generateId(),
+        amount,
+        category,
+        description,
+        operatorId: currentUser?.id ?? 'unknown',
+        operatorName: currentUser?.name ?? 'Неизвестно',
+        date: now,
+        shiftId: targetShift?.id ?? null,
+        method: 'cash',
+      };
+      setExpenses(prev => [expense, ...prev]);
+      console.log(`[Expense] Created expense record: ${expense.id}, shiftId=${expense.shiftId}`);
+
+      if (targetShift) {
+        const shiftId = targetShift.id;
+        setShifts(prev => prev.map(s =>
+          s.id === shiftId ? { ...s, expectedCash: s.expectedCash - amount, updatedAt: now } : s
+        ));
+        console.log(`[Expense] Updated shift ${shiftId} expectedCash: -${amount}`);
+      }
+
+      addTransaction({
+        clientId: '',
+        carId: '',
+        type: isUserAdmin ? 'admin_expense' : 'manager_expense',
+        amount,
+        method: 'cash',
+        date: now,
+        description: `Расход: ${amount} ₽ — ${category}: ${description}`,
+      });
+
+      addCashOperation({
+        type: 'expense',
+        amount,
+        category,
+        description,
+        method: 'cash',
+        shiftId: targetShift?.id ?? null,
+        balanceBefore,
+        balanceAfter,
+        relatedEntityId: expense.id,
+        relatedEntityType: 'expense',
+      });
+
+      const roleLabel = isUserAdmin ? '[ADMIN] ' : '';
+      logAction('expense_add', `${roleLabel}Добавлен расход`, `${amount} ₽ — ${category}: ${description} (баланс: ${balanceBefore} → ${balanceAfter} ₽)`, expense.id, 'expense');
+      schedulePush();
+      console.log(`[Expense] SUCCESS: expense ${expense.id}: ${amount} ₽ - ${description}, balance: ${balanceBefore} → ${balanceAfter}`);
+      return { success: true, expense };
+    } catch (err) {
+      console.log('[Expense] CRITICAL ERROR in addExpense:', err);
+      return { success: false, error: `Системная ошибка: ${err instanceof Error ? err.message : String(err)}` };
     }
-
-    const now = new Date().toISOString();
-    const balanceBefore = targetShift ? getShiftCashBalance(targetShift) : 0;
-
-    if (targetShift && balanceBefore < amount) {
-      console.log(`[Expense] Insufficient funds: balance=${balanceBefore}, expense=${amount}`);
-      return { success: false, error: `Недостаточно средств в кассе. Баланс: ${balanceBefore} ₽, расход: ${amount} ₽` };
-    }
-
-    const balanceAfter = roundMoney(balanceBefore - amount);
-
-    const expense: Expense = {
-      id: generateId(),
-      amount,
-      category,
-      description,
-      operatorId: currentUser?.id ?? 'unknown',
-      operatorName: currentUser?.name ?? 'Неизвестно',
-      date: now,
-      shiftId: targetShift?.id ?? null,
-    };
-    setExpenses(prev => [expense, ...prev]);
-
-    if (targetShift) {
-      setShifts(prev => prev.map(s =>
-        s.id === targetShift!.id ? { ...s, expectedCash: s.expectedCash - amount, updatedAt: now } : s
-      ));
-    }
-
-    addTransaction({
-      clientId: '',
-      carId: '',
-      type: 'manager_expense',
-      amount,
-      method: 'cash',
-      date: now,
-      description: `Расход: ${amount} ₽ — ${category}: ${description}`,
-    });
-
-    addCashOperation({
-      type: 'expense',
-      amount,
-      category,
-      description,
-      method: 'cash',
-      shiftId: targetShift?.id ?? null,
-      balanceBefore,
-      balanceAfter,
-      relatedEntityId: expense.id,
-      relatedEntityType: 'expense',
-    });
-
-    logAction('expense_add', 'Добавлен расход', `${amount} ₽ — ${category}: ${description} (баланс: ${balanceBefore} → ${balanceAfter} ₽)`, expense.id, 'expense');
-    schedulePush();
-    console.log(`[Expense] Added expense ${expense.id}: ${amount} ₽ - ${description}, balance: ${balanceBefore} → ${balanceAfter}`);
-    return { success: true, expense };
   }, [shifts, currentUser, schedulePush, logAction, addTransaction, addCashOperation, getShiftCashBalance]);
 
   const addAdminExpense = useCallback((amount: number, category: string, description: string, method: PaymentMethod): AdminExpense => {

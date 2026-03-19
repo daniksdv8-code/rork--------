@@ -11,7 +11,7 @@ import {
 import Colors from '@/constants/colors';
 import { useParking } from '@/providers/ParkingProvider';
 import { useAuth } from '@/providers/AuthProvider';
-import { formatDateTime } from '@/utils/date';
+import { formatDateTime, isToday } from '@/utils/date';
 import { CashShift } from '@/types';
 
 type CashTab = 'current' | 'report' | 'history';
@@ -20,7 +20,7 @@ type ReportPeriod = 'day' | 'week' | 'month' | 'all';
 export default function CashRegisterScreen() {
   const { currentUser, isAdmin, logout } = useAuth();
   const {
-    shifts, expenses, transactions, withdrawals,
+    shifts, expenses, transactions, withdrawals, cashOperations,
     openShift, closeShift, getActiveShift, getActiveManagerShift, getActiveAdminShift, addExpense, withdrawCash,
     getShiftCashBalance,
   } = useParking();
@@ -105,26 +105,83 @@ export default function CashRegisterScreen() {
     return getShiftCashBalance(activeShift);
   }, [activeShift, getShiftCashBalance]);
 
+  const recentExpenses = useMemo(() => {
+    return expenses
+      .filter(e => isToday(e.date))
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+      .slice(0, 20);
+  }, [expenses]);
+
+  const reportExpensesByCategory = useMemo(() => {
+    const now = new Date();
+    let cutoff: Date | null = null;
+    if (reportPeriod === 'day') {
+      cutoff = new Date(now);
+      cutoff.setHours(0, 0, 0, 0);
+    } else if (reportPeriod === 'week') {
+      cutoff = new Date(now);
+      cutoff.setDate(cutoff.getDate() - 7);
+    } else if (reportPeriod === 'month') {
+      cutoff = new Date(now);
+      cutoff.setMonth(cutoff.getMonth() - 1);
+    }
+    const filtered = expenses.filter(e => !cutoff || new Date(e.date) >= cutoff);
+    const byCategory: Record<string, { total: number; count: number }> = {};
+    for (const e of filtered) {
+      const cat = e.category || 'Прочее';
+      if (!byCategory[cat]) byCategory[cat] = { total: 0, count: 0 };
+      byCategory[cat].total += e.amount;
+      byCategory[cat].count++;
+    }
+    return Object.entries(byCategory).sort((a, b) => b[1].total - a[1].total);
+  }, [expenses, reportPeriod]);
+
+  const reportCashOps = useMemo(() => {
+    const now = new Date();
+    let cutoff: Date | null = null;
+    if (reportPeriod === 'day') {
+      cutoff = new Date(now);
+      cutoff.setHours(0, 0, 0, 0);
+    } else if (reportPeriod === 'week') {
+      cutoff = new Date(now);
+      cutoff.setDate(cutoff.getDate() - 7);
+    } else if (reportPeriod === 'month') {
+      cutoff = new Date(now);
+      cutoff.setMonth(cutoff.getMonth() - 1);
+    }
+    return cashOperations
+      .filter(op => !cutoff || new Date(op.date) >= cutoff)
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+      .slice(0, 50);
+  }, [cashOperations, reportPeriod]);
+
   const handleAddExpense = useCallback(() => {
-    const amount = Number(expenseAmount);
-    if (!amount || amount <= 0) {
-      Alert.alert('Ошибка', 'Укажите сумму расхода');
-      return;
+    try {
+      const amount = Number(expenseAmount);
+      if (!amount || amount <= 0) {
+        Alert.alert('Ошибка', 'Укажите сумму расхода');
+        return;
+      }
+      if (!expenseDesc.trim()) {
+        Alert.alert('Ошибка', 'Укажите описание расхода');
+        return;
+      }
+      console.log(`[CashRegister] Adding expense: ${amount} ₽, category=${expenseCategory}, desc=${expenseDesc}`);
+      const result = addExpense(amount, expenseCategory.trim() || 'Прочее', expenseDesc.trim());
+      console.log(`[CashRegister] addExpense result:`, JSON.stringify(result));
+      if (!result.success) {
+        Alert.alert('Ошибка', result.error ?? 'Не удалось провести расход');
+        return;
+      }
+      setShowExpenseModal(false);
+      setExpenseAmount('');
+      setExpenseCategory('');
+      setExpenseDesc('');
+      Alert.alert('Готово', `Расход ${amount} ₽ успешно проведён`);
+    } catch (err) {
+      console.log('[CashRegister] handleAddExpense error:', err);
+      Alert.alert('Ошибка', `Не удалось добавить расход: ${err instanceof Error ? err.message : String(err)}`);
     }
-    if (!expenseDesc.trim()) {
-      Alert.alert('Ошибка', 'Укажите описание расхода');
-      return;
-    }
-    const result = addExpense(amount, expenseCategory.trim() || 'Прочее', expenseDesc.trim());
-    if (!result.success) {
-      Alert.alert('Ошибка', result.error ?? 'Не удалось провести расход');
-      return;
-    }
-    setShowExpenseModal(false);
-    setExpenseAmount('');
-    setExpenseCategory('');
-    setExpenseDesc('');
-    Alert.alert('Готово', `Расход ${amount} ₽ добавлен`);
   }, [expenseAmount, expenseCategory, expenseDesc, addExpense]);
 
   const handleWithdraw = useCallback(() => {
@@ -378,6 +435,24 @@ export default function CashRegisterScreen() {
                     </TouchableOpacity>
                   </View>
                 )}
+
+                {isAdmin && recentExpenses.length > 0 && (
+                  <View style={{ marginTop: 16 }}>
+                    <Text style={styles.subsectionTitle}>Расходы за сегодня (без смены)</Text>
+                    {recentExpenses.map(exp => (
+                      <View key={exp.id} style={styles.expenseRow}>
+                        <View style={styles.expenseIconWrap}>
+                          <MinusCircle size={16} color={Colors.danger} />
+                        </View>
+                        <View style={styles.expenseInfo}>
+                          <Text style={styles.expenseDesc}>{exp.description}</Text>
+                          <Text style={styles.expenseMeta}>{exp.category} • {formatDateTime(exp.date)}</Text>
+                        </View>
+                        <Text style={styles.expenseAmount}>-{exp.amount} ₽</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
               </View>
             ) : (
               <View>
@@ -604,6 +679,24 @@ export default function CashRegisterScreen() {
               </>
             )}
 
+            {reportExpensesByCategory.length > 0 && (
+              <>
+                <Text style={styles.subsectionTitle}>Расходы по категориям</Text>
+                {reportExpensesByCategory.map(([cat, info]) => (
+                  <View key={cat} style={styles.expenseRow}>
+                    <View style={styles.expenseIconWrap}>
+                      <MinusCircle size={16} color={Colors.danger} />
+                    </View>
+                    <View style={styles.expenseInfo}>
+                      <Text style={styles.expenseDesc}>{cat}</Text>
+                      <Text style={styles.expenseMeta}>Операций: {info.count}</Text>
+                    </View>
+                    <Text style={styles.expenseAmount}>-{info.total} ₽</Text>
+                  </View>
+                ))}
+              </>
+            )}
+
             {reportData.periodExpenses.length > 0 && (
               <>
                 <Text style={styles.subsectionTitle}>Расходы за период</Text>
@@ -621,6 +714,42 @@ export default function CashRegisterScreen() {
                     <Text style={styles.expenseAmount}>-{exp.amount} ₽</Text>
                   </View>
                 ))}
+              </>
+            )}
+
+            {reportCashOps.length > 0 && (
+              <>
+                <Text style={styles.subsectionTitle}>Кассовые операции за период</Text>
+                {reportCashOps.map(op => {
+                  const isExpenseOp = op.type === 'expense' || op.type === 'withdrawal';
+                  return (
+                    <View key={op.id} style={styles.expenseRow}>
+                      <View style={[styles.expenseIconWrap, {
+                        backgroundColor: isExpenseOp ? Colors.dangerLight : Colors.successLight,
+                      }]}>
+                        {isExpenseOp ? (
+                          <MinusCircle size={16} color={Colors.danger} />
+                        ) : (
+                          <DollarSign size={16} color={Colors.success} />
+                        )}
+                      </View>
+                      <View style={styles.expenseInfo}>
+                        <Text style={styles.expenseDesc}>{op.description}</Text>
+                        <Text style={styles.expenseMeta}>
+                          {op.userName} ({op.userRole === 'admin' ? 'админ' : 'менеджер'}) • {op.category} • {formatDateTime(op.date)}
+                        </Text>
+                        <Text style={styles.expenseMeta}>
+                          Баланс: {op.balanceBefore} → {op.balanceAfter} ₽
+                        </Text>
+                      </View>
+                      <Text style={[styles.expenseAmount, {
+                        color: isExpenseOp ? Colors.danger : Colors.success,
+                      }]}>
+                        {isExpenseOp ? '-' : '+'}{op.amount} ₽
+                      </Text>
+                    </View>
+                  );
+                })}
               </>
             )}
           </View>

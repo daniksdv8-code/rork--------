@@ -81,13 +81,23 @@ export default function ReportsScreen() {
     );
     const totalExpensesTx = expenseTx.reduce((s, t) => s + t.amount, 0);
 
+    const filteredExpenses = expenses.filter(e => !cutoff || new Date(e.date) >= cutoff);
+    const expByCategory: Record<string, { total: number; count: number }> = {};
+    for (const e of filteredExpenses) {
+      const cat = e.category || 'Прочее';
+      if (!expByCategory[cat]) expByCategory[cat] = { total: 0, count: 0 };
+      expByCategory[cat].total += e.amount;
+      expByCategory[cat].count++;
+    }
+    const expenseCategories = Object.entries(expByCategory).sort((a, b) => b[1].total - a[1].total);
+
     const cash = cashGross - cashCancelled - cashRefunded;
     const card = cardGross - cardCancelled - cardRefunded;
     const totalRefunds = cashRefunded + cardRefunded;
     const totalDebtAmount = debts.reduce((s, d) => s + d.remainingAmount, 0);
 
-    return { cash, card, total: cash + card, totalDebtAmount, totalRefunds, totalExpensesTx };
-  }, [transactions, debts, revenuePeriod]);
+    return { cash, card, total: cash + card, totalDebtAmount, totalRefunds, totalExpensesTx, expenseCategories };
+  }, [transactions, debts, revenuePeriod, expenses]);
 
   const vehicleData = useMemo(() => {
     const cutoff = getCutoff(vehiclePeriod);
@@ -284,6 +294,28 @@ export default function ReportsScreen() {
             <Text style={styles.breakdownLabel}>Неоплаченные долги</Text>
             <Text style={[styles.breakdownValue, { color: Colors.danger }]}>{revenueData.totalDebtAmount} ₽</Text>
           </View>
+
+          {revenueData.totalExpensesTx > 0 && (
+            <View style={[styles.breakdownCard, { borderLeftColor: '#e74c3c', marginHorizontal: 0, marginTop: 8 }]}>
+              <Text style={styles.breakdownLabel}>Расходы за период</Text>
+              <Text style={[styles.breakdownValue, { color: '#e74c3c' }]}>-{revenueData.totalExpensesTx} ₽</Text>
+            </View>
+          )}
+
+          {revenueData.expenseCategories.length > 0 && (
+            <View style={{ marginTop: 12 }}>
+              <Text style={styles.subsectionTitle}>Расходы по категориям</Text>
+              {revenueData.expenseCategories.map(([cat, info]) => (
+                <View key={cat} style={styles.debtorRow}>
+                  <View style={styles.debtorInfo}>
+                    <Text style={styles.debtorName}>{cat}</Text>
+                    <Text style={styles.debtorCars}>Операций: {info.count}</Text>
+                  </View>
+                  <Text style={[styles.debtorAmount, { color: '#e74c3c' }]}>-{info.total} ₽</Text>
+                </View>
+              ))}
+            </View>
+          )}
         </View>
       )}
 
