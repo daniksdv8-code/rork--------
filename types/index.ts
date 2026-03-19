@@ -1,7 +1,27 @@
 export type PaymentMethod = 'cash' | 'card';
 export type ServiceType = 'monthly' | 'onetime';
 export type SessionStatus = 'active' | 'completed' | 'active_debt' | 'released_debt';
-export type TransactionType = 'payment' | 'debt' | 'exit' | 'debt_payment' | 'entry' | 'cancel_entry' | 'cancel_exit' | 'cancel_payment' | 'withdrawal' | 'client_deleted' | 'refund' | 'admin_withdrawal' | 'admin_expense' | 'debt_accrual' | 'debt_freeze';
+export type TransactionType = 'payment' | 'debt' | 'exit' | 'debt_payment' | 'entry' | 'cancel_entry' | 'cancel_exit' | 'cancel_payment' | 'withdrawal' | 'client_deleted' | 'refund' | 'admin_withdrawal' | 'admin_expense' | 'debt_accrual' | 'debt_freeze' | 'manager_expense';
+
+export type CashOperationType = 'income' | 'expense' | 'withdrawal' | 'deposit' | 'refund' | 'debt_payment_income';
+
+export interface CashOperation {
+  id: string;
+  userId: string;
+  userName: string;
+  userRole: UserRole;
+  shiftId: string | null;
+  type: CashOperationType;
+  amount: number;
+  category: string;
+  description: string;
+  method: PaymentMethod;
+  balanceBefore: number;
+  balanceAfter: number;
+  date: string;
+  relatedEntityId?: string;
+  relatedEntityType?: string;
+}
 export type UserRole = 'admin' | 'manager';
 
 export interface User {
@@ -305,6 +325,7 @@ export interface AppData {
   expenseCategories: ExpenseCategory[];
   dailyDebtAccruals: DailyDebtAccrual[];
   clientDebts: ClientDebt[];
+  cashOperations: CashOperation[];
   deletedClientIds?: string[];
   restoreEpoch?: number;
 }

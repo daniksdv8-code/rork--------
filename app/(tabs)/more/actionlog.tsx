@@ -24,7 +24,7 @@ const ACTION_GROUPS: Record<FilterType, ActionType[]> = {
   all: [],
   clients: ['client_add', 'client_edit', 'client_delete', 'car_add', 'car_delete'],
   parking: ['checkin', 'checkout', 'cancel_checkin', 'cancel_checkout'],
-  payments: ['payment', 'cancel_payment', 'debt_payment', 'expense_add', 'withdrawal', 'refund'],
+  payments: ['payment', 'cancel_payment', 'debt_payment', 'expense_add', 'withdrawal', 'refund', 'admin_expense_add', 'admin_withdrawal'],
   shifts: ['shift_open', 'shift_close', 'schedule_add', 'schedule_edit', 'schedule_delete'],
   system: ['tariff_update', 'user_add', 'user_remove', 'user_toggle', 'user_password', 'admin_profile', 'data_reset'],
 };
@@ -53,6 +53,14 @@ function getActionIcon(action: ActionType) {
     case 'user_toggle': return { Icon: Shield, color: Colors.warning, bg: Colors.warningLight };
     case 'user_password': return { Icon: Shield, color: Colors.info, bg: Colors.infoLight };
     case 'admin_profile': return { Icon: Shield, color: Colors.info, bg: Colors.infoLight };
+    case 'admin_expense_add': return { Icon: Banknote, color: Colors.danger, bg: Colors.dangerLight };
+    case 'admin_withdrawal': return { Icon: Banknote, color: Colors.warning, bg: Colors.warningLight };
+    case 'expense_category_add': return { Icon: Settings, color: Colors.success, bg: Colors.successLight };
+    case 'expense_category_edit': return { Icon: Settings, color: Colors.info, bg: Colors.infoLight };
+    case 'expense_category_delete': return { Icon: Trash2, color: Colors.danger, bg: Colors.dangerLight };
+    case 'admin_edit': return { Icon: Shield, color: Colors.info, bg: Colors.infoLight };
+    case 'debt_accrual': return { Icon: Banknote, color: Colors.warning, bg: Colors.warningLight };
+    case 'debt_freeze': return { Icon: Banknote, color: Colors.info, bg: Colors.infoLight };
     case 'schedule_add': return { Icon: CalendarDays, color: Colors.success, bg: Colors.successLight };
     case 'schedule_edit': return { Icon: CalendarDays, color: Colors.info, bg: Colors.infoLight };
     case 'schedule_delete': return { Icon: CalendarDays, color: Colors.danger, bg: Colors.dangerLight };

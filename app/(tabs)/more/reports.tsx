@@ -75,12 +75,18 @@ export default function ReportsScreen() {
     const cashRefunded = refundTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0);
     const cardRefunded = refundTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0);
 
+    const expenseTx = transactions.filter(t =>
+      (t.type === 'manager_expense' || t.type === 'admin_expense') &&
+      (!cutoff || new Date(t.date) >= cutoff)
+    );
+    const totalExpensesTx = expenseTx.reduce((s, t) => s + t.amount, 0);
+
     const cash = cashGross - cashCancelled - cashRefunded;
     const card = cardGross - cardCancelled - cardRefunded;
     const totalRefunds = cashRefunded + cardRefunded;
     const totalDebtAmount = debts.reduce((s, d) => s + d.remainingAmount, 0);
 
-    return { cash, card, total: cash + card, totalDebtAmount, totalRefunds };
+    return { cash, card, total: cash + card, totalDebtAmount, totalRefunds, totalExpensesTx };
   }, [transactions, debts, revenuePeriod]);
 
   const vehicleData = useMemo(() => {

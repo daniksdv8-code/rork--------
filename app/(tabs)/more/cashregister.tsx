@@ -22,6 +22,7 @@ export default function CashRegisterScreen() {
   const {
     shifts, expenses, transactions, withdrawals,
     openShift, closeShift, getActiveShift, getActiveManagerShift, getActiveAdminShift, addExpense, withdrawCash,
+    getShiftCashBalance,
   } = useParking();
 
   const [tab, setTab] = useState<CashTab>('current');
@@ -99,6 +100,11 @@ export default function CashRegisterScreen() {
     }
   }, [activeShift, actualCash, closeNotes, closeShift, logout, isAdmin]);
 
+  const currentCashBalance = useMemo(() => {
+    if (!activeShift) return 0;
+    return getShiftCashBalance(activeShift);
+  }, [activeShift, getShiftCashBalance]);
+
   const handleAddExpense = useCallback(() => {
     const amount = Number(expenseAmount);
     if (!amount || amount <= 0) {
@@ -109,12 +115,16 @@ export default function CashRegisterScreen() {
       Alert.alert('Ошибка', 'Укажите описание расхода');
       return;
     }
-    addExpense(amount, expenseCategory.trim() || 'Прочее', expenseDesc.trim());
+    const result = addExpense(amount, expenseCategory.trim() || 'Прочее', expenseDesc.trim());
+    if (!result.success) {
+      Alert.alert('Ошибка', result.error ?? 'Не удалось провести расход');
+      return;
+    }
     setShowExpenseModal(false);
     setExpenseAmount('');
     setExpenseCategory('');
     setExpenseDesc('');
-    Alert.alert('Готово', 'Расход добавлен');
+    Alert.alert('Готово', `Расход ${amount} ₽ добавлен`);
   }, [expenseAmount, expenseCategory, expenseDesc, addExpense]);
 
   const handleWithdraw = useCallback(() => {
@@ -849,6 +859,14 @@ export default function CashRegisterScreen() {
                 <X size={22} color={Colors.textSecondary} />
               </TouchableOpacity>
             </View>
+            {activeShift && (
+              <View style={styles.modalExpectedRow}>
+                <Text style={styles.modalExpectedLabel}>Баланс кассы:</Text>
+                <Text style={[styles.modalExpectedValue, currentCashBalance < 0 ? { color: Colors.danger } : undefined]}>
+                  {currentCashBalance} ₽
+                </Text>
+              </View>
+            )}
             <Text style={styles.modalFieldLabel}>Сумма (₽)</Text>
             <TextInput
               style={styles.modalInput}
