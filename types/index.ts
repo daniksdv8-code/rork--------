@@ -1,7 +1,7 @@
 export type PaymentMethod = 'cash' | 'card';
 export type ServiceType = 'monthly' | 'onetime';
-export type SessionStatus = 'active' | 'completed';
-export type TransactionType = 'payment' | 'debt' | 'exit' | 'debt_payment' | 'entry' | 'cancel_entry' | 'cancel_exit' | 'cancel_payment' | 'withdrawal' | 'client_deleted' | 'refund' | 'admin_withdrawal' | 'admin_expense';
+export type SessionStatus = 'active' | 'completed' | 'active_debt' | 'released_debt';
+export type TransactionType = 'payment' | 'debt' | 'exit' | 'debt_payment' | 'entry' | 'cancel_entry' | 'cancel_exit' | 'cancel_payment' | 'withdrawal' | 'client_deleted' | 'refund' | 'admin_withdrawal' | 'admin_expense' | 'debt_accrual' | 'debt_freeze';
 export type UserRole = 'admin' | 'manager';
 
 export interface User {
@@ -93,6 +93,29 @@ export interface Debt {
   createdAt: string;
   description: string;
   updatedAt?: string;
+  parkingEntryId?: string;
+  status?: 'active' | 'frozen' | 'paid';
+}
+
+export interface DailyDebtAccrual {
+  id: string;
+  parkingEntryId: string;
+  clientId: string;
+  carId: string;
+  accrualDate: string;
+  amount: number;
+  tariffRate: number;
+  createdAt: string;
+}
+
+export interface ClientDebt {
+  id: string;
+  clientId: string;
+  totalAmount: number;
+  frozenAmount: number;
+  activeAmount: number;
+  lastUpdate: string;
+  frozenDate?: string;
 }
 
 export interface Transaction {
@@ -246,7 +269,9 @@ export type ActionType =
   | 'expense_category_add'
   | 'expense_category_edit'
   | 'expense_category_delete'
-  | 'admin_edit';
+  | 'admin_edit'
+  | 'debt_accrual'
+  | 'debt_freeze';
 
 export interface ActionLog {
   id: string;
@@ -278,6 +303,8 @@ export interface AppData {
   adminExpenses: AdminExpense[];
   adminCashOperations: AdminCashOperation[];
   expenseCategories: ExpenseCategory[];
+  dailyDebtAccruals: DailyDebtAccrual[];
+  clientDebts: ClientDebt[];
   deletedClientIds?: string[];
   restoreEpoch?: number;
 }

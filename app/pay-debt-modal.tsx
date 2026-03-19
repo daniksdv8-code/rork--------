@@ -9,18 +9,23 @@ import { PaymentMethod } from '@/types';
 
 export default function PayDebtModal() {
   const router = useRouter();
-  const { debtId, clientName, totalDebt } = useLocalSearchParams<{
+  const { debtId, clientId, clientName, totalDebt, mode } = useLocalSearchParams<{
     debtId: string;
+    clientId: string;
     clientName: string;
     totalDebt: string;
+    mode: string;
   }>();
-  const { payDebt, debts, needsShiftCheck } = useParking();
+  const { payDebt, payClientDebt, debts, getClientDebtInfo, needsShiftCheck } = useParking();
   const { isAdmin } = useAuth();
   const shiftRequired = needsShiftCheck();
   const [amount, setAmount] = useState<string>(totalDebt ?? '0');
   const [method, setMethod] = useState<PaymentMethod>('cash');
 
-  const debt = debts.find(d => d.id === debtId);
+  const isClientDebtMode = mode === 'client_debt';
+  const debt = !isClientDebtMode ? debts.find(d => d.id === debtId) : null;
+  const clientDebtInfo = isClientDebtMode && clientId ? getClientDebtInfo(clientId) : null;
+  const displayDebt = isClientDebtMode ? (clientDebtInfo?.totalAmount ?? (Number(totalDebt) || 0)) : (debt?.remainingAmount ?? (Number(totalDebt) || 0));
 
   const handlePay = useCallback(() => {
     if (!isAdmin && shiftRequired) {
@@ -32,23 +37,33 @@ export default function PayDebtModal() {
       Alert.alert('Ошибка', 'Введите сумму');
       return;
     }
-    if (!debtId) return;
-    payDebt(debtId, numAmount, method);
-    const remaining = (debt?.remainingAmount ?? 0) - numAmount;
-    if (remaining <= 0) {
-      Alert.alert('Готово', 'Долг полностью погашен');
-    } else {
-      Alert.alert('Готово', `Оплачено ${numAmount} ₽. Остаток: ${remaining} ₽`);
+
+    if (isClientDebtMode && clientId) {
+      payClientDebt(clientId, numAmount, method);
+      const remaining = displayDebt - numAmount;
+      if (remaining <= 0) {
+        Alert.alert('Готово', 'Долг полностью погашен');
+      } else {
+        Alert.alert('Готово', `Оплачено ${numAmount} ₽. Остаток: ${Math.max(0, remaining)} ₽`);
+      }
+    } else if (debtId) {
+      payDebt(debtId, numAmount, method);
+      const remaining = (debt?.remainingAmount ?? 0) - numAmount;
+      if (remaining <= 0) {
+        Alert.alert('Готово', 'Долг полностью погашен');
+      } else {
+        Alert.alert('Готово', `Оплачено ${numAmount} ₽. Остаток: ${remaining} ₽`);
+      }
     }
     router.back();
-  }, [amount, method, debtId, payDebt, debt, router, shiftRequired, isAdmin]);
+  }, [amount, method, debtId, clientId, isClientDebtMode, payDebt, payClientDebt, debt, displayDebt, router, shiftRequired, isAdmin]);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.header}>
         <Text style={styles.title}>{clientName ?? 'Клиент'}</Text>
         <View style={styles.debtBadge}>
-          <Text style={styles.debtBadgeText}>Долг: {debt?.remainingAmount ?? totalDebt} ₽</Text>
+          <Text style={styles.debtBadgeText}>Долг: {displayDebt} ₽</Text>
         </View>
       </View>
 
@@ -64,10 +79,10 @@ export default function PayDebtModal() {
       />
 
       <View style={styles.quickAmounts}>
-        {debt && [
-          Math.min(100, debt.remainingAmount),
-          Math.min(Math.round(debt.remainingAmount / 2), debt.remainingAmount),
-          debt.remainingAmount,
+        {displayDebt > 0 && [
+          Math.min(100, displayDebt),
+          Math.min(Math.round(displayDebt / 2), displayDebt),
+          displayDebt,
         ].filter((v, i, arr) => arr.indexOf(v) === i && v > 0).map(v => (
           <TouchableOpacity
             key={v}

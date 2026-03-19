@@ -41,12 +41,19 @@ export default function DebtorsScreen() {
         <TouchableOpacity
           style={styles.payBtn}
           onPress={() => {
-            const firstDebt = item.debts[0];
-            if (firstDebt) {
+            if (item.clientDebt && item.clientDebt.totalAmount > 0) {
               router.push({
                 pathname: '/pay-debt-modal',
-                params: { debtId: firstDebt.id, clientName: item.client!.name, totalDebt: String(item.totalDebt) },
+                params: { clientId: item.client!.id, clientName: item.client!.name, totalDebt: String(item.totalDebt), mode: 'client_debt' },
               });
+            } else {
+              const firstDebt = item.debts[0];
+              if (firstDebt) {
+                router.push({
+                  pathname: '/pay-debt-modal',
+                  params: { debtId: firstDebt.id, clientName: item.client!.name, totalDebt: String(item.totalDebt) },
+                });
+              }
             }
           }}
           activeOpacity={0.7}
