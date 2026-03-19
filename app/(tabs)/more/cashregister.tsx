@@ -331,20 +331,43 @@ export default function CashRegisterScreen() {
         {tab === 'current' && (
           <View>
             {!activeShift ? (
-              <View style={styles.noShiftCard}>
-                <StopCircle size={40} color={Colors.textMuted} />
-                <Text style={styles.noShiftTitle}>
-                  {isAdmin ? 'Смена администратора не открыта' : 'Смена не открыта'}
-                </Text>
-                <Text style={styles.noShiftDesc}>
-                  {isAdmin
-                    ? 'Откройте свою смену для работы с кассой администратора (независимо от менеджера)'
-                    : 'Откройте смену для начала работы с кассой'}
-                </Text>
-                <TouchableOpacity style={styles.openShiftBtn} onPress={handleOpenShift} activeOpacity={0.7}>
-                  <PlayCircle size={20} color={Colors.white} />
-                  <Text style={styles.openShiftBtnText}>Открыть смену</Text>
-                </TouchableOpacity>
+              <View>
+                <View style={styles.noShiftCard}>
+                  <StopCircle size={40} color={Colors.textMuted} />
+                  <Text style={styles.noShiftTitle}>
+                    {isAdmin ? 'Смена администратора не открыта' : 'Смена не открыта'}
+                  </Text>
+                  <Text style={styles.noShiftDesc}>
+                    {isAdmin
+                      ? 'Вы можете работать без смены или открыть свою смену для учёта'
+                      : 'Откройте смену для начала работы с кассой'}
+                  </Text>
+                  <TouchableOpacity style={styles.openShiftBtn} onPress={handleOpenShift} activeOpacity={0.7}>
+                    <PlayCircle size={20} color={Colors.white} />
+                    <Text style={styles.openShiftBtnText}>Открыть смену</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {isAdmin && (
+                  <View style={styles.shiftActions}>
+                    <TouchableOpacity
+                      style={styles.expenseBtn}
+                      onPress={() => setShowExpenseModal(true)}
+                      activeOpacity={0.7}
+                    >
+                      <MinusCircle size={18} color={Colors.white} />
+                      <Text style={styles.expenseBtnText}>Добавить расход</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.withdrawBtn}
+                      onPress={() => setShowWithdrawModal(true)}
+                      activeOpacity={0.7}
+                    >
+                      <DollarSign size={18} color={Colors.white} />
+                      <Text style={styles.withdrawBtnText}>Снять деньги из кассы</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
               </View>
             ) : (
               <View>
@@ -765,9 +788,11 @@ export default function CashRegisterScreen() {
                       <X size={22} color={Colors.textSecondary} />
                     </TouchableOpacity>
                   </View>
-                  <View style={styles.logoutNotice}>
-                    <Text style={styles.logoutNoticeText}>После закрытия смены произойдёт выход из аккаунта</Text>
-                  </View>
+                  {!isAdmin && (
+                    <View style={styles.logoutNotice}>
+                      <Text style={styles.logoutNoticeText}>После закрытия смены произойдёт выход из аккаунта</Text>
+                    </View>
+                  )}
                   {activeShift && (
                     <View style={styles.modalExpectedRow}>
                       <Text style={styles.modalExpectedLabel}>Расчёт в кассе:</Text>

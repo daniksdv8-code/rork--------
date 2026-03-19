@@ -806,7 +806,7 @@ export default function ClientCardScreen() {
 
           <View style={styles.checkInActions}>
             <TouchableOpacity
-              style={[styles.checkInConfirmBtn, shiftRequired && styles.actionBtnDisabled]}
+              style={[styles.checkInConfirmBtn, (!isAdmin && shiftRequired) && styles.actionBtnDisabled]}
               onPress={handleCheckIn}
               activeOpacity={0.7}
             >
