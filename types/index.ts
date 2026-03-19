@@ -291,7 +291,9 @@ export type ActionType =
   | 'expense_category_delete'
   | 'admin_edit'
   | 'debt_accrual'
-  | 'debt_freeze';
+  | 'debt_freeze'
+  | 'violation_add'
+  | 'violation_delete';
 
 export interface ActionLog {
   id: string;
@@ -303,6 +305,27 @@ export interface ActionLog {
   timestamp: string;
   entityId?: string;
   entityType?: string;
+}
+
+export type ViolationStatus = 'ok' | 'warning' | 'bonus_denied';
+
+export interface ViolationEntry {
+  id: string;
+  managerId: string;
+  managerName: string;
+  type: string;
+  comment: string;
+  date: string;
+  addedBy: string;
+  addedByName: string;
+}
+
+export interface TeamViolationMonth {
+  id: string;
+  month: string;
+  violationCount: number;
+  status: ViolationStatus;
+  violations: ViolationEntry[];
 }
 
 export interface AppData {
@@ -326,6 +349,7 @@ export interface AppData {
   dailyDebtAccruals: DailyDebtAccrual[];
   clientDebts: ClientDebt[];
   cashOperations: CashOperation[];
+  teamViolations: TeamViolationMonth[];
   deletedClientIds?: string[];
   restoreEpoch?: number;
 }

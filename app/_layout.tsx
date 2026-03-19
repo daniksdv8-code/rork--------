@@ -54,6 +54,7 @@ function RootLayoutNav() {
         <Stack.Screen name="pay-debt-modal" options={{ title: "Погашение долга", presentation: "modal" }} />
         <Stack.Screen name="pay-monthly-modal" options={{ title: "Оплата месяца", presentation: "modal" }} />
         <Stack.Screen name="add-client-modal" options={{ title: "Новый клиент", presentation: "modal" }} />
+        <Stack.Screen name="add-violation-modal" options={{ title: "Новое нарушение", presentation: "modal" }} />
       </Stack>
     </AuthGate>
   );

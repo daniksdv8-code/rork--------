@@ -18,6 +18,7 @@ export default function DashboardLayout() {
       <Stack.Screen name="debtors-list" options={{ title: "Должники" }} />
       <Stack.Screen name="debts-list" options={{ title: "Все долги" }} />
       <Stack.Screen name="debt-payments" options={{ title: "Оплаты долгов" }} />
+      <Stack.Screen name="violations" options={{ title: "Нарушения команды" }} />
     </Stack>
   );
 }

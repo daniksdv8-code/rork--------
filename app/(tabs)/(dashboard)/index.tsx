@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, RefreshControl } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Search, Car, Wallet, AlertTriangle, Users, Clock, ChevronRight, LogOut, UserPlus, BarChart3, LogIn, Banknote, PlayCircle, HandCoins } from 'lucide-react-native';
+import { Search, Car, Wallet, AlertTriangle, Users, Clock, ChevronRight, LogOut, UserPlus, BarChart3, LogIn, Banknote, PlayCircle, HandCoins, Shield } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/providers/AuthProvider';
 import { useParking } from '@/providers/ParkingProvider';
@@ -12,7 +12,9 @@ import { isToday } from '@/utils/date';
 export default function DashboardScreen() {
   const router = useRouter();
   const { currentUser, logout } = useAuth();
-  const { todayStats, searchClients, cars, expiringSubscriptions, needsShiftCheck, transactions } = useParking();
+  const { todayStats, searchClients, cars, expiringSubscriptions, needsShiftCheck, transactions, getCurrentMonthViolations } = useParking();
+
+  const monthViolations = useMemo(() => getCurrentMonthViolations(), [getCurrentMonthViolations]);
 
   const debtPaymentsToday = useMemo(() => {
     return transactions.filter(t => isToday(t.date) && t.type === 'debt_payment' && t.amount > 0)
@@ -130,6 +132,92 @@ export default function DashboardScreen() {
           <ChevronRight size={18} color={Colors.warning} />
         </TouchableOpacity>
       )}
+
+      <TouchableOpacity
+        style={[
+          styles.violationCard,
+          {
+            borderColor: monthViolations.violationCount >= 3
+              ? Colors.danger + '40'
+              : monthViolations.violationCount >= 2
+                ? Colors.warning + '40'
+                : monthViolations.violationCount >= 1
+                  ? '#F59E0B40'
+                  : Colors.success + '40',
+          },
+        ]}
+        activeOpacity={0.7}
+        onPress={() => router.push('/(tabs)/(dashboard)/violations' as any)}
+      >
+        <View style={[
+          styles.violationIcon,
+          {
+            backgroundColor: monthViolations.violationCount >= 3
+              ? Colors.dangerLight
+              : monthViolations.violationCount >= 1
+                ? Colors.warningLight
+                : Colors.successLight,
+          },
+        ]}>
+          <Shield
+            size={22}
+            color={
+              monthViolations.violationCount >= 3
+                ? Colors.danger
+                : monthViolations.violationCount >= 1
+                  ? Colors.warning
+                  : Colors.success
+            }
+          />
+        </View>
+        <View style={styles.violationContent}>
+          <Text style={styles.violationTitle}>Премия</Text>
+          <View style={styles.violationProgress}>
+            {[0, 1, 2].map(i => (
+              <View
+                key={i}
+                style={[
+                  styles.violationDot,
+                  {
+                    backgroundColor: i < monthViolations.violationCount
+                      ? (monthViolations.violationCount >= 3 ? Colors.danger : Colors.warning)
+                      : Colors.border,
+                  },
+                ]}
+              />
+            ))}
+            <Text style={[
+              styles.violationCount,
+              {
+                color: monthViolations.violationCount >= 3
+                  ? Colors.danger
+                  : monthViolations.violationCount >= 1
+                    ? Colors.warning
+                    : Colors.success,
+              },
+            ]}>
+              {monthViolations.violationCount}/3
+            </Text>
+          </View>
+          <Text style={[
+            styles.violationStatus,
+            {
+              color: monthViolations.violationCount >= 3
+                ? Colors.danger
+                : monthViolations.violationCount >= 1
+                  ? Colors.warning
+                  : Colors.success,
+            },
+          ]}>
+            {monthViolations.status === 'bonus_denied'
+              ? 'Премия отменена'
+              : monthViolations.status === 'warning'
+                ? 'Есть нарушения'
+                : 'Нарушений нет'}
+          </Text>
+        </View>
+        <ChevronRight size={18} color={Colors.textMuted} />
+      </TouchableOpacity>
 
       <View style={styles.statsGrid}>
         <TouchableOpacity
@@ -513,5 +601,51 @@ const styles = StyleSheet.create({
     color: Colors.warning,
     opacity: 0.8,
     marginTop: 2,
+  },
+  violationCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.card,
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 16,
+    borderWidth: 1.5,
+    gap: 12,
+  },
+  violationIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  violationContent: {
+    flex: 1,
+  },
+  violationTitle: {
+    fontSize: 15,
+    fontWeight: '600' as const,
+    color: Colors.text,
+    marginBottom: 4,
+  },
+  violationProgress: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 2,
+  },
+  violationDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  violationCount: {
+    fontSize: 13,
+    fontWeight: '700' as const,
+    marginLeft: 4,
+  },
+  violationStatus: {
+    fontSize: 12,
+    fontWeight: '500' as const,
   },
 });

@@ -22,4 +22,5 @@ export const EMPTY_DATA: AppData = {
   dailyDebtAccruals: [],
   clientDebts: [],
   cashOperations: [],
+  teamViolations: [],
 };

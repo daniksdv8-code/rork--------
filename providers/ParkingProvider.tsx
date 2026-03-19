@@ -6,7 +6,7 @@ import {
   Payment, Debt, Transaction, Tariffs,
   PaymentMethod, ServiceType, CashShift, Expense, User, CashWithdrawal, ScheduledShift,
   ActionLog, ActionType, AdminExpense, AdminCashOperation, ExpenseCategory,
-  DailyDebtAccrual, ClientDebt, CashOperation
+  DailyDebtAccrual, ClientDebt, CashOperation, TeamViolationMonth
 } from '@/types';
 import { EMPTY_DATA } from '@/mocks/initialData';
 import { generateId } from '@/utils/id';
@@ -43,6 +43,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   const [dailyDebtAccruals, setDailyDebtAccruals] = useState<DailyDebtAccrual[]>([]);
   const [clientDebts, setClientDebts] = useState<ClientDebt[]>([]);
   const [cashOperations, setCashOperations] = useState<CashOperation[]>([]);
+  const [teamViolations, setTeamViolations] = useState<TeamViolationMonth[]>([]);
   const [deletedClientIds, setDeletedClientIds] = useState<string[]>([]);
   const [isLoaded, setIsLoaded] = useState<boolean>(false);
   const [isServerSynced, setIsServerSynced] = useState<boolean>(false);
@@ -59,11 +60,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   const restoreEpochRef = useRef<number>(-1);
 
   const latestDataRef = useRef({
-    clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories, dailyDebtAccruals, clientDebts, cashOperations,
+    clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories, dailyDebtAccruals, clientDebts, cashOperations, teamViolations,
   });
   useEffect(() => {
-    latestDataRef.current = { clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories, dailyDebtAccruals, clientDebts, cashOperations };
-  }, [clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories, dailyDebtAccruals, clientDebts, cashOperations]);
+    latestDataRef.current = { clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories, dailyDebtAccruals, clientDebts, cashOperations, teamViolations };
+  }, [clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories, dailyDebtAccruals, clientDebts, cashOperations, teamViolations]);
 
   const logAction = useCallback((action: ActionType, label: string, details: string, entityId?: string, entityType?: string) => {
     const entry: ActionLog = {
@@ -117,6 +118,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     setDailyDebtAccruals(d.dailyDebtAccruals ?? []);
     setClientDebts(deleted.size > 0 ? (d.clientDebts ?? []).filter((cd: any) => !deleted.has(cd.clientId)) : (d.clientDebts ?? []));
     setCashOperations(d.cashOperations ?? []);
+    setTeamViolations(d.teamViolations ?? []);
     console.log(`[Sync] Applied server data: clients=${(d.clients||[]).length}, sessions=${(d.sessions||[]).length}, shifts=${(d.shifts||[]).length}, users=${(serverUsers||[]).length}`);
   }, []);
 
@@ -150,6 +152,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
           if (data.dailyDebtAccruals) setDailyDebtAccruals(data.dailyDebtAccruals);
           if (data.clientDebts) setClientDebts(data.clientDebts);
           if (data.cashOperations) setCashOperations(data.cashOperations);
+          if (data.teamViolations) setTeamViolations(data.teamViolations);
           if (data.users) {
             setUsers(data.users);
           }
@@ -2415,6 +2418,128 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     scheduledShifts.filter(s => !(s as any).deleted),
   [scheduledShifts]);
 
+  const getCurrentMonth = useCallback((): string => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    return `${y}-${m}`;
+  }, []);
+
+  const getCurrentMonthViolations = useCallback((): TeamViolationMonth => {
+    const month = getCurrentMonth();
+    const existing = teamViolations.find(v => v.month === month);
+    if (existing) return existing;
+    return {
+      id: '',
+      month,
+      violationCount: 0,
+      status: 'ok',
+      violations: [],
+    };
+  }, [teamViolations, getCurrentMonth]);
+
+  const ensureCurrentMonth = useCallback((): void => {
+    const month = getCurrentMonth();
+    const exists = teamViolations.some(v => v.month === month);
+    if (!exists) {
+      const newMonth: TeamViolationMonth = {
+        id: generateId(),
+        month,
+        violationCount: 0,
+        status: 'ok',
+        violations: [],
+      };
+      setTeamViolations(prev => [...prev, newMonth]);
+      schedulePush();
+      console.log(`[Violations] Created new month record: ${month}`);
+    }
+  }, [teamViolations, getCurrentMonth, schedulePush]);
+
+  useEffect(() => {
+    if (isLoaded && currentUser) {
+      ensureCurrentMonth();
+    }
+  }, [isLoaded, currentUser, ensureCurrentMonth]);
+
+  const addViolation = useCallback((managerId: string, managerName: string, violationType: string, comment: string) => {
+    if (currentUser?.role !== 'admin') {
+      console.log('[Violations] Only admin can add violations');
+      return;
+    }
+    const month = getCurrentMonth();
+    const now = new Date().toISOString();
+    const entry = {
+      id: generateId(),
+      managerId,
+      managerName,
+      type: violationType,
+      comment,
+      date: now,
+      addedBy: currentUser.id,
+      addedByName: currentUser.name,
+    };
+
+    setTeamViolations(prev => {
+      const existing = prev.find(v => v.month === month);
+      if (existing) {
+        if (existing.status === 'bonus_denied') {
+          console.log('[Violations] Month already at bonus_denied, cannot add more');
+          return prev;
+        }
+        const newCount = Math.min(existing.violationCount + 1, 3);
+        const newStatus = newCount >= 3 ? 'bonus_denied' as const : newCount >= 2 ? 'warning' as const : newCount >= 1 ? 'warning' as const : 'ok' as const;
+        return prev.map(v => v.month === month ? {
+          ...v,
+          violationCount: newCount,
+          status: newStatus,
+          violations: [...v.violations, entry],
+        } : v);
+      } else {
+        return [...prev, {
+          id: generateId(),
+          month,
+          violationCount: 1,
+          status: 'warning' as const,
+          violations: [entry],
+        }];
+      }
+    });
+
+    logAction('violation_add', 'Зафиксировано нарушение', `Менеджер: ${managerName}, тип: ${violationType}${comment ? `, комментарий: ${comment}` : ''}`, managerId, 'violation');
+    schedulePush();
+    console.log(`[Violations] Added violation for ${managerName}: ${violationType}`);
+  }, [currentUser, getCurrentMonth, logAction, schedulePush]);
+
+  const deleteViolation = useCallback((violationEntryId: string) => {
+    if (currentUser?.role !== 'admin') {
+      console.log('[Violations] Only admin can delete violations');
+      return;
+    }
+    const month = getCurrentMonth();
+
+    setTeamViolations(prev => {
+      const existing = prev.find(v => v.month === month);
+      if (!existing) return prev;
+      if (existing.status === 'bonus_denied') {
+        console.log('[Violations] Cannot delete violations when bonus_denied');
+        return prev;
+      }
+      const updatedViolations = existing.violations.filter(v => v.id !== violationEntryId);
+      const newCount = updatedViolations.length;
+      const newStatus = newCount >= 3 ? 'bonus_denied' as const : newCount >= 1 ? 'warning' as const : 'ok' as const;
+      return prev.map(v => v.month === month ? {
+        ...v,
+        violationCount: newCount,
+        status: newStatus,
+        violations: updatedViolations,
+      } : v);
+    });
+
+    logAction('violation_delete', 'Удалено нарушение', `ID: ${violationEntryId}`, violationEntryId, 'violation');
+    schedulePush();
+    console.log(`[Violations] Deleted violation ${violationEntryId}`);
+  }, [currentUser, getCurrentMonth, logAction, schedulePush]);
+
   const createBackup = useCallback((): string => {
     const backupData = {
       version: 1,
@@ -2442,6 +2567,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         dailyDebtAccruals: latestDataRef.current.dailyDebtAccruals,
         clientDebts: latestDataRef.current.clientDebts,
         cashOperations: latestDataRef.current.cashOperations,
+        teamViolations: latestDataRef.current.teamViolations,
       },
     };
     logAction('backup_create', 'Создана резервная копия', `Клиентов: ${backupData.data.clients.length}, машин: ${backupData.data.cars.length}`);
@@ -2485,6 +2611,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       setDailyDebtAccruals(d.dailyDebtAccruals ?? []);
       setClientDebts(d.clientDebts ?? []);
       setCashOperations(d.cashOperations ?? []);
+      setTeamViolations(d.teamViolations ?? []);
 
       const restorePayload = {
         clients: d.clients ?? [],
@@ -2508,6 +2635,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         dailyDebtAccruals: d.dailyDebtAccruals ?? [],
         clientDebts: d.clientDebts ?? [],
         cashOperations: d.cashOperations ?? [],
+        teamViolations: d.teamViolations ?? [],
       };
 
       try {
@@ -2581,6 +2709,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     setDailyDebtAccruals([]);
     setClientDebts([]);
     setCashOperations([]);
+    setTeamViolations([]);
 
     const resetPayload = {
       clients: [] as any[],
@@ -2604,6 +2733,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       dailyDebtAccruals: [] as any[],
       clientDebts: [] as any[],
       cashOperations: [] as any[],
+      teamViolations: [] as any[],
     };
 
     try {
@@ -2723,6 +2853,10 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     cashOperations,
     getShiftCashBalance,
     addCashOperation,
+    teamViolations,
+    getCurrentMonthViolations,
+    addViolation,
+    deleteViolation,
   }), [
     clients, cars, activeClients, activeCars, isClientDeleted,
     sessions, subscriptions, payments, debts, transactions, tariffs,
@@ -2743,5 +2877,6 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     getManagerCategories, getAdminCategories, getManagerCashRegister, getAdminCashRegister,
     dailyDebtAccruals, clientDebts, payClientDebt, getClientDebtInfo, runDebtAccrual,
     cashOperations, getShiftCashBalance, addCashOperation,
+    teamViolations, getCurrentMonthViolations, addViolation, deleteViolation,
   ]);
 });
