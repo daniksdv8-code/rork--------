@@ -580,9 +580,14 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       if (alreadyAccrued) continue;
 
       const isLombardSession = session.tariffType === 'lombard' || session.serviceType === 'lombard';
-      const dailyRate = isLombardSession
-        ? (session.lombardRateApplied ?? currentTariffs.lombardRate)
-        : currentTariffs.onetimeCash;
+      let dailyRate: number;
+      if (isLombardSession) {
+        dailyRate = session.lombardRateApplied ?? currentTariffs.lombardRate;
+      } else if (session.serviceType === 'monthly') {
+        dailyRate = currentTariffs.monthlyCash;
+      } else {
+        dailyRate = currentTariffs.onetimeCash;
+      }
       const accrual: DailyDebtAccrual = {
         id: generateId(),
         parkingEntryId: session.id,
@@ -844,7 +849,14 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     if (isDebtEntry) {
       const todayNow = new Date();
       const todayStr = `${todayNow.getFullYear()}-${String(todayNow.getMonth() + 1).padStart(2, '0')}-${String(todayNow.getDate()).padStart(2, '0')}`;
-      const dailyRate = isLombard ? (lombardRate ?? tariffs.lombardRate) : tariffs.onetimeCash;
+      let dailyRate: number;
+      if (isLombard) {
+        dailyRate = lombardRate ?? tariffs.lombardRate;
+      } else if (serviceType === 'monthly') {
+        dailyRate = tariffs.monthlyCash;
+      } else {
+        dailyRate = tariffs.onetimeCash;
+      }
       const firstAccrual: DailyDebtAccrual = {
         id: generateId(),
         parkingEntryId: session.id,
@@ -1337,7 +1349,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   }, [sessions, subscriptions, payments, tariffs, shifts, cars, addTransaction, schedulePush, logAction, updateShiftExpected]);
 
   const cancelCheckIn = useCallback((sessionId: string) => {
-    const session = sessions.find(s => s.id === sessionId && s.status === 'active');
+    const session = sessions.find(s => s.id === sessionId && (s.status === 'active' || s.status === 'active_debt'));
     if (!session) return;
 
     const cancelNow = new Date().toISOString();
@@ -1362,7 +1374,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   }, [sessions, currentUser, addTransaction, schedulePush, cars, logAction]);
 
   const cancelCheckOut = useCallback((sessionId: string) => {
-    const session = sessions.find(s => s.id === sessionId && s.status === 'completed' && !s.cancelled);
+    const session = sessions.find(s => s.id === sessionId && (s.status === 'completed' || s.status === 'released' || s.status === 'released_debt') && !s.cancelled);
     if (!session || !session.exitTime) return;
 
     const exitTime = new Date(session.exitTime).getTime();
@@ -1372,9 +1384,10 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       Math.abs(new Date(d.createdAt).getTime() - exitTime) < 10000
     );
 
+    const restoreStatus = session.status === 'released_debt' ? 'active_debt' : 'active';
     const now = new Date().toISOString();
     setSessions(prev => prev.map(s =>
-      s.id === sessionId ? { ...s, status: 'active' as const, exitTime: null, updatedAt: now } : s
+      s.id === sessionId ? { ...s, status: restoreStatus as any, exitTime: null, updatedAt: now } : s
     ));
 
     if (relatedDebts.length > 0) {
@@ -1865,7 +1878,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   }, [sessions, dailyDebtAccruals, debts, tariffs]);
 
   const activeSessions = useMemo(() =>
-    sessions.filter(s => (s.status === 'active' || s.status === 'active_debt') && !isClientDeleted(s.clientId)),
+    sessions.filter(s => (s.status === 'active' || s.status === 'active_debt') && !s.cancelled && !isClientDeleted(s.clientId)),
   [sessions, isClientDeleted]);
 
   const debtors = useMemo(() => {
@@ -2307,7 +2320,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     ));
 
     setSessions(prev => prev.map(s =>
-      s.carId === carId && s.status === 'active'
+      s.carId === carId && (s.status === 'active' || s.status === 'active_debt')
         ? { ...s, status: 'completed' as const, exitTime: now, cancelled: true, updatedAt: now }
         : s
     ));
@@ -2329,7 +2342,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       c.clientId === clientId ? { ...c, deleted: true, deletedAt: now, updatedAt: now } : c
     ));
     setSessions(prev => prev.map(s =>
-      s.clientId === clientId && s.status === 'active'
+      s.clientId === clientId && (s.status === 'active' || s.status === 'active_debt')
         ? { ...s, status: 'completed' as const, exitTime: now, cancelled: true, updatedAt: now }
         : s
     ));

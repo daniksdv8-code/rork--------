@@ -1,7 +1,7 @@
 export type PaymentMethod = 'cash' | 'card';
 export type ServiceType = 'monthly' | 'onetime' | 'lombard';
 export type TariffType = 'standard' | 'lombard';
-export type SessionStatus = 'active' | 'completed' | 'active_debt' | 'released_debt';
+export type SessionStatus = 'draft' | 'active' | 'completed' | 'active_debt' | 'released' | 'released_debt';
 export type TransactionType = 'payment' | 'debt' | 'exit' | 'debt_payment' | 'entry' | 'cancel_entry' | 'cancel_exit' | 'cancel_payment' | 'withdrawal' | 'client_deleted' | 'refund' | 'admin_withdrawal' | 'admin_expense' | 'debt_accrual' | 'debt_freeze' | 'manager_expense';
 
 export type CashOperationType = 'income' | 'expense' | 'withdrawal' | 'deposit' | 'refund' | 'debt_payment_income';

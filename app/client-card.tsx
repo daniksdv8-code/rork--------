@@ -60,11 +60,11 @@ export default function ClientCardScreen() {
   const clientDebtInfo = useMemo(() => clientId ? getClientDebtInfo(clientId) : null, [clientId, getClientDebtInfo]);
 
   const clientActiveSessions = useMemo(() =>
-    sessions.filter(s => s.clientId === clientId && s.status === 'active'),
+    sessions.filter(s => s.clientId === clientId && (s.status === 'active' || s.status === 'active_debt') && !s.cancelled),
   [sessions, clientId]);
 
   const recentCompletedSessions = useMemo(() =>
-    sessions.filter(s => s.clientId === clientId && s.status === 'completed' && !s.cancelled)
+    sessions.filter(s => s.clientId === clientId && (s.status === 'completed' || s.status === 'released' || s.status === 'released_debt') && !s.cancelled)
       .sort((a, b) => new Date(b.exitTime ?? b.entryTime).getTime() - new Date(a.exitTime ?? a.entryTime).getTime())
       .slice(0, 5),
   [sessions, clientId]);
@@ -930,8 +930,11 @@ export default function ClientCardScreen() {
                       ]}>
                         {(session.tariffType === 'lombard' || session.serviceType === 'lombard')
                           ? `Ломбард (${session.lombardRateApplied ?? tariffs.lombardRate} ₽/сут.)`
-                          : session.serviceType === 'monthly' ? 'Месяц' : 'Разово'}
-                        {session.serviceType === 'monthly' && hasActiveSub ? ' (оплачено)' : ''}
+                          : session.serviceType === 'monthly'
+                            ? `Месяц (${tariffs.monthlyCash} ₽/сут.)`
+                            : `Разово (${tariffs.onetimeCash} ₽/сут.)`}
+                        {session.serviceType === 'monthly' && hasActiveSub ? ' — оплачено' : ''}
+                        {session.status === 'active_debt' && !(session.tariffType === 'lombard' || session.serviceType === 'lombard') ? ' — в долг' : ''}
                       </Text>
                     </View>
                   </View>

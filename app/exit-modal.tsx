@@ -27,6 +27,7 @@ export default function ExitModal() {
   const now = new Date().toISOString();
   const isMonthly = session?.serviceType === 'monthly';
   const isLombard = session?.tariffType === 'lombard' || session?.serviceType === 'lombard';
+  const isDebtSession = session?.status === 'active_debt';
   const days = session ? calculateDays(session.entryTime, now) : 0;
   const prepaid = session?.prepaidAmount ?? 0;
   const lombardRate = session?.lombardRateApplied ?? tariffs.lombardRate;
@@ -43,21 +44,27 @@ export default function ExitModal() {
     return getClientTotalDebt(session.clientId);
   }, [session, getClientTotalDebt]);
 
-  const lombardAccrualTotal = useMemo(() => {
-    if (!isLombard || !session) return 0;
+  const debtAccrualTotal = useMemo(() => {
+    if (!session) return 0;
     return roundMoney(dailyDebtAccruals.filter(a => a.parkingEntryId === session.id).reduce((s, a) => s + a.amount, 0));
-  }, [isLombard, session, dailyDebtAccruals]);
+  }, [session, dailyDebtAccruals]);
 
-  const lombardAccrualDays = useMemo(() => {
-    if (!isLombard || !session) return 0;
+  const debtAccrualDays = useMemo(() => {
+    if (!session) return 0;
     return dailyDebtAccruals.filter(a => a.parkingEntryId === session.id).length;
-  }, [isLombard, session, dailyDebtAccruals]);
+  }, [session, dailyDebtAccruals]);
 
-  const onetimeAmountCash = isLombard ? lombardAccrualTotal : tariffs.onetimeCash * days;
-  const onetimeAmountCard = isLombard ? lombardAccrualTotal : tariffs.onetimeCard * days;
-  const onetimeAmount = isLombard ? lombardAccrualTotal : (method === 'cash' ? onetimeAmountCash : onetimeAmountCard);
-  const dailyRate = isLombard ? lombardRate : (method === 'cash' ? tariffs.onetimeCash : tariffs.onetimeCard);
-  const remainingAmount = isLombard ? lombardAccrualTotal : Math.max(0, onetimeAmount - prepaid);
+  const getDailyRate = useCallback((m: PaymentMethod): number => {
+    if (isLombard) return lombardRate;
+    if (isMonthly) return m === 'cash' ? tariffs.monthlyCash : tariffs.monthlyCard;
+    return m === 'cash' ? tariffs.onetimeCash : tariffs.onetimeCard;
+  }, [isLombard, isMonthly, lombardRate, tariffs]);
+
+  const dailyRate = getDailyRate(method);
+  const onetimeAmountCash = isLombard ? debtAccrualTotal : tariffs.onetimeCash * days;
+  const onetimeAmountCard = isLombard ? debtAccrualTotal : tariffs.onetimeCard * days;
+  const onetimeAmount = isLombard ? debtAccrualTotal : (method === 'cash' ? onetimeAmountCash : onetimeAmountCard);
+  const remainingAmount = isLombard ? debtAccrualTotal : (isDebtSession ? debtAccrualTotal : Math.max(0, onetimeAmount - prepaid));
 
   const monthlyAmountCash = getMonthlyAmount(tariffs.monthlyCash);
   const monthlyAmountCard = getMonthlyAmount(tariffs.monthlyCard);
@@ -295,7 +302,7 @@ export default function ExitModal() {
             <View style={styles.divider} />
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Суток (начислено):</Text>
-              <Text style={styles.infoValueBold}>{lombardAccrualDays}</Text>
+              <Text style={styles.infoValueBold}>{debtAccrualDays}</Text>
             </View>
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Ставка:</Text>
@@ -303,7 +310,29 @@ export default function ExitModal() {
             </View>
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Начислено долга:</Text>
-              <Text style={[styles.infoValueBold, { color: Colors.danger }]}>{lombardAccrualTotal} ₽</Text>
+              <Text style={[styles.infoValueBold, { color: Colors.danger }]}>{debtAccrualTotal} ₽</Text>
+            </View>
+          </>
+        )}
+
+        {isDebtSession && !isLombard && !isMonthly && (
+          <>
+            <View style={styles.divider} />
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Статус:</Text>
+              <Text style={[styles.infoValue, { color: Colors.danger, fontWeight: '700' as const }]}>В долг</Text>
+            </View>
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Суток (начислено):</Text>
+              <Text style={styles.infoValueBold}>{debtAccrualDays}</Text>
+            </View>
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Ставка:</Text>
+              <Text style={styles.infoValue}>{getDailyRate('cash')} ₽/сутки</Text>
+            </View>
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Начислено долга:</Text>
+              <Text style={[styles.infoValueBold, { color: Colors.danger }]}>{debtAccrualTotal} ₽</Text>
             </View>
           </>
         )}
@@ -341,16 +370,16 @@ export default function ExitModal() {
             </View>
             <View style={styles.calcRow}>
               <Text style={styles.calcLabel}>Начислено дней:</Text>
-              <Text style={styles.calcValue}>{lombardAccrualDays}</Text>
+              <Text style={styles.calcValue}>{debtAccrualDays}</Text>
             </View>
             <View style={styles.calcDivider} />
             <View style={styles.calcRow}>
               <Text style={styles.calcTotalLabel}>Долг:</Text>
-              <Text style={styles.calcTotalValue}>{lombardAccrualTotal} ₽</Text>
+              <Text style={styles.calcTotalValue}>{debtAccrualTotal} ₽</Text>
             </View>
           </View>
 
-          {existingDebt > lombardAccrualTotal && (
+          {existingDebt > debtAccrualTotal && (
             <View style={styles.existingDebtNotice}>
               <AlertTriangle size={14} color={Colors.warning} />
               <Text style={styles.existingDebtText}>Общий долг клиента (с предыдущими): {existingDebt} ₽</Text>
@@ -375,7 +404,7 @@ export default function ExitModal() {
             </TouchableOpacity>
           </View>
 
-          {lombardAccrualTotal > 0 && (
+          {debtAccrualTotal > 0 && (
             <TouchableOpacity
               style={[styles.payExitBtn, (!isAdmin && shiftRequired) && styles.exitBtnDisabled]}
               onPress={() => {
@@ -384,14 +413,14 @@ export default function ExitModal() {
                   return;
                 }
                 if (!session) return;
-                checkOut(session.id, { method, amount: lombardAccrualTotal });
-                Alert.alert('Готово', `Выезд зафиксирован, оплачено ${lombardAccrualTotal} ₽`);
+                checkOut(session.id, { method, amount: debtAccrualTotal });
+                Alert.alert('Готово', `Выезд зафиксирован, оплачено ${debtAccrualTotal} ₽`);
                 router.back();
               }}
               activeOpacity={0.7}
             >
               <Wallet size={20} color={Colors.white} />
-              <Text style={styles.payExitBtnText}>Оплатить {lombardAccrualTotal} ₽ и выезд</Text>
+              <Text style={styles.payExitBtnText}>Оплатить {debtAccrualTotal} ₽ и выезд</Text>
             </TouchableOpacity>
           )}
 
@@ -424,7 +453,7 @@ export default function ExitModal() {
             activeOpacity={0.7}
           >
             <AlertTriangle size={18} color={Colors.danger} />
-            <Text style={styles.debtExitBtnText}>Выпустить в долг ({lombardAccrualTotal} ₽)</Text>
+            <Text style={styles.debtExitBtnText}>Выпустить в долг ({debtAccrualTotal} ₽)</Text>
           </TouchableOpacity>
         </>
       ) : noPaymentNeeded ? (

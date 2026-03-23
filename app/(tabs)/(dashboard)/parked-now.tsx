@@ -20,20 +20,21 @@ export default function ParkedNowScreen() {
       const days = calculateDays(session.entryTime);
       const isLombard = session.tariffType === 'lombard' || session.serviceType === 'lombard';
       const lombardRate = session.lombardRateApplied ?? tariffs.lombardRate;
+      const isDebt = session.status === 'active_debt';
       let expectedAmount = 0;
       let tariffLabel = '';
       if (isLombard) {
         expectedAmount = days * lombardRate;
-        tariffLabel = `ломбард ${days} дн.`;
+        tariffLabel = `ломбард ${days} дн. × ${lombardRate} ₽`;
       } else if (session.serviceType === 'monthly') {
-        expectedAmount = tariffs.monthlyCash;
-        tariffLabel = 'месяц';
+        expectedAmount = days * tariffs.monthlyCash;
+        tariffLabel = `месяц ${days} дн. × ${tariffs.monthlyCash} ₽`;
       } else {
         expectedAmount = days * tariffs.onetimeCash;
-        tariffLabel = `${days} дн.`;
+        tariffLabel = `${days} дн. × ${tariffs.onetimeCash} ₽`;
       }
-      const isPaid = !isLombard && session.prepaidAmount != null && session.prepaidAmount > 0;
-      const paymentStatus = isLombard ? 'Ломбард' : (isPaid ? 'Оплачено' : 'В долг');
+      const isPaid = !isDebt && !isLombard && session.prepaidAmount != null && session.prepaidAmount > 0;
+      const paymentStatus = isLombard ? 'Ломбард' : isDebt ? 'В долг' : (isPaid ? 'Оплачено' : (session.serviceType === 'monthly' ? 'Абонемент' : 'Активен'));
       return {
         ...session,
         car,
@@ -79,7 +80,11 @@ export default function ParkedNowScreen() {
           <Text style={styles.plateText}>{item.car?.plateNumber ?? '—'}</Text>
           <Text style={[
             styles.statusBadge,
-            item.isLombard ? styles.statusLombard : (item.isPaid ? styles.statusPaid : styles.statusDebt),
+            item.isLombard ? styles.statusLombard
+              : item.paymentStatus === 'В долг' ? styles.statusDebt
+              : item.paymentStatus === 'Оплачено' ? styles.statusPaid
+              : item.paymentStatus === 'Абонемент' ? styles.statusActive
+              : styles.statusActive,
           ]}>{item.paymentStatus}</Text>
         </View>
         <Text style={styles.clientText}>{item.client?.name ?? '—'}</Text>
@@ -164,6 +169,7 @@ const styles = StyleSheet.create({
   statusBadge: { fontSize: 11, fontWeight: '600' as const, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, overflow: 'hidden' },
   statusPaid: { backgroundColor: Colors.successLight, color: Colors.success },
   statusDebt: { backgroundColor: Colors.dangerLight, color: Colors.danger },
+  statusActive: { backgroundColor: Colors.infoLight, color: Colors.info },
   statusLombard: { backgroundColor: '#fef3c7', color: '#b45309' },
   empty: { alignItems: 'center', justifyContent: 'center', paddingVertical: 60 },
   emptyText: { fontSize: 14, color: Colors.textMuted, marginTop: 12 },

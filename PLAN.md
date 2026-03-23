@@ -53,7 +53,21 @@
 
 ---
 
+### 9. Статусы заездов и тарифная логика
+- [x] Добавлены статусы `draft`, `released` в SessionStatus (полный набор: draft, active, active_debt, completed, released, released_debt)
+- [x] `activeSessions` фильтрует только active + active_debt, исключает draft и cancelled
+- [x] Начисление долга только для active_debt сессий
+- [x] Долг начисляется по правильному тарифу: onetime → onetimeCash (200₽), monthly → monthlyCash (150₽), lombard → lombardRate
+- [x] Исправлен cancelCheckIn — теперь работает и для active_debt сессий
+- [x] Исправлен cancelCheckOut — восстанавливает правильный статус (active_debt если был released_debt)
+- [x] Исправлен deleteCar/deleteClient — закрывает и active_debt сессии
+- [x] Клиентская карточка показывает active_debt заезды (был баг: показывались только active)
+- [x] Парковка «Сейчас на парковке» показывает тариф и ставку для каждого заезда
+- [x] Экран выезда показывает начисленный долг для долговых заездов
+- [x] calculateDebtByMethod корректно считает по типу тарифа при оплате
+
+---
+
 ## Что НЕ меняется
 - Дизайн и интерфейс остаются без изменений
-- Логика тарифов (дневные ставки 150/160) остаётся как есть
 - Структура маршрутов и вкладок не меняется
