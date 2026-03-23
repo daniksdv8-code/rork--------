@@ -18,17 +18,22 @@ export default function ParkedNowScreen() {
       const client = clients.find(c => c.id === session.clientId);
       const sub = subscriptions.find(s => s.carId === session.carId);
       const days = calculateDays(session.entryTime);
+      const isLombard = session.tariffType === 'lombard' || session.serviceType === 'lombard';
+      const lombardRate = session.lombardRateApplied ?? tariffs.lombardRate;
       let expectedAmount = 0;
       let tariffLabel = '';
-      if (session.serviceType === 'monthly') {
+      if (isLombard) {
+        expectedAmount = days * lombardRate;
+        tariffLabel = `ломбард ${days} дн.`;
+      } else if (session.serviceType === 'monthly') {
         expectedAmount = tariffs.monthlyCash;
         tariffLabel = 'месяц';
       } else {
         expectedAmount = days * tariffs.onetimeCash;
         tariffLabel = `${days} дн.`;
       }
-      const isPaid = session.prepaidAmount != null && session.prepaidAmount > 0;
-      const paymentStatus = isPaid ? 'Оплачено' : 'В долг';
+      const isPaid = !isLombard && session.prepaidAmount != null && session.prepaidAmount > 0;
+      const paymentStatus = isLombard ? 'Ломбард' : (isPaid ? 'Оплачено' : 'В долг');
       return {
         ...session,
         car,
@@ -39,6 +44,7 @@ export default function ParkedNowScreen() {
         tariffLabel,
         paymentStatus,
         isPaid,
+        isLombard,
       };
     });
   }, [activeSessions, cars, clients, subscriptions, tariffs]);
@@ -73,7 +79,7 @@ export default function ParkedNowScreen() {
           <Text style={styles.plateText}>{item.car?.plateNumber ?? '—'}</Text>
           <Text style={[
             styles.statusBadge,
-            item.isPaid ? styles.statusPaid : styles.statusDebt,
+            item.isLombard ? styles.statusLombard : (item.isPaid ? styles.statusPaid : styles.statusDebt),
           ]}>{item.paymentStatus}</Text>
         </View>
         <Text style={styles.clientText}>{item.client?.name ?? '—'}</Text>
@@ -158,6 +164,7 @@ const styles = StyleSheet.create({
   statusBadge: { fontSize: 11, fontWeight: '600' as const, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, overflow: 'hidden' },
   statusPaid: { backgroundColor: Colors.successLight, color: Colors.success },
   statusDebt: { backgroundColor: Colors.dangerLight, color: Colors.danger },
+  statusLombard: { backgroundColor: '#fef3c7', color: '#b45309' },
   empty: { alignItems: 'center', justifyContent: 'center', paddingVertical: 60 },
   emptyText: { fontSize: 14, color: Colors.textMuted, marginTop: 12 },
 });

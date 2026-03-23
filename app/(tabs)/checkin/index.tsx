@@ -8,7 +8,7 @@ import ShiftGuard from '@/components/ShiftGuard';
 import { formatPlateNumber } from '@/utils/plate';
 import { isExpired, getMonthlyAmount, toDateString } from '@/utils/date';
 import { roundMoney } from '@/utils/money';
-import { ServiceType, PaymentMethod } from '@/types';
+import { ServiceType, PaymentMethod, TariffType } from '@/types';
 
 export default function CheckinScreen() {
   const { currentUser } = useAuth();
@@ -22,6 +22,7 @@ export default function CheckinScreen() {
   const [newNotes, setNewNotes] = useState<string>('');
   const [newCarModel, setNewCarModel] = useState<string>('');
   const [serviceType, setServiceType] = useState<ServiceType>('onetime');
+  const [tariffType, setTariffType] = useState<TariffType>('standard');
   const [plannedDeparture, setPlannedDeparture] = useState<string>('');
   const [showDropdown, setShowDropdown] = useState<boolean>(false);
 
@@ -80,12 +81,16 @@ export default function CheckinScreen() {
   }, [monthlyMonths, monthlyStartDate, paymentMethod, tariffs]);
 
   const paymentAmount = useMemo(() => {
+    if (tariffType === 'lombard') {
+      const d = Math.max(1, parseInt(payDays, 10) || 1);
+      return tariffs.lombardRate * d;
+    }
     if (serviceType === 'onetime') {
       const d = Math.max(1, parseInt(payDays, 10) || 1);
       return paymentMethod === 'cash' ? tariffs.onetimeCash * d : tariffs.onetimeCard * d;
     }
     return monthlyCalc.totalPrice;
-  }, [serviceType, payDays, paymentMethod, tariffs, monthlyCalc]);
+  }, [serviceType, tariffType, payDays, paymentMethod, tariffs, monthlyCalc]);
 
   const resetForm = useCallback(() => {
     setPlateInput('');
@@ -97,6 +102,7 @@ export default function CheckinScreen() {
     setNewNotes('');
     setNewCarModel('');
     setServiceType('onetime');
+    setTariffType('standard');
     setPlannedDeparture('');
     setPaymentStatus('pay_now');
     setPaymentMethod('cash');
@@ -180,12 +186,15 @@ export default function CheckinScreen() {
   }, [paymentStatus, paymentAmount, paymentMethod, serviceType, payDays, monthlyCalc]);
 
   const buildDebtAtEntry = useCallback((): { amount: number; description?: string } | undefined => {
+    if (tariffType === 'lombard') {
+      return { amount: tariffs.lombardRate, description: `Ломбард: ${tariffs.lombardRate} ₽/сут.` };
+    }
     if (paymentStatus !== 'in_debt' || paymentAmount <= 0) return undefined;
     const desc = serviceType === 'onetime'
       ? `Парковка без оплаты: ${Math.max(1, parseInt(payDays, 10) || 1)} сут. × ${paymentMethod === 'cash' ? tariffs.onetimeCash : tariffs.onetimeCard} ₽`
       : `Месячный абонемент без оплаты: ${paymentAmount} ₽`;
     return { amount: paymentAmount, description: desc };
-  }, [paymentStatus, paymentAmount, serviceType, payDays, paymentMethod, tariffs]);
+  }, [paymentStatus, paymentAmount, serviceType, tariffType, payDays, paymentMethod, tariffs]);
 
   const handleCheckin = useCallback(() => {
     if (!isAdmin && shiftRequired) {
@@ -193,16 +202,17 @@ export default function CheckinScreen() {
       return;
     }
     if (!foundClient) return;
-    const finalServiceType: ServiceType = foundClientHasActiveSub ? 'monthly' : serviceType;
-    const payment = buildPaymentAtEntry();
+    const isLombard = tariffType === 'lombard';
+    const finalServiceType: ServiceType = isLombard ? 'lombard' : (foundClientHasActiveSub ? 'monthly' : serviceType);
+    const payment = isLombard ? undefined : buildPaymentAtEntry();
     const debt = buildDebtAtEntry();
-    checkIn(foundClient.carId, foundClient.clientId, finalServiceType, plannedDeparture.trim() || undefined, payment, debt);
-    const typeLabel = foundClientHasActiveSub ? 'месяц (абонемент)' : (finalServiceType === 'monthly' ? 'месяц' : 'разово');
+    checkIn(foundClient.carId, foundClient.clientId, finalServiceType, plannedDeparture.trim() || undefined, payment, debt, false, isLombard);
+    const typeLabel = isLombard ? 'ломбард' : (foundClientHasActiveSub ? 'месяц (абонемент)' : (finalServiceType === 'monthly' ? 'месяц' : 'разово'));
     const payLabel = payment ? `\nОплата: ${payment.amount} ₽` : '';
-    const debtLabel = debt ? `\nВ долг: ${debt.amount} ₽` : '';
+    const debtLabel = isLombard ? `\nЛомбард: ${tariffs.lombardRate} ₽/сут.` : (debt ? `\nВ долг: ${debt.amount} ₽` : '');
     Alert.alert('Готово', `Заезд зафиксирован (${typeLabel}): ${formatPlateNumber(plateInput)}${payLabel}${debtLabel}`);
     resetForm();
-  }, [foundClient, foundClientHasActiveSub, serviceType, checkIn, plateInput, resetForm, shiftRequired, plannedDeparture, buildPaymentAtEntry, buildDebtAtEntry, isAdmin]);
+  }, [foundClient, foundClientHasActiveSub, serviceType, tariffType, tariffs, checkIn, plateInput, resetForm, shiftRequired, plannedDeparture, buildPaymentAtEntry, buildDebtAtEntry, isAdmin]);
 
   const handleAddAndCheckin = useCallback(() => {
     if (!isAdmin && shiftRequired) {
@@ -219,15 +229,17 @@ export default function CheckinScreen() {
     }
     const formatted = formatPlateNumber(plateInput);
     const { client, car } = addClient(newName.trim(), newPhone.trim(), formatted, newNotes.trim(), newCarModel.trim());
-    const payment = buildPaymentAtEntry();
+    const isLombard = tariffType === 'lombard';
+    const finalServiceType: ServiceType = isLombard ? 'lombard' : serviceType;
+    const payment = isLombard ? undefined : buildPaymentAtEntry();
     const debt = buildDebtAtEntry();
-    checkIn(car.id, client.id, serviceType, plannedDeparture.trim() || undefined, payment, debt);
-    const typeLabel = serviceType === 'monthly' ? 'месяц' : 'разово';
+    checkIn(car.id, client.id, finalServiceType, plannedDeparture.trim() || undefined, payment, debt, false, isLombard);
+    const typeLabel = isLombard ? 'ломбард' : (serviceType === 'monthly' ? 'месяц' : 'разово');
     const payLabel = payment ? `\nОплата: ${payment.amount} ₽` : '';
-    const debtLabel = debt ? `\nВ долг: ${debt.amount} ₽` : '';
+    const debtLabel = isLombard ? `\nЛомбард: ${tariffs.lombardRate} ₽/сут.` : (debt ? `\nВ долг: ${debt.amount} ₽` : '');
     Alert.alert('Готово', `Клиент добавлен, заезд зафиксирован (${typeLabel}): ${formatted}${payLabel}${debtLabel}`);
     resetForm();
-  }, [newName, newPhone, newNotes, newCarModel, plateInput, addClient, checkIn, serviceType, resetForm, shiftRequired, plannedDeparture, buildPaymentAtEntry, buildDebtAtEntry, isAdmin]);
+  }, [newName, newPhone, newNotes, newCarModel, plateInput, addClient, checkIn, serviceType, tariffType, tariffs, resetForm, shiftRequired, plannedDeparture, buildPaymentAtEntry, buildDebtAtEntry, isAdmin]);
 
   const handleAddCarToExistingAndCheckin = useCallback((existingClientId: string, existingClientName: string) => {
     if (!isAdmin && shiftRequired) {
@@ -241,15 +253,17 @@ export default function CheckinScreen() {
       return;
     }
     const car = addCarToClient(existingClientId, formatted, newCarModel.trim());
-    const payment = buildPaymentAtEntry();
+    const isLombard = tariffType === 'lombard';
+    const finalServiceType: ServiceType = isLombard ? 'lombard' : serviceType;
+    const payment = isLombard ? undefined : buildPaymentAtEntry();
     const debt = buildDebtAtEntry();
-    checkIn(car.id, existingClientId, serviceType, plannedDeparture.trim() || undefined, payment, debt);
-    const typeLabel = serviceType === 'monthly' ? 'месяц' : 'разово';
+    checkIn(car.id, existingClientId, finalServiceType, plannedDeparture.trim() || undefined, payment, debt, false, isLombard);
+    const typeLabel = isLombard ? 'ломбард' : (serviceType === 'monthly' ? 'месяц' : 'разово');
     const payLabel = payment ? `\nОплата: ${payment.amount} ₽` : '';
-    const debtLabel = debt ? `\nВ долг: ${debt.amount} ₽` : '';
+    const debtLabel = isLombard ? `\nЛомбард: ${tariffs.lombardRate} ₽/сут.` : (debt ? `\nВ долг: ${debt.amount} ₽` : '');
     Alert.alert('Готово', `Авто привязано к ${existingClientName}, заезд зафиксирован (${typeLabel})${payLabel}${debtLabel}`);
     resetForm();
-  }, [plateInput, newCarModel, activeCars, addCarToClient, checkIn, serviceType, resetForm, shiftRequired, plannedDeparture, buildPaymentAtEntry, buildDebtAtEntry, isAdmin]);
+  }, [plateInput, newCarModel, activeCars, addCarToClient, checkIn, serviceType, tariffType, tariffs, resetForm, shiftRequired, plannedDeparture, buildPaymentAtEntry, buildDebtAtEntry, isAdmin]);
 
   if (!currentUser) {
     return (
@@ -281,28 +295,38 @@ export default function CheckinScreen() {
       <Text style={styles.label}>Тип заезда</Text>
       <View style={styles.typeRow}>
         <TouchableOpacity
-          style={[styles.typeBtn, serviceType === 'onetime' && styles.typeBtnActive]}
-          onPress={() => { setServiceType('onetime'); }}
+          style={[styles.typeBtn, tariffType === 'standard' && serviceType === 'onetime' && styles.typeBtnActive]}
+          onPress={() => { setTariffType('standard'); setServiceType('onetime'); setPaymentStatus('pay_now'); }}
         >
-          <Text style={[styles.typeBtnText, serviceType === 'onetime' && styles.typeBtnTextActive]}>Разово</Text>
+          <Text style={[styles.typeBtnText, tariffType === 'standard' && serviceType === 'onetime' && styles.typeBtnTextActive]}>Разово</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.typeBtn, serviceType === 'monthly' && styles.typeBtnActiveGreen]}
-          onPress={() => { setServiceType('monthly'); }}
+          style={[styles.typeBtn, tariffType === 'standard' && serviceType === 'monthly' && styles.typeBtnActiveGreen]}
+          onPress={() => { setTariffType('standard'); setServiceType('monthly'); setPaymentStatus('pay_now'); }}
         >
-          <Text style={[styles.typeBtnText, serviceType === 'monthly' && styles.typeBtnTextActive]}>Месяц</Text>
+          <Text style={[styles.typeBtnText, tariffType === 'standard' && serviceType === 'monthly' && styles.typeBtnTextActive]}>Месяц</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.typeBtn, tariffType === 'lombard' && styles.typeBtnActiveLombard]}
+          onPress={() => { setTariffType('lombard'); setServiceType('lombard'); setPaymentStatus('in_debt'); }}
+        >
+          <Text style={[styles.typeBtnText, tariffType === 'lombard' && styles.typeBtnTextActive]}>Ломбард</Text>
         </TouchableOpacity>
       </View>
 
-      <View style={styles.tariffHint}>
-        <Text style={styles.tariffHintText}>
-          {serviceType === 'onetime'
+      <View style={tariffType === 'lombard' ? styles.tariffHintLombard : styles.tariffHint}>
+        <Text style={tariffType === 'lombard' ? styles.tariffHintTextLombard : styles.tariffHintText}>
+          {tariffType === 'lombard'
+            ? `Ломбард: ${tariffs.lombardRate} ₽/сутки, начисление с первого дня`
+            : serviceType === 'onetime'
             ? `Тариф: ${tariffs.onetimeCash} ₽/сутки (нал.) / ${tariffs.onetimeCard} ₽/сутки (безнал.)`
             : `Тариф: ${tariffs.monthlyCash} ₽/день (нал.) / ${tariffs.monthlyCard} ₽/день (безнал.) — за мес. ${getMonthlyAmount(tariffs.monthlyCash)} / ${getMonthlyAmount(tariffs.monthlyCard)} ₽`
           }
         </Text>
-        <Text style={styles.tariffHintSub}>
-          {serviceType === 'onetime'
+        <Text style={tariffType === 'lombard' ? styles.tariffHintSubLombard : styles.tariffHintSub}>
+          {tariffType === 'lombard'
+            ? 'Оплата только при выезде или отдельной оплатой долга. Долг формируется автоматически.'
+            : serviceType === 'onetime'
             ? 'Можно оплатить сейчас или при выезде.'
             : 'Можно оплатить сейчас или позже.'
           }
@@ -313,6 +337,20 @@ export default function CheckinScreen() {
 
   const renderPaymentAtEntry = (forActiveSub?: boolean) => {
     if (forActiveSub) return null;
+    if (tariffType === 'lombard') {
+      return (
+        <View style={styles.lombardNotice}>
+          <AlertTriangle size={16} color="#b45309" />
+          <View style={styles.lombardNoticeContent}>
+            <Text style={styles.lombardNoticeTitle}>Тариф «Ломбард»</Text>
+            <Text style={styles.lombardNoticeText}>
+              Долг начисляется автоматически: {tariffs.lombardRate} ₽/сутки с первого дня.
+              Оплата недоступна при постановке.
+            </Text>
+          </View>
+        </View>
+      );
+    }
 
     return (
       <View style={styles.paymentSection}>
@@ -553,7 +591,9 @@ export default function CheckinScreen() {
             <TouchableOpacity style={[styles.checkinBtn, (!isAdmin && shiftRequired) && styles.checkinBtnDisabled]} onPress={handleCheckin} activeOpacity={0.7}>
               <LogInIcon size={20} color={Colors.white} />
               <Text style={styles.checkinBtnText}>
-                {paymentStatus === 'pay_now' && paymentAmount > 0
+                {tariffType === 'lombard'
+                  ? `Заезд (ломбард ${tariffs.lombardRate} ₽/сут.)`
+                  : paymentStatus === 'pay_now' && paymentAmount > 0
                   ? `Заезд + оплата ${paymentAmount} ₽`
                   : paymentStatus === 'in_debt' && paymentAmount > 0
                   ? `Заезд (в долг ${paymentAmount} ₽)`
@@ -655,7 +695,9 @@ export default function CheckinScreen() {
             <TouchableOpacity style={[styles.checkinBtn, (!isAdmin && shiftRequired) && styles.checkinBtnDisabled]} onPress={handleAddAndCheckin} activeOpacity={0.7}>
               <UserPlus size={20} color={Colors.white} />
               <Text style={styles.checkinBtnText}>
-                {paymentStatus === 'pay_now' && paymentAmount > 0
+                {tariffType === 'lombard'
+                  ? `Добавить + заезд (ломбард ${tariffs.lombardRate} ₽/сут.)`
+                  : paymentStatus === 'pay_now' && paymentAmount > 0
                   ? `Добавить + заезд + оплата ${paymentAmount} ₽`
                   : paymentStatus === 'in_debt' && paymentAmount > 0
                   ? `Добавить + заезд (в долг ${paymentAmount} ₽)`
@@ -836,6 +878,10 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.success,
     borderColor: Colors.success,
   },
+  typeBtnActiveLombard: {
+    backgroundColor: '#b45309',
+    borderColor: '#b45309',
+  },
   typeBtnText: {
     fontSize: 15,
     fontWeight: '500' as const,
@@ -878,6 +924,50 @@ const styles = StyleSheet.create({
     color: Colors.warning,
     marginTop: 4,
     opacity: 0.8,
+  },
+  tariffHintLombard: {
+    backgroundColor: '#fef3c7',
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: '#b4530930',
+  },
+  tariffHintTextLombard: {
+    fontSize: 13,
+    fontWeight: '600' as const,
+    color: '#b45309',
+  },
+  tariffHintSubLombard: {
+    fontSize: 12,
+    color: '#b45309',
+    marginTop: 4,
+    opacity: 0.8,
+  },
+  lombardNotice: {
+    flexDirection: 'row' as const,
+    alignItems: 'flex-start' as const,
+    gap: 10,
+    backgroundColor: '#fef3c7',
+    borderRadius: 12,
+    padding: 14,
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: '#b4530930',
+  },
+  lombardNoticeContent: {
+    flex: 1,
+  },
+  lombardNoticeTitle: {
+    fontSize: 14,
+    fontWeight: '700' as const,
+    color: '#b45309',
+    marginBottom: 4,
+  },
+  lombardNoticeText: {
+    fontSize: 13,
+    color: '#92400e',
+    lineHeight: 18,
   },
   matchesBlock: {
     backgroundColor: Colors.warningLight,

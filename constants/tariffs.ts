@@ -5,4 +5,5 @@ export const DEFAULT_TARIFFS: Tariffs = {
   monthlyCard: 160,
   onetimeCash: 150,
   onetimeCard: 200,
+  lombardRate: 150,
 };

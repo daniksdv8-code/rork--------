@@ -918,13 +918,19 @@ export default function ClientCardScreen() {
                     ) : null}
                     <View style={[
                       styles.sessionTypeBadge,
-                      session.serviceType === 'monthly' ? styles.sessionTypeBadgeMonthly : styles.sessionTypeBadgeOnetime,
+                      (session.tariffType === 'lombard' || session.serviceType === 'lombard')
+                        ? styles.sessionTypeBadgeLombard
+                        : session.serviceType === 'monthly' ? styles.sessionTypeBadgeMonthly : styles.sessionTypeBadgeOnetime,
                     ]}>
                       <Text style={[
                         styles.sessionTypeBadgeText,
-                        session.serviceType === 'monthly' ? styles.sessionTypeBadgeTextMonthly : styles.sessionTypeBadgeTextOnetime,
+                        (session.tariffType === 'lombard' || session.serviceType === 'lombard')
+                          ? styles.sessionTypeBadgeTextLombard
+                          : session.serviceType === 'monthly' ? styles.sessionTypeBadgeTextMonthly : styles.sessionTypeBadgeTextOnetime,
                       ]}>
-                        {session.serviceType === 'monthly' ? 'Месяц' : 'Разово'}
+                        {(session.tariffType === 'lombard' || session.serviceType === 'lombard')
+                          ? `Ломбард (${session.lombardRateApplied ?? tariffs.lombardRate} ₽/сут.)`
+                          : session.serviceType === 'monthly' ? 'Месяц' : 'Разово'}
                         {session.serviceType === 'monthly' && hasActiveSub ? ' (оплачено)' : ''}
                       </Text>
                     </View>
@@ -2103,6 +2109,9 @@ const styles = StyleSheet.create({
   sessionTypeBadgeOnetime: {
     backgroundColor: Colors.warningLight,
   },
+  sessionTypeBadgeLombard: {
+    backgroundColor: '#fef3c7',
+  },
   sessionTypeBadgeText: {
     fontSize: 11,
     fontWeight: '600' as const,
@@ -2112,6 +2121,9 @@ const styles = StyleSheet.create({
   },
   sessionTypeBadgeTextOnetime: {
     color: Colors.warning,
+  },
+  sessionTypeBadgeTextLombard: {
+    color: '#b45309',
   },
   sessionActions: {
     gap: 6,

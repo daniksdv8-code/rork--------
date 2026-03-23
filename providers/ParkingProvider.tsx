@@ -579,7 +579,10 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       );
       if (alreadyAccrued) continue;
 
-      const dailyRate = currentTariffs.onetimeCash;
+      const isLombardSession = session.tariffType === 'lombard' || session.serviceType === 'lombard';
+      const dailyRate = isLombardSession
+        ? (session.lombardRateApplied ?? currentTariffs.lombardRate)
+        : currentTariffs.onetimeCash;
       const accrual: DailyDebtAccrual = {
         id: generateId(),
         parkingEntryId: session.id,
@@ -729,18 +732,20 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     return op;
   }, [currentUser]);
 
-  const checkIn = useCallback((carId: string, clientId: string, serviceType: ServiceType, plannedDepartureTime?: string, paymentAtEntry?: { method: PaymentMethod; amount: number; days?: number; paidUntilDate?: string }, debtAtEntry?: { amount: number; description?: string }, isSecondary?: boolean) => {
+  const checkIn = useCallback((carId: string, clientId: string, serviceType: ServiceType, plannedDepartureTime?: string, paymentAtEntry?: { method: PaymentMethod; amount: number; days?: number; paidUntilDate?: string }, debtAtEntry?: { amount: number; description?: string }, isSecondary?: boolean, lombardEntry?: boolean) => {
     const activeShift = shifts.find(s => s.status === 'open');
     const sessionNow = new Date().toISOString();
-    const isDebtEntry = !!debtAtEntry && debtAtEntry.amount > 0;
+    const isLombard = lombardEntry === true || serviceType === 'lombard';
+    const isDebtEntry = isLombard || (!!debtAtEntry && debtAtEntry.amount > 0);
     const sessionStatus = isDebtEntry ? 'active_debt' : 'active';
+    const lombardRate = isLombard ? tariffs.lombardRate : undefined;
     const session: ParkingSession = {
       id: generateId(),
       carId,
       clientId,
       entryTime: sessionNow,
       exitTime: null,
-      serviceType,
+      serviceType: isLombard ? 'lombard' : serviceType,
       status: sessionStatus as any,
       plannedDepartureTime: plannedDepartureTime || null,
       managerId: currentUser?.id ?? 'unknown',
@@ -749,6 +754,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       updatedAt: sessionNow,
       prepaidAmount: paymentAtEntry?.amount ?? 0,
       prepaidMethod: paymentAtEntry?.method ?? null,
+      tariffType: isLombard ? 'lombard' : 'standard',
+      lombardRateApplied: lombardRate,
     };
     setSessions(prev => [...prev, session]);
     addTransaction({
@@ -837,7 +844,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     if (isDebtEntry) {
       const todayNow = new Date();
       const todayStr = `${todayNow.getFullYear()}-${String(todayNow.getMonth() + 1).padStart(2, '0')}-${String(todayNow.getDate()).padStart(2, '0')}`;
-      const dailyRate = tariffs.onetimeCash;
+      const dailyRate = isLombard ? (lombardRate ?? tariffs.lombardRate) : tariffs.onetimeCash;
       const firstAccrual: DailyDebtAccrual = {
         id: generateId(),
         parkingEntryId: session.id,
@@ -858,19 +865,23 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         amount: dailyRate,
         method: null,
         date: sessionNow,
-        description: `Постановка в долг: первое начисление ${dailyRate} ₽/сут.`,
+        description: isLombard
+          ? `Ломбард: первое начисление ${dailyRate} ₽/сут.`
+          : `Постановка в долг: первое начисление ${dailyRate} ₽/сут.`,
       });
-      console.log(`[CheckIn] Debt entry: first accrual ${dailyRate} ₽, session ${session.id}`);
+      console.log(`[CheckIn] ${isLombard ? 'Lombard' : 'Debt'} entry: first accrual ${dailyRate} ₽, session ${session.id}`);
     }
 
     const car = cars.find(c => c.id === carId);
     const client = clients.find(c => c.id === clientId);
     const payInfo = paymentAtEntry && paymentAtEntry.amount > 0 ? `, оплата ${paymentAtEntry.amount} ₽` : '';
-    const debtInfo = isDebtEntry ? `, в долг` : '';
+    const debtInfo = isDebtEntry ? (isLombard ? `, ломбард ${lombardRate ?? tariffs.lombardRate} ₽/сут.` : `, в долг`) : '';
+    const typeLabel = isLombard ? 'ломбард' : (serviceType === 'monthly' ? 'месяц' : 'разово');
     const entryLabel = isSecondary ? 'Вторичная постановка авто' : 'Заезд';
-    logAction('checkin', entryLabel, `${car?.plateNumber ?? carId} (${client?.name ?? clientId}), ${serviceType === 'monthly' ? 'месяц' : 'разово'}${payInfo}${debtInfo}`, session.id, 'session');
+    logAction('checkin', entryLabel, `${car?.plateNumber ?? carId} (${client?.name ?? clientId}), ${typeLabel}${payInfo}${debtInfo}`, session.id, 'session');
     if (isSecondary && isDebtEntry) {
-      logAction('checkin', 'Создан долг по вторичной постановке', `${car?.plateNumber ?? carId} (${client?.name ?? clientId}), начисление: ${tariffs.onetimeCash} ₽/сут.`, session.id, 'session');
+      const accrualRate = isLombard ? (lombardRate ?? tariffs.lombardRate) : tariffs.onetimeCash;
+      logAction('checkin', 'Создан долг по вторичной постановке', `${car?.plateNumber ?? carId} (${client?.name ?? clientId}), начисление: ${accrualRate} ₽/сут.`, session.id, 'session');
     }
     schedulePush();
     console.log(`[CheckIn] Session created for car ${carId}, status=${sessionStatus}, planned departure: ${plannedDepartureTime ?? 'not set'}`);
@@ -2225,7 +2236,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   const updateTariffs = useCallback((newTariffs: Tariffs) => {
     const tariffsWithTimestamp = { ...newTariffs, updatedAt: new Date().toISOString() };
     setTariffs(tariffsWithTimestamp);
-    logAction('tariff_update', 'Обновление тарифов', `Нал.мес: ${newTariffs.monthlyCash}, Безнал.мес: ${newTariffs.monthlyCard}, Нал.раз: ${newTariffs.onetimeCash}, Безнал.раз: ${newTariffs.onetimeCard}`);
+    logAction('tariff_update', 'Обновление тарифов', `Нал.мес: ${newTariffs.monthlyCash}, Безнал.мес: ${newTariffs.monthlyCard}, Нал.раз: ${newTariffs.onetimeCash}, Безнал.раз: ${newTariffs.onetimeCard}, Ломбард: ${newTariffs.lombardRate}`);
     schedulePush();
   }, [schedulePush, logAction]);
 

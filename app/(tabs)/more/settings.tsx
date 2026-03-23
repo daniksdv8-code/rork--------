@@ -420,6 +420,20 @@ export default function SettingsScreen() {
             keyboardType="numeric"
           />
         </View>
+        <View style={styles.lombardDivider} />
+        <View style={styles.lombardHeader}>
+          <Text style={styles.lombardHeaderText}>Ломбард</Text>
+        </View>
+        <View style={styles.tariffRow}>
+          <Text style={styles.tariffLabel}>Ломбард (₽/сутки)</Text>
+          <TextInput
+            style={styles.tariffInput}
+            value={String(editTariffs.lombardRate ?? 150)}
+            onChangeText={v => setEditTariffs(prev => ({ ...prev, lombardRate: Number(v) || 0 }))}
+            keyboardType="numeric"
+          />
+        </View>
+        <Text style={styles.lombardNote}>Ставка применяется к новым ломбард-заездам. Действующие заезды сохраняют ставку на момент постановки.</Text>
         <TouchableOpacity style={styles.saveBtn} onPress={handleSaveTariffs} activeOpacity={0.7}>
           <Save size={18} color={Colors.white} />
           <Text style={styles.saveBtnText}>Сохранить тарифы</Text>
@@ -1237,5 +1251,24 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     gap: 8,
     marginTop: 4,
+  },
+  lombardDivider: {
+    height: 1,
+    backgroundColor: Colors.border,
+    marginVertical: 4,
+  },
+  lombardHeader: {
+    marginTop: 4,
+  },
+  lombardHeaderText: {
+    fontSize: 14,
+    fontWeight: '700' as const,
+    color: '#b45309',
+  },
+  lombardNote: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    lineHeight: 17,
+    marginTop: -4,
   },
 });

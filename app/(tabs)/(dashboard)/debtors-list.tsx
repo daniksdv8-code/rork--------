@@ -7,7 +7,7 @@ import { useParking } from '@/providers/ParkingProvider';
 
 export default function DebtorsListScreen() {
   const router = useRouter();
-  const { debtors } = useParking();
+  const { debtors, sessions } = useParking();
   const [search, setSearch] = useState<string>('');
 
   const totalDebt = useMemo(() => debtors.reduce((s, d) => s + d.totalDebt, 0), [debtors]);
@@ -25,28 +25,43 @@ export default function DebtorsListScreen() {
     router.push({ pathname: '/client-card', params: { clientId } });
   }, [router]);
 
-  const renderItem = useCallback(({ item, index }: { item: typeof filtered[0]; index: number }) => (
-    <TouchableOpacity
-      style={styles.row}
-      activeOpacity={0.7}
-      onPress={() => item.client && handlePress(item.client.id)}
-    >
-      <View style={styles.rowNum}>
-        <Text style={styles.rowNumText}>{index + 1}</Text>
-      </View>
-      <View style={styles.rowContent}>
-        <View style={styles.rowTop}>
-          <Text style={styles.clientText}>{item.client?.name ?? '—'}</Text>
-          <Text style={styles.debtAmount}>{item.totalDebt} ₽</Text>
+  const renderItem = useCallback(({ item, index }: { item: typeof filtered[0]; index: number }) => {
+    const hasLombardSession = item.client ? sessions.some(s =>
+      s.clientId === item.client!.id &&
+      (s.tariffType === 'lombard' || s.serviceType === 'lombard') &&
+      (s.status === 'active_debt' || s.status === 'released_debt')
+    ) : false;
+
+    return (
+      <TouchableOpacity
+        style={styles.row}
+        activeOpacity={0.7}
+        onPress={() => item.client && handlePress(item.client.id)}
+      >
+        <View style={styles.rowNum}>
+          <Text style={styles.rowNumText}>{index + 1}</Text>
         </View>
-        <Text style={styles.carsText}>
-          {item.cars.map(c => c.plateNumber).join(', ') || '—'}
-        </Text>
-        <Text style={styles.metaText}>Долгов: {item.debts.length}</Text>
-      </View>
-      <ChevronRight size={16} color={Colors.textMuted} />
-    </TouchableOpacity>
-  ), [handlePress]);
+        <View style={styles.rowContent}>
+          <View style={styles.rowTop}>
+            <View style={styles.clientRow}>
+              <Text style={styles.clientText}>{item.client?.name ?? '—'}</Text>
+              {hasLombardSession && (
+                <View style={styles.lombardTag}>
+                  <Text style={styles.lombardTagText}>Ломбард</Text>
+                </View>
+              )}
+            </View>
+            <Text style={styles.debtAmount}>{item.totalDebt} ₽</Text>
+          </View>
+          <Text style={styles.carsText}>
+            {item.cars.map(c => c.plateNumber).join(', ') || '—'}
+          </Text>
+          <Text style={styles.metaText}>Долгов: {item.debts.length}</Text>
+        </View>
+        <ChevronRight size={16} color={Colors.textMuted} />
+      </TouchableOpacity>
+    );
+  }, [handlePress, sessions]);
 
   return (
     <>
@@ -111,7 +126,10 @@ const styles = StyleSheet.create({
   rowNumText: { fontSize: 12, fontWeight: '600' as const, color: Colors.danger },
   rowContent: { flex: 1 },
   rowTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 },
-  clientText: { fontSize: 15, fontWeight: '600' as const, color: Colors.text, flex: 1 },
+  clientRow: { flexDirection: 'row' as const, alignItems: 'center' as const, flex: 1, gap: 6 },
+  clientText: { fontSize: 15, fontWeight: '600' as const, color: Colors.text },
+  lombardTag: { backgroundColor: '#fef3c7', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 1 },
+  lombardTagText: { fontSize: 10, fontWeight: '700' as const, color: '#b45309' },
   debtAmount: { fontSize: 15, fontWeight: '700' as const, color: Colors.danger },
   carsText: { fontSize: 13, color: Colors.textSecondary, marginBottom: 2 },
   metaText: { fontSize: 12, color: Colors.textMuted },
