@@ -483,7 +483,7 @@ export default function CheckinScreen() {
           <View style={styles.debtNotice}>
             <AlertTriangle size={14} color={Colors.danger} />
             <Text style={styles.debtNoticeText}>
-              Сумма {paymentAmount} ₽ будет записана как долг клиента. Оплата не принимается.
+              Ориентировочный долг: {paymentAmount} ₽ (по дневному тарифу {tariffs.onetimeCash} ₽/сут.).{"\n"}Итоговая сумма будет пересчитана при погашении в зависимости от способа оплаты.
             </Text>
           </View>
         )}

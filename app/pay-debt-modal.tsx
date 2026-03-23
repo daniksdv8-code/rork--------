@@ -1,11 +1,12 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { Wallet, Check } from 'lucide-react-native';
+import { Check, Banknote, CreditCard, Info, ArrowRightLeft } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useParking } from '@/providers/ParkingProvider';
 import { useAuth } from '@/providers/AuthProvider';
 import { PaymentMethod } from '@/types';
+import { roundMoney } from '@/utils/money';
 
 export default function PayDebtModal() {
   const router = useRouter();
@@ -16,16 +17,61 @@ export default function PayDebtModal() {
     totalDebt: string;
     mode: string;
   }>();
-  const { payDebt, payClientDebt, debts, getClientDebtInfo, needsShiftCheck } = useParking();
+  const { payDebt, payClientDebt, debts, needsShiftCheck, calculateDebtByMethod } = useParking();
   const { isAdmin } = useAuth();
   const shiftRequired = needsShiftCheck();
-  const [amount, setAmount] = useState<string>(totalDebt ?? '0');
   const [method, setMethod] = useState<PaymentMethod>('cash');
+  const [amount, setAmount] = useState<string>('');
+  const [amountManuallyEdited, setAmountManuallyEdited] = useState<boolean>(false);
 
   const isClientDebtMode = mode === 'client_debt';
   const debt = !isClientDebtMode ? debts.find(d => d.id === debtId) : null;
-  const clientDebtInfo = isClientDebtMode && clientId ? getClientDebtInfo(clientId) : null;
-  const displayDebt = isClientDebtMode ? (clientDebtInfo?.totalAmount ?? (Number(totalDebt) || 0)) : (debt?.remainingAmount ?? (Number(totalDebt) || 0));
+
+  const calculatedDebt = useMemo(() => {
+    if (!isClientDebtMode || !clientId) return null;
+    return calculateDebtByMethod(clientId, method);
+  }, [isClientDebtMode, clientId, method, calculateDebtByMethod]);
+
+  const calculatedCash = useMemo(() => {
+    if (!isClientDebtMode || !clientId) return null;
+    return calculateDebtByMethod(clientId, 'cash');
+  }, [isClientDebtMode, clientId, calculateDebtByMethod]);
+
+  const calculatedCard = useMemo(() => {
+    if (!isClientDebtMode || !clientId) return null;
+    return calculateDebtByMethod(clientId, 'card');
+  }, [isClientDebtMode, clientId, calculateDebtByMethod]);
+
+  const displayDebt = useMemo(() => {
+    if (isClientDebtMode && calculatedDebt) {
+      return calculatedDebt.total;
+    }
+    if (debt) return debt.remainingAmount;
+    return Number(totalDebt) || 0;
+  }, [isClientDebtMode, calculatedDebt, debt, totalDebt]);
+
+  useEffect(() => {
+    if (!amountManuallyEdited) {
+      setAmount(String(displayDebt));
+    }
+  }, [displayDebt, amountManuallyEdited]);
+
+  const handleMethodChange = useCallback((newMethod: PaymentMethod) => {
+    setMethod(newMethod);
+    if (!amountManuallyEdited) {
+      // amount will update via useEffect
+    }
+  }, [amountManuallyEdited]);
+
+  const handleAmountChange = useCallback((text: string) => {
+    setAmount(text);
+    setAmountManuallyEdited(true);
+  }, []);
+
+  const handleSetFullAmount = useCallback(() => {
+    setAmount(String(displayDebt));
+    setAmountManuallyEdited(false);
+  }, [displayDebt]);
 
   const handlePay = useCallback(() => {
     if (!isAdmin && shiftRequired) {
@@ -39,8 +85,9 @@ export default function PayDebtModal() {
     }
 
     if (isClientDebtMode && clientId) {
-      payClientDebt(clientId, numAmount, method);
-      const remaining = displayDebt - numAmount;
+      const effectiveTotal = calculatedDebt?.total ?? displayDebt;
+      payClientDebt(clientId, numAmount, method, effectiveTotal);
+      const remaining = roundMoney(effectiveTotal - numAmount);
       if (remaining <= 0) {
         Alert.alert('Готово', 'Долг полностью погашен');
       } else {
@@ -56,7 +103,11 @@ export default function PayDebtModal() {
       }
     }
     router.back();
-  }, [amount, method, debtId, clientId, isClientDebtMode, payDebt, payClientDebt, debt, displayDebt, router, shiftRequired, isAdmin]);
+  }, [amount, method, debtId, clientId, isClientDebtMode, payDebt, payClientDebt, debt, displayDebt, calculatedDebt, router, shiftRequired, isAdmin]);
+
+  const cashTotal = calculatedCash?.total ?? 0;
+  const cardTotal = calculatedCard?.total ?? 0;
+  const hasDifferentRates = isClientDebtMode && Math.abs(cashTotal - cardTotal) > 0.01;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -67,11 +118,78 @@ export default function PayDebtModal() {
         </View>
       </View>
 
+      <Text style={styles.label}>Способ оплаты</Text>
+      <View style={styles.methodRow}>
+        <TouchableOpacity
+          style={[styles.methodBtn, method === 'cash' && styles.methodBtnActive]}
+          onPress={() => handleMethodChange('cash')}
+          testID="method-cash"
+        >
+          <Banknote size={18} color={method === 'cash' ? Colors.white : Colors.textSecondary} />
+          <Text style={[styles.methodBtnText, method === 'cash' && styles.methodBtnTextActive]}>Наличные</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.methodBtn, method === 'card' && styles.methodBtnActive]}
+          onPress={() => handleMethodChange('card')}
+          testID="method-card"
+        >
+          <CreditCard size={18} color={method === 'card' ? Colors.white : Colors.textSecondary} />
+          <Text style={[styles.methodBtnText, method === 'card' && styles.methodBtnTextActive]}>Безнал</Text>
+        </TouchableOpacity>
+      </View>
+
+      {hasDifferentRates && (
+        <View style={styles.rateCompare}>
+          <ArrowRightLeft size={14} color={Colors.primary} />
+          <Text style={styles.rateCompareText}>
+            Наличные: {cashTotal} ₽  |  Безнал: {cardTotal} ₽
+          </Text>
+        </View>
+      )}
+
+      {isClientDebtMode && calculatedDebt && calculatedDebt.details.length > 0 && (
+        <View style={styles.detailsBlock}>
+          <View style={styles.detailsHeader}>
+            <Info size={14} color={Colors.textSecondary} />
+            <Text style={styles.detailsTitle}>Расчёт по тарифам ({method === 'cash' ? 'наличные' : 'безнал'})</Text>
+          </View>
+          {calculatedDebt.details.map((d, i) => (
+            <View key={d.sessionId + i} style={styles.detailRow}>
+              <Text style={styles.detailLabel}>
+                {d.serviceType === 'lombard' ? 'Ломбард' : d.serviceType === 'monthly' ? 'Месячный' : 'Дневной'}:
+              </Text>
+              <Text style={styles.detailValue}>
+                {d.days} сут. × {d.rate} ₽ = {d.amount} ₽
+              </Text>
+            </View>
+          ))}
+          {calculatedDebt.oldDebtsTotal > 0 && (
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Ручные/старые долги:</Text>
+              <Text style={styles.detailValue}>{calculatedDebt.oldDebtsTotal} ₽</Text>
+            </View>
+          )}
+          <View style={[styles.detailRow, styles.detailRowTotal]}>
+            <Text style={styles.detailTotalLabel}>Итого:</Text>
+            <Text style={styles.detailTotalValue}>{calculatedDebt.total} ₽</Text>
+          </View>
+        </View>
+      )}
+
+      {isClientDebtMode && (
+        <View style={styles.recalcNotice}>
+          <Info size={14} color={Colors.warning} />
+          <Text style={styles.recalcNoticeText}>
+            Итоговая сумма пересчитана по текущим тарифам для выбранного способа оплаты.
+          </Text>
+        </View>
+      )}
+
       <Text style={styles.label}>Сумма оплаты (₽)</Text>
       <TextInput
         style={styles.amountInput}
         value={amount}
-        onChangeText={setAmount}
+        onChangeText={handleAmountChange}
         keyboardType="numeric"
         placeholder="0"
         placeholderTextColor={Colors.textMuted}
@@ -86,35 +204,30 @@ export default function PayDebtModal() {
         ].filter((v, i, arr) => arr.indexOf(v) === i && v > 0).map(v => (
           <TouchableOpacity
             key={v}
-            style={styles.quickBtn}
-            onPress={() => setAmount(String(v))}
+            style={[styles.quickBtn, v === displayDebt && styles.quickBtnFull]}
+            onPress={() => {
+              setAmount(String(v));
+              setAmountManuallyEdited(v !== displayDebt);
+            }}
           >
-            <Text style={styles.quickBtnText}>{v} ₽</Text>
+            <Text style={[styles.quickBtnText, v === displayDebt && styles.quickBtnTextFull]}>
+              {v === displayDebt ? 'Полностью' : `${v} ₽`}
+            </Text>
           </TouchableOpacity>
         ))}
       </View>
 
-      <Text style={styles.label}>Способ оплаты</Text>
-      <View style={styles.methodRow}>
-        <TouchableOpacity
-          style={[styles.methodBtn, method === 'cash' && styles.methodBtnActive]}
-          onPress={() => setMethod('cash')}
-        >
-          <Wallet size={18} color={method === 'cash' ? Colors.white : Colors.textSecondary} />
-          <Text style={[styles.methodBtnText, method === 'cash' && styles.methodBtnTextActive]}>Наличные</Text>
+      {amountManuallyEdited && Number(amount) !== displayDebt && (
+        <TouchableOpacity style={styles.resetAmountBtn} onPress={handleSetFullAmount}>
+          <Text style={styles.resetAmountText}>Вернуть рассчитанную сумму: {displayDebt} ₽</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.methodBtn, method === 'card' && styles.methodBtnActive]}
-          onPress={() => setMethod('card')}
-        >
-          <Wallet size={18} color={method === 'card' ? Colors.white : Colors.textSecondary} />
-          <Text style={[styles.methodBtnText, method === 'card' && styles.methodBtnTextActive]}>Безнал</Text>
-        </TouchableOpacity>
-      </View>
+      )}
 
-      <TouchableOpacity style={styles.payBtn} onPress={handlePay} activeOpacity={0.7}>
+      <TouchableOpacity style={styles.payBtn} onPress={handlePay} activeOpacity={0.7} testID="pay-debt-btn">
         <Check size={20} color={Colors.white} />
-        <Text style={styles.payBtnText}>Погасить</Text>
+        <Text style={styles.payBtnText}>
+          Погасить {Number(amount) > 0 ? `${amount} ₽` : ''}
+        </Text>
       </TouchableOpacity>
     </ScrollView>
   );
@@ -129,8 +242,8 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   header: {
-    alignItems: 'center',
-    marginBottom: 24,
+    alignItems: 'center' as const,
+    marginBottom: 20,
   },
   title: {
     fontSize: 20,
@@ -168,13 +281,13 @@ const styles = StyleSheet.create({
     color: Colors.text,
     borderWidth: 1,
     borderColor: Colors.cardBorder,
-    textAlign: 'center',
+    textAlign: 'center' as const,
   },
   quickAmounts: {
-    flexDirection: 'row',
+    flexDirection: 'row' as const,
     gap: 8,
     marginTop: 10,
-    justifyContent: 'center',
+    justifyContent: 'center' as const,
   },
   quickBtn: {
     paddingHorizontal: 16,
@@ -184,20 +297,27 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.cardBorder,
   },
+  quickBtnFull: {
+    backgroundColor: Colors.primary + '15',
+    borderColor: Colors.primary + '40',
+  },
   quickBtnText: {
     fontSize: 14,
     fontWeight: '500' as const,
     color: Colors.primary,
   },
+  quickBtnTextFull: {
+    fontWeight: '600' as const,
+  },
   methodRow: {
-    flexDirection: 'row',
+    flexDirection: 'row' as const,
     gap: 10,
   },
   methodBtn: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
     height: 48,
     borderRadius: 12,
     backgroundColor: Colors.card,
@@ -217,10 +337,104 @@ const styles = StyleSheet.create({
   methodBtnTextActive: {
     color: Colors.white,
   },
+  rateCompare: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 8,
+    backgroundColor: Colors.primary + '10',
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: Colors.primary + '20',
+  },
+  rateCompareText: {
+    fontSize: 13,
+    fontWeight: '600' as const,
+    color: Colors.primary,
+    flex: 1,
+  },
+  detailsBlock: {
+    backgroundColor: Colors.card,
+    borderRadius: 12,
+    padding: 14,
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: Colors.cardBorder,
+  },
+  detailsHeader: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 6,
+    marginBottom: 10,
+  },
+  detailsTitle: {
+    fontSize: 13,
+    fontWeight: '600' as const,
+    color: Colors.textSecondary,
+  },
+  detailRow: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
+    paddingVertical: 4,
+  },
+  detailRowTotal: {
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+    marginTop: 6,
+    paddingTop: 8,
+  },
+  detailLabel: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+  },
+  detailValue: {
+    fontSize: 13,
+    fontWeight: '500' as const,
+    color: Colors.text,
+  },
+  detailTotalLabel: {
+    fontSize: 14,
+    fontWeight: '700' as const,
+    color: Colors.text,
+  },
+  detailTotalValue: {
+    fontSize: 14,
+    fontWeight: '700' as const,
+    color: Colors.primary,
+  },
+  recalcNotice: {
+    flexDirection: 'row' as const,
+    alignItems: 'flex-start' as const,
+    gap: 8,
+    backgroundColor: Colors.warningLight,
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: Colors.warning + '30',
+  },
+  recalcNoticeText: {
+    fontSize: 12,
+    color: Colors.warning,
+    flex: 1,
+    lineHeight: 17,
+  },
+  resetAmountBtn: {
+    alignItems: 'center' as const,
+    marginTop: 8,
+    paddingVertical: 6,
+  },
+  resetAmountText: {
+    fontSize: 13,
+    color: Colors.primary,
+    fontWeight: '500' as const,
+  },
   payBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
     backgroundColor: Colors.success,
     height: 52,
     borderRadius: 14,

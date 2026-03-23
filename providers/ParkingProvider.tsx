@@ -1576,7 +1576,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     schedulePush();
   }, [debts, addTransaction, schedulePush, shifts, updateShiftExpected, logAction, addCashOperation, getShiftCashBalance]);
 
-  const payClientDebt = useCallback((clientId: string, amount: number, method: PaymentMethod) => {
+  const payClientDebt = useCallback((clientId: string, amount: number, method: PaymentMethod, calculatedTotal?: number) => {
     const now = new Date().toISOString();
 
     const clientOldDebts = debts.filter(d => d.clientId === clientId && d.remainingAmount > 0)
@@ -1584,12 +1584,17 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     const cd = clientDebts.find(c => c.clientId === clientId);
     const oldDebtsTotal = clientOldDebts.reduce((s, d) => s + d.remainingAmount, 0);
     const clientDebtTotal = cd ? cd.totalAmount : 0;
-    const grandTotal = roundMoney(oldDebtsTotal + clientDebtTotal);
+    const storedTotal = roundMoney(oldDebtsTotal + clientDebtTotal);
 
-    if (grandTotal <= 0) return;
+    if (storedTotal <= 0) return;
 
-    const actualAmount = roundMoney(Math.min(amount, grandTotal));
-    let remaining = actualAmount;
+    const effectiveTotal = calculatedTotal && calculatedTotal > 0 ? calculatedTotal : storedTotal;
+    const actualAmount = roundMoney(Math.min(amount, effectiveTotal));
+    const payRatio = effectiveTotal > 0 ? actualAmount / effectiveTotal : 1;
+    const isFullPayment = actualAmount >= effectiveTotal;
+
+    const storedReduction = isFullPayment ? storedTotal : roundMoney(storedTotal * payRatio);
+    let remaining = storedReduction;
 
     const updatedDebtIds: string[] = [];
     if (clientOldDebts.length > 0 && remaining > 0) {
@@ -1617,7 +1622,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       ));
     }
 
-    const newRemainingTotal = roundMoney(grandTotal - actualAmount);
+    const newRemainingTotal = isFullPayment ? 0 : roundMoney(effectiveTotal - actualAmount);
 
     const newPayment: Payment = {
       id: generateId(),
@@ -1806,6 +1811,58 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   const getClientDebtInfo = useCallback((clientId: string): ClientDebt | null => {
     return clientDebts.find(c => c.clientId === clientId) ?? null;
   }, [clientDebts]);
+
+  const calculateDebtByMethod = useCallback((clientId: string, method: PaymentMethod): {
+    total: number;
+    details: Array<{
+      sessionId: string;
+      days: number;
+      rate: number;
+      amount: number;
+      serviceType: ServiceType;
+    }>;
+    oldDebtsTotal: number;
+  } => {
+    const clientDebtSessions = sessions.filter(s =>
+      s.clientId === clientId &&
+      (s.status === 'active_debt' || s.status === 'released_debt') &&
+      !s.cancelled
+    );
+
+    const details: Array<{ sessionId: string; days: number; rate: number; amount: number; serviceType: ServiceType }> = [];
+    let accrualTotal = 0;
+
+    for (const session of clientDebtSessions) {
+      const sessionAccruals = dailyDebtAccruals.filter(a => a.parkingEntryId === session.id);
+      if (sessionAccruals.length === 0) continue;
+
+      const days = sessionAccruals.length;
+      let rate: number;
+
+      if (session.serviceType === 'lombard') {
+        rate = session.lombardRateApplied ?? tariffs.lombardRate;
+      } else if (session.serviceType === 'monthly') {
+        rate = method === 'cash' ? tariffs.monthlyCash : tariffs.monthlyCard;
+      } else {
+        rate = method === 'cash' ? tariffs.onetimeCash : tariffs.onetimeCard;
+      }
+
+      const amount = roundMoney(days * rate);
+      accrualTotal += amount;
+      details.push({ sessionId: session.id, days, rate, amount, serviceType: session.serviceType });
+    }
+
+    const oldDebtsTotal = roundMoney(
+      debts.filter(d => d.clientId === clientId && d.remainingAmount > 0)
+        .reduce((s, d) => s + d.remainingAmount, 0)
+    );
+
+    return {
+      total: roundMoney(accrualTotal + oldDebtsTotal),
+      details,
+      oldDebtsTotal,
+    };
+  }, [sessions, dailyDebtAccruals, debts, tariffs]);
 
   const activeSessions = useMemo(() =>
     sessions.filter(s => (s.status === 'active' || s.status === 'active_debt') && !isClientDeleted(s.clientId)),
@@ -3013,6 +3070,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     deleteViolation,
     addManualDebt,
     deleteManualDebt,
+    calculateDebtByMethod,
   }), [
     clients, cars, activeClients, activeCars, isClientDeleted,
     sessions, subscriptions, payments, debts, transactions, tariffs,
@@ -3035,5 +3093,6 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     cashOperations, getShiftCashBalance, addCashOperation,
     teamViolations, getCurrentMonthViolations, addViolation, deleteViolation,
     addManualDebt, deleteManualDebt,
+    calculateDebtByMethod,
   ]);
 });
