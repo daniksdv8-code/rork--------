@@ -1077,6 +1077,18 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
           updateShiftExpected(activeShift.id, paidAmount);
         }
 
+        const onetimeExitBalBefore = activeShift ? getShiftCashBalance(activeShift) : 0;
+        addCashOperation({
+          type: 'income',
+          amount: paidAmount,
+          category: 'Оплата при выезде (разово)',
+          description: payDesc,
+          method: paymentAtExit.method,
+          shiftId: activeShift?.id ?? null,
+          balanceBefore: onetimeExitBalBefore,
+          balanceAfter: paymentAtExit.method === 'cash' ? roundMoney(onetimeExitBalBefore + paidAmount) : onetimeExitBalBefore,
+        });
+
         if (afterPay > 0) {
           const debtId = generateId();
           const newDebt: Debt = {
@@ -1195,6 +1207,18 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
           if (paymentAtExit.method === 'cash' && activeShift) {
             updateShiftExpected(activeShift.id, paymentAtExit.amount);
           }
+
+          const monthlyExitBalBefore = activeShift ? getShiftCashBalance(activeShift) : 0;
+          addCashOperation({
+            type: 'income',
+            amount: paymentAtExit.amount,
+            category: 'Оплата месяца при выезде',
+            description: payDesc,
+            method: paymentAtExit.method,
+            shiftId: activeShift?.id ?? null,
+            balanceBefore: monthlyExitBalBefore,
+            balanceAfter: paymentAtExit.method === 'cash' ? roundMoney(monthlyExitBalBefore + paymentAtExit.amount) : monthlyExitBalBefore,
+          });
 
           setSubscriptions(prev => {
             const existing = prev.find(s => s.carId === session.carId && s.clientId === session.clientId);
@@ -1334,6 +1358,18 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         updateShiftExpected(activeShift.id, -refundAmount);
       }
 
+      const refundBalBefore = activeShift ? getShiftCashBalance(activeShift) : 0;
+      addCashOperation({
+        type: 'refund',
+        amount: refundAmount,
+        category: 'Возврат за досрочный выезд',
+        description: `Возврат ${refundAmount} ₽ (${daysUsed} дн. × ${dailyRate} ₽, ${refundMethod === 'cash' ? 'наличные' : 'безнал'})`,
+        method: refundMethod,
+        shiftId: activeShift?.id ?? null,
+        balanceBefore: refundBalBefore,
+        balanceAfter: refundMethod === 'cash' ? roundMoney(refundBalBefore - refundAmount) : refundBalBefore,
+      });
+
       if (sub) {
         setSubscriptions(prev => prev.map(s =>
           s.id === sub.id ? { ...s, paidUntil: now, updatedAt: now } : s
@@ -1346,7 +1382,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     schedulePush();
     console.log(`[EarlyExit] Refund: ${refundAmount} ₽, days used: ${daysUsed}, original paid: ${paidAmount}, adjusted to: ${usedAmount}, daily: ${dailyRate}`);
     return { refundAmount, daysUsed, dailyRate, paidAmount };
-  }, [sessions, subscriptions, payments, tariffs, shifts, cars, addTransaction, schedulePush, logAction, updateShiftExpected]);
+  }, [sessions, subscriptions, payments, tariffs, shifts, cars, addTransaction, schedulePush, logAction, updateShiftExpected, addCashOperation, getShiftCashBalance]);
 
   const cancelCheckIn = useCallback((sessionId: string) => {
     const session = sessions.find(s => s.id === sessionId && (s.status === 'active' || s.status === 'active_debt'));
@@ -1466,10 +1502,23 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       }
     }
 
+    const cancelShift = shifts.find(s => s.status === 'open');
+    const cancelBalBefore = cancelShift ? getShiftCashBalance(cancelShift) : 0;
+    addCashOperation({
+      type: 'refund',
+      amount: payment.amount,
+      category: 'Отмена оплаты',
+      description: `Отмена оплаты: ${payment.amount} ₽ — ${payment.description}`,
+      method: payment.method,
+      shiftId: cancelShift?.id ?? null,
+      balanceBefore: cancelBalBefore,
+      balanceAfter: payment.method === 'cash' ? roundMoney(cancelBalBefore - payment.amount) : cancelBalBefore,
+    });
+
     logAction('cancel_payment', 'Отмена оплаты', `${payment.amount} ₽, ${payment.description}`, paymentId, 'payment');
     schedulePush();
     console.log(`[Cancel] Payment cancelled: ${paymentId}, amount: ${payment.amount}`);
-  }, [payments, currentUser, addTransaction, schedulePush, shifts, updateShiftExpected, logAction]);
+  }, [payments, currentUser, addTransaction, schedulePush, shifts, updateShiftExpected, logAction, addCashOperation, getShiftCashBalance]);
 
   const payMonthly = useCallback((clientId: string, carId: string, method: PaymentMethod, months: number = 1, customAmount?: number, paidUntilDate?: string) => {
     const dailyRate = method === 'cash' ? tariffs.monthlyCash : tariffs.monthlyCard;
@@ -1625,14 +1674,19 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     if (remaining > 0 && cd && cd.totalAmount > 0) {
       const payForCd = roundMoney(Math.min(remaining, cd.totalAmount));
       remaining = roundMoney(remaining - payForCd);
-      setClientDebts(prev => prev.map(c =>
-        c.clientId === clientId ? {
+      setClientDebts(prev => prev.map(c => {
+        if (c.clientId !== clientId) return c;
+        const newTotal = roundMoney(Math.max(0, c.totalAmount - payForCd));
+        const frozenReduction = roundMoney(Math.min(payForCd, c.frozenAmount));
+        const activeReduction = roundMoney(payForCd - frozenReduction);
+        return {
           ...c,
-          totalAmount: roundMoney(Math.max(0, c.totalAmount - payForCd)),
-          frozenAmount: roundMoney(Math.max(0, c.frozenAmount - payForCd)),
+          totalAmount: newTotal,
+          frozenAmount: roundMoney(Math.max(0, c.frozenAmount - frozenReduction)),
+          activeAmount: roundMoney(Math.max(0, c.activeAmount - activeReduction)),
           lastUpdate: now,
-        } : c
-      ));
+        };
+      }));
     }
 
     const newRemainingTotal = isFullPayment ? 0 : roundMoney(effectiveTotal - actualAmount);
