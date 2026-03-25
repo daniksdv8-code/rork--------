@@ -64,7 +64,10 @@ export default function ExitModal() {
   const onetimeAmountCash = isLombard ? debtAccrualTotal : tariffs.onetimeCash * days;
   const onetimeAmountCard = isLombard ? debtAccrualTotal : tariffs.onetimeCard * days;
   const onetimeAmount = isLombard ? debtAccrualTotal : (method === 'cash' ? onetimeAmountCash : onetimeAmountCard);
-  const remainingAmount = isLombard ? debtAccrualTotal : (isDebtSession ? debtAccrualTotal : Math.max(0, onetimeAmount - prepaid));
+  const debtRecalculated = isDebtSession && !isLombard
+    ? roundMoney(debtAccrualDays * dailyRate)
+    : debtAccrualTotal;
+  const remainingAmount = isLombard ? debtAccrualTotal : (isDebtSession ? debtRecalculated : Math.max(0, onetimeAmount - prepaid));
 
   const monthlyAmountCash = getMonthlyAmount(tariffs.monthlyCash);
   const monthlyAmountCard = getMonthlyAmount(tariffs.monthlyCard);

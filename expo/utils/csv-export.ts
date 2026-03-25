@@ -47,7 +47,7 @@ export function buildClientsCsv(data: ExportClientsData): string {
 
       const carIds = new Set(clientCars.map(c => c.id));
       const isParked = data.sessions.some(
-        s => s.clientId === client.id && s.status === 'active' && !s.cancelled && carIds.has(s.carId)
+        s => s.clientId === client.id && (s.status === 'active' || s.status === 'active_debt') && !s.cancelled && carIds.has(s.carId)
       );
 
       const totalDebt = data.debts

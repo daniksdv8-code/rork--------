@@ -2932,8 +2932,12 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         console.log('[Restore] AsyncStorage save failed:', e);
       }
 
-      restoreInProgressRef.current = false;
-      console.log('[Restore] === RESTORE COMPLETED, sync unblocked ===');
+      console.log('[Restore] === RESTORE COMPLETED ===');
+
+      setTimeout(() => {
+        restoreInProgressRef.current = false;
+        console.log('[Restore] Sync unblocked after delay');
+      }, 5000);
 
       void utils.parking.getData.invalidate();
 

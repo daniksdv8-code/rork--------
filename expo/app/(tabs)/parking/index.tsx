@@ -78,6 +78,11 @@ export default function ParkingScreen() {
   const renderItem = useCallback(({ item }: { item: typeof sessionData[0] }) => {
     const isMonthly = item.session.serviceType === 'monthly';
     const isOnetime = item.session.serviceType === 'onetime';
+    const isLombard = item.session.tariffType === 'lombard' || item.session.serviceType === 'lombard';
+    const isDebt = item.session.status === 'active_debt';
+    const badgeLabel = isLombard ? 'Ломбард' : isMonthly ? 'Месяц' : 'Разово';
+    const badgeStyle = isLombard ? styles.typeBadgeLombard : isMonthly ? styles.typeBadgeMonthly : styles.typeBadgeOnetime;
+    const badgeTextStyle = isLombard ? styles.typeBadgeTextLombard : isMonthly ? styles.typeBadgeTextMonthly : styles.typeBadgeTextOnetime;
     return (
       <View style={styles.card}>
         <View style={styles.cardHeader}>
@@ -85,10 +90,17 @@ export default function ParkingScreen() {
             <Text style={styles.plateText}>{item.car?.plateNumber ?? '—'}</Text>
             {item.car?.carModel ? <Text style={styles.carModelText}>{item.car.carModel}</Text> : null}
           </View>
-          <View style={[styles.typeBadge, isMonthly ? styles.typeBadgeMonthly : styles.typeBadgeOnetime]}>
-            <Text style={[styles.typeBadgeText, isMonthly ? styles.typeBadgeTextMonthly : styles.typeBadgeTextOnetime]}>
-              {isMonthly ? 'Месяц' : 'Разово'}
-            </Text>
+          <View style={styles.badgeRow}>
+            {isDebt && !isLombard && (
+              <View style={styles.typeBadgeDebt}>
+                <Text style={styles.typeBadgeTextDebt}>В долг</Text>
+              </View>
+            )}
+            <View style={[styles.typeBadge, badgeStyle]}>
+              <Text style={[styles.typeBadgeText, badgeTextStyle]}>
+                {badgeLabel}
+              </Text>
+            </View>
           </View>
         </View>
         <Text style={styles.clientName}>{item.client?.name ?? '—'}</Text>
@@ -112,7 +124,19 @@ export default function ParkingScreen() {
           </View>
         ) : null}
 
-        {isOnetime && (
+        {isLombard && (
+          <View style={[styles.costRow, { backgroundColor: '#fef3c7' }]}>
+            <Wallet size={14} color="#b45309" />
+            <Text style={[styles.costLabel, { color: '#b45309' }]}>
+              {item.days} сут. × {item.session.lombardRateApplied ?? tariffs.lombardRate} ₽
+            </Text>
+            <Text style={[styles.costValue, { color: '#b45309' }]}>
+              {item.days * (item.session.lombardRateApplied ?? tariffs.lombardRate)} ₽
+            </Text>
+          </View>
+        )}
+
+        {isOnetime && !isLombard && (
           <View style={styles.costRow}>
             <Wallet size={14} color={Colors.warning} />
             <Text style={styles.costLabel}>
@@ -339,6 +363,28 @@ const styles = StyleSheet.create({
   },
   typeBadgeTextOnetime: {
     color: Colors.warning,
+  },
+  typeBadgeLombard: {
+    backgroundColor: '#fef3c7',
+  },
+  typeBadgeTextLombard: {
+    color: '#b45309',
+  },
+  typeBadgeDebt: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    backgroundColor: Colors.dangerLight,
+  },
+  typeBadgeTextDebt: {
+    fontSize: 12,
+    fontWeight: '600' as const,
+    color: Colors.danger,
+  },
+  badgeRow: {
+    flexDirection: 'row' as const,
+    gap: 6,
+    alignItems: 'center' as const,
   },
   clientName: {
     fontSize: 15,

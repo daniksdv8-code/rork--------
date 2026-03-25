@@ -41,7 +41,7 @@ export default function DebtorsScreen() {
         <TouchableOpacity
           style={styles.payBtn}
           onPress={() => {
-            if (item.clientDebt && item.clientDebt.totalAmount > 0) {
+            if ((item.clientDebt && item.clientDebt.totalAmount > 0) || item.debts.length > 1) {
               router.push({
                 pathname: '/pay-debt-modal',
                 params: { clientId: item.client!.id, clientName: item.client!.name, totalDebt: String(item.totalDebt), mode: 'client_debt' },
@@ -51,7 +51,7 @@ export default function DebtorsScreen() {
               if (firstDebt) {
                 router.push({
                   pathname: '/pay-debt-modal',
-                  params: { debtId: firstDebt.id, clientName: item.client!.name, totalDebt: String(item.totalDebt) },
+                  params: { debtId: firstDebt.id, clientId: item.client!.id, clientName: item.client!.name, totalDebt: String(item.totalDebt) },
                 });
               }
             }
