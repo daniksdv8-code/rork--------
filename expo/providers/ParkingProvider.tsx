@@ -2768,47 +2768,75 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   }, [currentUser, getCurrentMonth, logAction, schedulePush]);
 
   const createBackup = useCallback((): string => {
+    const snapshot = latestDataRef.current;
     const backupData = {
-      version: 1,
+      formatId: 'park_manager_backup',
+      version: 2,
       createdAt: new Date().toISOString(),
       createdBy: currentUser?.name ?? 'unknown',
       data: {
-        clients: latestDataRef.current.clients,
-        cars: latestDataRef.current.cars,
-        sessions: latestDataRef.current.sessions,
-        subscriptions: latestDataRef.current.subscriptions,
-        payments: latestDataRef.current.payments,
-        debts: latestDataRef.current.debts,
-        transactions: latestDataRef.current.transactions,
-        tariffs: latestDataRef.current.tariffs,
-        shifts: latestDataRef.current.shifts,
-        expenses: latestDataRef.current.expenses,
-        withdrawals: latestDataRef.current.withdrawals,
-        users: latestDataRef.current.users,
-        deletedClientIds: latestDataRef.current.deletedClientIds,
-        scheduledShifts: latestDataRef.current.scheduledShifts,
-        actionLogs: latestDataRef.current.actionLogs,
-        adminExpenses: latestDataRef.current.adminExpenses,
-        adminCashOperations: latestDataRef.current.adminCashOperations,
-        expenseCategories: latestDataRef.current.expenseCategories,
-        dailyDebtAccruals: latestDataRef.current.dailyDebtAccruals,
-        clientDebts: latestDataRef.current.clientDebts,
-        cashOperations: latestDataRef.current.cashOperations,
-        teamViolations: latestDataRef.current.teamViolations,
+        clients: snapshot.clients,
+        cars: snapshot.cars,
+        sessions: snapshot.sessions,
+        subscriptions: snapshot.subscriptions,
+        payments: snapshot.payments,
+        debts: snapshot.debts,
+        transactions: snapshot.transactions,
+        tariffs: snapshot.tariffs,
+        shifts: snapshot.shifts,
+        expenses: snapshot.expenses,
+        withdrawals: snapshot.withdrawals,
+        users: snapshot.users,
+        deletedClientIds: snapshot.deletedClientIds,
+        scheduledShifts: snapshot.scheduledShifts,
+        actionLogs: snapshot.actionLogs,
+        adminExpenses: snapshot.adminExpenses,
+        adminCashOperations: snapshot.adminCashOperations,
+        expenseCategories: snapshot.expenseCategories,
+        dailyDebtAccruals: snapshot.dailyDebtAccruals,
+        clientDebts: snapshot.clientDebts,
+        cashOperations: snapshot.cashOperations,
+        teamViolations: snapshot.teamViolations,
       },
     };
-    logAction('backup_create', 'Создана резервная копия', `Клиентов: ${backupData.data.clients.length}, машин: ${backupData.data.cars.length}`);
-    console.log('[Backup] Created backup');
-    return JSON.stringify(backupData);
+    const jsonResult = JSON.stringify(backupData);
+    console.log(`[Backup] Created backup: ${jsonResult.length} bytes, clients=${snapshot.clients.length}, cars=${snapshot.cars.length}`);
+    logAction('backup_create', 'Создана резервная копия', `Клиентов: ${snapshot.clients.length}, машин: ${snapshot.cars.length}`);
+    return jsonResult;
   }, [currentUser, logAction]);
 
   const getPreRestoreBackup = useCallback((): string => {
+    const snapshot = latestDataRef.current;
     const backupData = {
-      version: 1,
+      formatId: 'park_manager_backup',
+      version: 2,
       createdAt: new Date().toISOString(),
       createdBy: currentUser?.name ?? 'system',
       isPreRestore: true,
-      data: { ...latestDataRef.current },
+      data: {
+        clients: snapshot.clients,
+        cars: snapshot.cars,
+        sessions: snapshot.sessions,
+        subscriptions: snapshot.subscriptions,
+        payments: snapshot.payments,
+        debts: snapshot.debts,
+        transactions: snapshot.transactions,
+        tariffs: snapshot.tariffs,
+        shifts: snapshot.shifts,
+        expenses: snapshot.expenses,
+        withdrawals: snapshot.withdrawals,
+        users: snapshot.users,
+        deletedClientIds: snapshot.deletedClientIds,
+        scheduledShifts: snapshot.scheduledShifts,
+        actionLogs: snapshot.actionLogs,
+        adminExpenses: snapshot.adminExpenses,
+        adminCashOperations: snapshot.adminCashOperations,
+        expenseCategories: snapshot.expenseCategories,
+        dailyDebtAccruals: snapshot.dailyDebtAccruals,
+        clientDebts: snapshot.clientDebts,
+        cashOperations: snapshot.cashOperations,
+        teamViolations: snapshot.teamViolations,
+      },
     };
     return JSON.stringify(backupData);
   }, [currentUser]);
@@ -2818,36 +2846,56 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     console.log('[Restore] === RESTORE STARTED, sync blocked ===');
     console.log(`[Restore] Input JSON length: ${jsonString?.length ?? 0}`);
 
+    if (!jsonString || typeof jsonString !== 'string' || jsonString.trim().length === 0) {
+      restoreInProgressRef.current = false;
+      return { success: false, error: 'Файл пустой или не содержит текста.' };
+    }
+
     let parsed: any;
     try {
-      parsed = JSON.parse(jsonString);
+      parsed = JSON.parse(jsonString.trim());
     } catch (parseErr) {
       restoreInProgressRef.current = false;
-      console.log('[Restore] JSON parse failed:', parseErr);
-      return { success: false, error: 'Файл не является валидным JSON. Убедитесь, что выбран правильный файл бэкапа.' };
+      const snippet = jsonString.trim().substring(0, 100);
+      console.log('[Restore] JSON parse failed:', parseErr, 'snippet:', snippet);
+      return { success: false, error: `Файл не является валидным JSON.\n\nОшибка: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}\n\nНачало файла: «${snippet}…»` };
     }
 
-    if (!parsed.data || !parsed.version) {
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
       restoreInProgressRef.current = false;
-      console.log('[Restore] Missing data or version in parsed backup');
-      return { success: false, error: 'Неверный формат файла: отсутствуют обязательные поля (data, version). Это не файл бэкапа ПаркМенеджера.' };
-    }
-    const d = parsed.data;
-
-    if (!Array.isArray(d.clients)) {
-      restoreInProgressRef.current = false;
-      return { success: false, error: 'Файл повреждён: отсутствует массив clients' };
-    }
-    if (!Array.isArray(d.cars)) {
-      restoreInProgressRef.current = false;
-      return { success: false, error: 'Файл повреждён: отсутствует массив cars' };
-    }
-    if (!d.tariffs || typeof d.tariffs !== 'object') {
-      restoreInProgressRef.current = false;
-      return { success: false, error: 'Файл повреждён: отсутствуют тарифы' };
+      return { success: false, error: `Файл содержит ${Array.isArray(parsed) ? 'массив' : typeof parsed}, а ожидается объект бэкапа ПаркМенеджера.` };
     }
 
-    console.log(`[Restore] Backup validated: v${parsed.version}, clients=${d.clients.length}, cars=${d.cars.length}, created=${parsed.createdAt ?? 'unknown'}`);
+    let d: Record<string, any>;
+    let detectedFormat: string;
+
+    if (parsed.data && typeof parsed.data === 'object' && !Array.isArray(parsed.data)) {
+      d = parsed.data;
+      detectedFormat = `wrapped (version=${parsed.version ?? '?'}, formatId=${parsed.formatId ?? 'none'})`;
+    } else if (Array.isArray(parsed.clients)) {
+      d = parsed;
+      detectedFormat = 'flat (raw data object)';
+    } else {
+      restoreInProgressRef.current = false;
+      const topKeys = Object.keys(parsed).slice(0, 10).join(', ');
+      console.log('[Restore] Unrecognized format, top keys:', topKeys);
+      return { success: false, error: `Неизвестный формат файла.\n\nОжидается бэкап ПаркМенеджера с полями: data, version (или плоский объект с полями clients, cars, tariffs).\n\nВаш файл содержит поля: ${topKeys}` };
+    }
+
+    console.log(`[Restore] Detected format: ${detectedFormat}`);
+
+    const missingFields: string[] = [];
+    if (!Array.isArray(d.clients)) missingFields.push('clients (массив клиентов)');
+    if (!Array.isArray(d.cars)) missingFields.push('cars (массив машин)');
+    if (!d.tariffs || typeof d.tariffs !== 'object' || Array.isArray(d.tariffs)) missingFields.push('tariffs (объект тарифов)');
+
+    if (missingFields.length > 0) {
+      restoreInProgressRef.current = false;
+      console.log('[Restore] Missing required fields:', missingFields);
+      return { success: false, error: `Файл повреждён или неполный. Отсутствуют обязательные поля:\n\n${missingFields.map(f => `• ${f}`).join('\n')}\n\nБаза данных НЕ затронута.` };
+    }
+
+    console.log(`[Restore] Backup validated: clients=${d.clients.length}, cars=${d.cars.length}, sessions=${(d.sessions ?? []).length}, created=${parsed.createdAt ?? 'unknown'}`);
 
     let preRestoreBackupJson: string;
     try {

@@ -172,6 +172,49 @@ export default function SettingsScreen() {
     }
   }, [createBackup]);
 
+  const readFileContent = useCallback(async (asset: { uri: string; name?: string | null; size?: number | null }): Promise<{ content: string | null; error: string | null }> => {
+    console.log(`[Restore] Reading file: name=${asset.name}, size=${asset.size}, uri=${asset.uri?.substring(0, 80)}...`);
+
+    if (Platform.OS === 'web') {
+      try {
+        const response = await fetch(asset.uri);
+        if (!response.ok) {
+          return { content: null, error: `HTTP ошибка при чтении: ${response.status} ${response.statusText}` };
+        }
+        const text = await response.text();
+        console.log(`[Restore] Web: read ${text.length} chars`);
+        return { content: text, error: null };
+      } catch (err) {
+        console.log('[Restore] Web read failed:', err);
+        return { content: null, error: `Ошибка чтения в браузере: ${err instanceof Error ? err.message : String(err)}` };
+      }
+    }
+
+    try {
+      const { File: FSFile } = await import('expo-file-system');
+      const file = new FSFile(asset.uri);
+      if (!file.exists) {
+        console.log('[Restore] File does not exist:', asset.uri);
+        return { content: null, error: 'Файл не найден по указанному пути. Попробуйте выбрать файл заново.' };
+      }
+      const text = file.textSync();
+      console.log(`[Restore] Native (new API): read ${text.length} chars`);
+      return { content: text, error: null };
+    } catch (primaryErr) {
+      console.log('[Restore] Native primary read failed:', primaryErr);
+    }
+
+    try {
+      const FSLegacy = await import('expo-file-system/legacy');
+      const text = await FSLegacy.readAsStringAsync(asset.uri);
+      console.log(`[Restore] Native (legacy): read ${text.length} chars`);
+      return { content: text, error: null };
+    } catch (legacyErr) {
+      console.log('[Restore] Native legacy read failed:', legacyErr);
+      return { content: null, error: `Не удалось прочитать файл: ${legacyErr instanceof Error ? legacyErr.message : String(legacyErr)}` };
+    }
+  }, []);
+
   const handleRestoreBackup = useCallback(async () => {
     setRestoreLoading(true);
     try {
@@ -187,69 +230,22 @@ export default function SettingsScreen() {
       }
 
       const asset = result.assets[0];
-      console.log(`[Restore] File selected: name=${asset.name}, size=${asset.size}, uri=${asset.uri?.substring(0, 80)}...`);
-      let jsonString: string;
 
-      if (Platform.OS === 'web') {
-        try {
-          const response = await fetch(asset.uri);
-          if (!response.ok) {
-            throw new Error(`HTTP error: ${response.status}`);
-          }
-          jsonString = await response.text();
-          console.log(`[Restore] Web: read ${jsonString.length} chars from file`);
-        } catch (webReadErr) {
-          console.log('[Restore] Failed to read file on web:', webReadErr);
-          Alert.alert('Ошибка чтения', 'Не удалось прочитать файл бэкапа в браузере. Данные не затронуты.');
-          setRestoreLoading(false);
-          return;
-        }
-      } else {
-        try {
-          const { File: FSFile } = await import('expo-file-system');
-          const file = new FSFile(asset.uri);
-          if (!file.exists) {
-            console.log('[Restore] File does not exist at path:', asset.uri);
-            Alert.alert('Ошибка', 'Файл не найден. Попробуйте выбрать файл заново. Данные не затронуты.');
-            setRestoreLoading(false);
-            return;
-          }
-          jsonString = file.textSync();
-          console.log(`[Restore] Native: read ${jsonString.length} chars, file size: ${file.size}`);
-        } catch (readErr) {
-          console.log('[Restore] Failed to read file on native (primary):', readErr);
-          try {
-            const FSLegacy = await import('expo-file-system/legacy');
-            jsonString = await FSLegacy.readAsStringAsync(asset.uri);
-            console.log(`[Restore] Native (legacy): read ${jsonString.length} chars`);
-          } catch (legacyErr) {
-            console.log('[Restore] Failed to read file on native (legacy fallback):', legacyErr);
-            Alert.alert(
-              'Ошибка чтения файла',
-              `Не удалось прочитать файл бэкапа.\n\nОшибка: ${readErr instanceof Error ? readErr.message : String(readErr)}\n\nДанные не затронуты.`
-            );
-            setRestoreLoading(false);
-            return;
-          }
-        }
-      }
+      const { content: jsonString, error: readError } = await readFileContent(asset);
 
-      if (!jsonString || jsonString.trim().length === 0) {
-        console.log('[Restore] File is empty');
-        Alert.alert('Ошибка', 'Файл бэкапа пустой. Выберите корректный файл. Данные не затронуты.');
+      if (readError || !jsonString) {
+        Alert.alert('Ошибка чтения файла', `${readError ?? 'Файл пустой или недоступен.'}\n\nДанные НЕ затронуты.`);
         setRestoreLoading(false);
         return;
       }
 
-      try {
-        JSON.parse(jsonString);
-      } catch (parseErr) {
-        console.log('[Restore] File is not valid JSON:', parseErr);
-        Alert.alert('Ошибка', 'Файл не является корректным JSON. Убедитесь, что выбран правильный файл бэкапа. Данные не затронуты.');
+      if (jsonString.trim().length === 0) {
+        Alert.alert('Ошибка', 'Файл бэкапа пустой. Выберите корректный файл.\n\nДанные НЕ затронуты.');
         setRestoreLoading(false);
         return;
       }
 
+      console.log(`[Restore] File content ready, length=${jsonString.length}, passing to restoreBackup`);
       const restoreResult = await restoreBackup(jsonString);
       setShowRestoreModal(false);
 
@@ -261,15 +257,15 @@ export default function SettingsScreen() {
         }
         Alert.alert('Готово', msgs.join('\n'));
       } else {
-        Alert.alert('Ошибка восстановления', restoreResult.error ?? 'Не удалось восстановить данные. Данные не затронуты.');
+        Alert.alert('Ошибка восстановления', `${restoreResult.error ?? 'Не удалось восстановить данные.'}\n\nДанные НЕ затронуты.`);
       }
     } catch (e) {
       console.log('[Restore] Unexpected error:', e);
-      Alert.alert('Ошибка', `Не удалось загрузить файл.\n\n${e instanceof Error ? e.message : String(e)}\n\nДанные не затронуты.`);
+      Alert.alert('Ошибка', `Непредвиденная ошибка при восстановлении.\n\n${e instanceof Error ? e.message : String(e)}\n\nДанные НЕ затронуты.`);
     } finally {
       setRestoreLoading(false);
     }
-  }, [restoreBackup]);
+  }, [restoreBackup, readFileContent]);
 
   const handleSaveTariffs = useCallback(() => {
     updateTariffs(editTariffs);
