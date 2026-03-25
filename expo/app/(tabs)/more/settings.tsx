@@ -110,9 +110,14 @@ export default function SettingsScreen() {
       let jsonString: string;
       try {
         jsonString = createBackup();
+        if (!jsonString || jsonString.length < 10) {
+          throw new Error('Backup data is empty or too short');
+        }
+        JSON.parse(jsonString);
+        console.log(`[Backup] Backup JSON created successfully, length: ${jsonString.length}`);
       } catch (readErr) {
-        console.log('[Backup] Failed to read data for backup:', readErr);
-        Alert.alert('Ошибка', 'Не удалось прочитать данные для резервной копии. Данные не затронуты.');
+        console.log('[Backup] Failed to create backup data:', readErr);
+        Alert.alert('Ошибка', 'Не удалось сформировать резервную копию. Данные не затронуты.');
         setBackupLoading(false);
         return;
       }
@@ -143,6 +148,10 @@ export default function SettingsScreen() {
           const SharingModule = await import('expo-sharing');
           const file = new FSFile(FSPaths.cache, fileName);
           file.write(jsonString);
+          const verifyContent = file.textSync();
+          if (verifyContent.length !== jsonString.length) {
+            console.log(`[Backup] File verification failed: written=${jsonString.length}, read=${verifyContent.length}`);
+          }
           await SharingModule.shareAsync(file.uri, {
             mimeType: 'application/json',
             dialogTitle: 'Сохранить резервную копию',
@@ -167,32 +176,78 @@ export default function SettingsScreen() {
     setRestoreLoading(true);
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: 'application/json',
+        type: ['application/json', '*/*'],
         copyToCacheDirectory: true,
       });
 
       if (result.canceled || !result.assets || result.assets.length === 0) {
+        console.log('[Restore] User cancelled file picker');
         setRestoreLoading(false);
         return;
       }
 
       const asset = result.assets[0];
+      console.log(`[Restore] File selected: name=${asset.name}, size=${asset.size}, uri=${asset.uri?.substring(0, 80)}...`);
       let jsonString: string;
 
       if (Platform.OS === 'web') {
-        const response = await fetch(asset.uri);
-        jsonString = await response.text();
+        try {
+          const response = await fetch(asset.uri);
+          if (!response.ok) {
+            throw new Error(`HTTP error: ${response.status}`);
+          }
+          jsonString = await response.text();
+          console.log(`[Restore] Web: read ${jsonString.length} chars from file`);
+        } catch (webReadErr) {
+          console.log('[Restore] Failed to read file on web:', webReadErr);
+          Alert.alert('Ошибка чтения', 'Не удалось прочитать файл бэкапа в браузере. Данные не затронуты.');
+          setRestoreLoading(false);
+          return;
+        }
       } else {
         try {
           const { File: FSFile } = await import('expo-file-system');
           const file = new FSFile(asset.uri);
+          if (!file.exists) {
+            console.log('[Restore] File does not exist at path:', asset.uri);
+            Alert.alert('Ошибка', 'Файл не найден. Попробуйте выбрать файл заново. Данные не затронуты.');
+            setRestoreLoading(false);
+            return;
+          }
           jsonString = file.textSync();
+          console.log(`[Restore] Native: read ${jsonString.length} chars, file size: ${file.size}`);
         } catch (readErr) {
-          console.log('[Restore] Failed to read file on native:', readErr);
-          Alert.alert('Ошибка', 'Не удалось прочитать файл бэкапа. Данные не затронуты.');
-          setRestoreLoading(false);
-          return;
+          console.log('[Restore] Failed to read file on native (primary):', readErr);
+          try {
+            const FSLegacy = await import('expo-file-system/legacy');
+            jsonString = await FSLegacy.readAsStringAsync(asset.uri);
+            console.log(`[Restore] Native (legacy): read ${jsonString.length} chars`);
+          } catch (legacyErr) {
+            console.log('[Restore] Failed to read file on native (legacy fallback):', legacyErr);
+            Alert.alert(
+              'Ошибка чтения файла',
+              `Не удалось прочитать файл бэкапа.\n\nОшибка: ${readErr instanceof Error ? readErr.message : String(readErr)}\n\nДанные не затронуты.`
+            );
+            setRestoreLoading(false);
+            return;
+          }
         }
+      }
+
+      if (!jsonString || jsonString.trim().length === 0) {
+        console.log('[Restore] File is empty');
+        Alert.alert('Ошибка', 'Файл бэкапа пустой. Выберите корректный файл. Данные не затронуты.');
+        setRestoreLoading(false);
+        return;
+      }
+
+      try {
+        JSON.parse(jsonString);
+      } catch (parseErr) {
+        console.log('[Restore] File is not valid JSON:', parseErr);
+        Alert.alert('Ошибка', 'Файл не является корректным JSON. Убедитесь, что выбран правильный файл бэкапа. Данные не затронуты.');
+        setRestoreLoading(false);
+        return;
       }
 
       const restoreResult = await restoreBackup(jsonString);
@@ -206,11 +261,11 @@ export default function SettingsScreen() {
         }
         Alert.alert('Готово', msgs.join('\n'));
       } else {
-        Alert.alert('Ошибка', restoreResult.error ?? 'Не удалось восстановить данные');
+        Alert.alert('Ошибка восстановления', restoreResult.error ?? 'Не удалось восстановить данные. Данные не затронуты.');
       }
     } catch (e) {
-      console.log('[Restore] Failed:', e);
-      Alert.alert('Ошибка', 'Не удалось загрузить файл. Данные не затронуты.');
+      console.log('[Restore] Unexpected error:', e);
+      Alert.alert('Ошибка', `Не удалось загрузить файл.\n\n${e instanceof Error ? e.message : String(e)}\n\nДанные не затронуты.`);
     } finally {
       setRestoreLoading(false);
     }
