@@ -1,8 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert, Modal, Platform, ActivityIndicator } from 'react-native';
 import { Save, UserPlus, Trash2, Bell, Lock, Eye, EyeOff, UserCheck, UserX, User, KeyRound, Pencil, AlertTriangle, X, Download, Upload, Database, ShieldCheck } from 'lucide-react-native';
-import { File, Paths } from 'expo-file-system';
-import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/providers/AuthProvider';
@@ -109,35 +107,57 @@ export default function SettingsScreen() {
   const handleCreateBackup = useCallback(async () => {
     setBackupLoading(true);
     try {
-      const jsonString = createBackup();
+      let jsonString: string;
+      try {
+        jsonString = createBackup();
+      } catch (readErr) {
+        console.log('[Backup] Failed to read data for backup:', readErr);
+        Alert.alert('Ошибка', 'Не удалось прочитать данные для резервной копии. Данные не затронуты.');
+        setBackupLoading(false);
+        return;
+      }
+
       const date = new Date();
       const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}_${String(date.getHours()).padStart(2, '0')}-${String(date.getMinutes()).padStart(2, '0')}`;
       const fileName = `parking_backup_${dateStr}.json`;
 
       if (Platform.OS === 'web') {
-        const blob = new Blob([jsonString], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = fileName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        Alert.alert('Готово', 'Резервная копия скачана');
+        try {
+          const blob = new Blob([jsonString], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = fileName;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+          Alert.alert('Готово', 'Резервная копия скачана');
+        } catch (webErr) {
+          console.log('[Backup] Web download failed:', webErr);
+          Alert.alert('Ошибка', 'Не удалось скачать файл. Данные не затронуты.');
+        }
       } else {
-        const file = new File(Paths.cache, fileName);
-        file.write(jsonString);
-        await Sharing.shareAsync(file.uri, {
-          mimeType: 'application/json',
-          dialogTitle: 'Сохранить резервную копию',
-          UTI: 'public.json',
-        });
+        try {
+          const { File: FSFile, Paths: FSPaths } = await import('expo-file-system');
+          const SharingModule = await import('expo-sharing');
+          const file = new FSFile(FSPaths.cache, fileName);
+          file.write(jsonString);
+          await SharingModule.shareAsync(file.uri, {
+            mimeType: 'application/json',
+            dialogTitle: 'Сохранить резервную копию',
+            UTI: 'public.json',
+          });
+          try { file.delete(); } catch {}
+        } catch (nativeErr) {
+          console.log('[Backup] Native share failed:', nativeErr);
+          Alert.alert('Ошибка', 'Не удалось сохранить файл. Данные не затронуты.');
+        }
       }
-      console.log('[Backup] Backup file shared/downloaded');
+      console.log('[Backup] Backup file shared/downloaded successfully');
     } catch (e) {
-      console.log('[Backup] Failed:', e);
-      Alert.alert('Ошибка', 'Не удалось создать резервную копию');
+      console.log('[Backup] Unexpected error:', e);
+      Alert.alert('Ошибка', 'Непредвиденная ошибка. Данные не затронуты.');
     } finally {
       setBackupLoading(false);
     }
@@ -163,8 +183,16 @@ export default function SettingsScreen() {
         const response = await fetch(asset.uri);
         jsonString = await response.text();
       } else {
-        const file = new File(asset.uri);
-        jsonString = file.textSync();
+        try {
+          const { File: FSFile } = await import('expo-file-system');
+          const file = new FSFile(asset.uri);
+          jsonString = file.textSync();
+        } catch (readErr) {
+          console.log('[Restore] Failed to read file on native:', readErr);
+          Alert.alert('Ошибка', 'Не удалось прочитать файл бэкапа. Данные не затронуты.');
+          setRestoreLoading(false);
+          return;
+        }
       }
 
       const restoreResult = await restoreBackup(jsonString);
@@ -182,7 +210,7 @@ export default function SettingsScreen() {
       }
     } catch (e) {
       console.log('[Restore] Failed:', e);
-      Alert.alert('Ошибка', 'Не удалось загрузить файл');
+      Alert.alert('Ошибка', 'Не удалось загрузить файл. Данные не затронуты.');
     } finally {
       setRestoreLoading(false);
     }

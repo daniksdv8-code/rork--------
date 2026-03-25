@@ -58,6 +58,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   const pushRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const localChangeCounterRef = useRef<number>(0);
   const restoreEpochRef = useRef<number>(-1);
+  const restoreInProgressRef = useRef<boolean>(false);
 
   const latestDataRef = useRef({
     clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories, dailyDebtAccruals, clientDebts, cashOperations, teamViolations,
@@ -224,7 +225,9 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       serverInitializedRef.current = true;
       serverDataAppliedRef.current = true;
 
-      if (pushingRef.current) {
+      if (restoreInProgressRef.current) {
+        console.log(`[Sync] Restore in progress, skipping server data v${version}`);
+      } else if (pushingRef.current) {
         if (skipLogVersionRef.current !== version) {
           console.log(`[Sync] Server v${version} available, push in progress — will apply after push completes`);
           skipLogVersionRef.current = version;
@@ -2807,26 +2810,33 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   }, [currentUser]);
 
   const restoreBackup = useCallback(async (jsonString: string): Promise<{ success: boolean; error?: string; preRestoreBackup?: string }> => {
+    restoreInProgressRef.current = true;
+    console.log('[Restore] === RESTORE STARTED, sync blocked ===');
     try {
       let parsed: any;
       try {
         parsed = JSON.parse(jsonString);
       } catch {
+        restoreInProgressRef.current = false;
         return { success: false, error: 'Файл не является валидным JSON' };
       }
 
       if (!parsed.data || !parsed.version) {
+        restoreInProgressRef.current = false;
         return { success: false, error: 'Неверный формат файла резервной копии (отсутствует data или version)' };
       }
       const d = parsed.data;
 
       if (!Array.isArray(d.clients)) {
+        restoreInProgressRef.current = false;
         return { success: false, error: 'Файл повреждён: отсутствует массив clients' };
       }
       if (!Array.isArray(d.cars)) {
+        restoreInProgressRef.current = false;
         return { success: false, error: 'Файл повреждён: отсутствует массив cars' };
       }
       if (!d.tariffs || typeof d.tariffs !== 'object') {
+        restoreInProgressRef.current = false;
         return { success: false, error: 'Файл повреждён: отсутствуют тарифы' };
       }
 
@@ -2922,6 +2932,9 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         console.log('[Restore] AsyncStorage save failed:', e);
       }
 
+      restoreInProgressRef.current = false;
+      console.log('[Restore] === RESTORE COMPLETED, sync unblocked ===');
+
       void utils.parking.getData.invalidate();
 
       const stats = {
@@ -2949,7 +2962,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
       return { success: true, preRestoreBackup: preRestoreBackupJson };
     } catch (e) {
-      console.log('[Restore] Failed to parse backup:', e);
+      restoreInProgressRef.current = false;
+      console.log('[Restore] Failed:', e);
       return { success: false, error: 'Не удалось прочитать файл резервной копии' };
     }
   }, [schedulePush, utils, logAction, getPreRestoreBackup]);
