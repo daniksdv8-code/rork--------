@@ -1,11 +1,11 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert, Modal, Platform, ActivityIndicator } from 'react-native';
-import { Save, UserPlus, Trash2, Bell, Lock, Eye, EyeOff, UserCheck, UserX, User, KeyRound, Pencil, AlertTriangle, X, Download, Upload, Database, ShieldCheck } from 'lucide-react-native';
+import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert, Modal, Platform, ActivityIndicator, Linking } from 'react-native';
+import { Save, UserPlus, Trash2, Bell, Lock, Eye, EyeOff, UserCheck, UserX, User, KeyRound, Pencil, AlertTriangle, X, Download, Upload, Database, ShieldCheck, ExternalLink, Copy, Link2 } from 'lucide-react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/providers/AuthProvider';
 import { useParking } from '@/providers/ParkingProvider';
-import { saveFile, openBackupUrl } from '@/utils/file-save';
+import { saveFile } from '@/utils/file-save';
 
 import { Tariffs } from '@/types';
 
@@ -20,6 +20,10 @@ export default function SettingsScreen() {
   const [backupLoading, setBackupLoading] = useState<boolean>(false);
   const [restoreLoading, setRestoreLoading] = useState<boolean>(false);
   const [showRestoreModal, setShowRestoreModal] = useState<boolean>(false);
+  const [showFallbackModal, setShowFallbackModal] = useState<boolean>(false);
+  const [fallbackUrl, setFallbackUrl] = useState<string | null>(null);
+  const [fallbackError, setFallbackError] = useState<string>('');
+  const [fallbackJsonContent, setFallbackJsonContent] = useState<string | null>(null);
 
   const [showResetModal, setShowResetModal] = useState<boolean>(false);
   const [resetConfirmText, setResetConfirmText] = useState<string>('');
@@ -113,21 +117,47 @@ export default function SettingsScreen() {
     return `${stripped}/api/backup`;
   }, []);
 
+  const showFallback = useCallback((error: string, url: string | null, jsonContent: string | null = null) => {
+    console.log(`[Backup] Showing fallback: error="${error}", url=${url ? 'yes' : 'no'}, jsonContent=${jsonContent ? jsonContent.length + ' chars' : 'no'}`);
+    setFallbackError(error);
+    setFallbackUrl(url);
+    setFallbackJsonContent(jsonContent);
+    setShowFallbackModal(true);
+  }, []);
+
+  const handleFallbackOpenUrl = useCallback(() => {
+    if (!fallbackUrl) return;
+    console.log(`[Backup] Fallback: opening URL ${fallbackUrl}`);
+    if (Platform.OS === 'web') {
+      try {
+        window.open(fallbackUrl, '_blank');
+        return;
+      } catch (e) {
+        console.log('[Backup] Fallback window.open failed:', e);
+      }
+    }
+    Linking.openURL(fallbackUrl).catch(err => {
+      console.log('[Backup] Fallback Linking.openURL failed:', err);
+      Alert.alert('Ошибка', `Не удалось открыть ссылку:\n${fallbackUrl}`);
+    });
+  }, [fallbackUrl]);
+
+  const handleFallbackCopyToClipboard = useCallback(async () => {
+    if (!fallbackJsonContent) return;
+    try {
+      const Clipboard = await import('expo-clipboard');
+      await Clipboard.setStringAsync(fallbackJsonContent);
+      Alert.alert('Скопировано', 'Данные бэкапа скопированы в буфер обмена.\nВставьте в текстовый файл и сохраните как .json');
+    } catch {
+      Alert.alert('Ошибка', 'Не удалось скопировать в буфер обмена.');
+    }
+  }, [fallbackJsonContent]);
+
   const handleCreateBackup = useCallback(async () => {
     setBackupLoading(true);
     console.log('[Backup] === EXPORT STARTED ===');
+    const serverUrl = getServerBackupUrl();
     try {
-      if (Platform.OS === 'web') {
-        const backupUrl = getServerBackupUrl();
-        if (backupUrl) {
-          console.log(`[Backup] Web: opening direct backup URL: ${backupUrl}`);
-          openBackupUrl(backupUrl);
-          Alert.alert('Скачивание', 'Открывается ссылка на бэкап в новой вкладке.\nФайл скачается автоматически.\n\nБаза данных НЕ затронута.');
-          return;
-        }
-        console.log('[Backup] Web: no server URL, falling back to client-side backup');
-      }
-
       const date = new Date();
       const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}_${String(date.getHours()).padStart(2, '0')}-${String(date.getMinutes()).padStart(2, '0')}`;
       const fileName = `parking_backup_${dateStr}.json`;
@@ -148,61 +178,54 @@ export default function SettingsScreen() {
       }
 
       if (!jsonString || jsonString.length < 10) {
-        const backupUrl = getServerBackupUrl();
-        if (backupUrl) {
-          Alert.alert(
-            'Альтернативное скачивание',
-            `Не удалось сформировать бэкап локально.\n\nОткроется ссылка для скачивания бэкапа напрямую с сервера.\n\nБаза данных НЕ затронута.`,
-            [
-              { text: 'Отмена', style: 'cancel' },
-              { text: 'Открыть ссылку', onPress: () => openBackupUrl(backupUrl) },
-            ]
-          );
-        } else {
-          Alert.alert(
-            'Ошибка экспорта',
-            'Не удалось сформировать резервную копию.\n\nВозможные причины:\n• Данные ещё не загружены с сервера\n• Нет соединения с сервером\n\nБаза данных НЕ затронута.'
-          );
-        }
+        showFallback(
+          'Не удалось сформировать бэкап локально.',
+          serverUrl,
+          null
+        );
         return;
       }
 
       const sizeKB = (jsonString.length / 1024).toFixed(1);
       console.log(`[Backup] Backup ready: ${sizeKB} KB, file: ${fileName}`);
 
-      const saved = await saveFile({
-        content: jsonString,
-        fileName,
-        mimeType: 'application/json',
-        dialogTitle: 'Сохранить резервную копию',
-        UTI: 'public.json',
-      });
+      let saved = false;
+      try {
+        saved = await saveFile({
+          content: jsonString,
+          fileName,
+          mimeType: 'application/json',
+          dialogTitle: 'Сохранить резервную копию',
+          UTI: 'public.json',
+        });
+      } catch (saveErr) {
+        console.log('[Backup] saveFile threw:', saveErr instanceof Error ? saveErr.message : String(saveErr));
+        saved = false;
+      }
 
       if (saved) {
         Alert.alert('Готово', `Резервная копия сохранена (${fileName}).\nРазмер: ${sizeKB} КБ\n\nБаза данных НЕ затронута.`);
       } else {
-        const backupUrl = getServerBackupUrl();
-        if (backupUrl) {
-          Alert.alert(
-            'Ошибка сохранения',
-            `Не удалось сохранить файл на устройство.\n\nОткроется ссылка для скачивания бэкапа напрямую.\n\nБаза данных НЕ затронута.`,
-            [
-              { text: 'Отмена', style: 'cancel' },
-              { text: 'Открыть ссылку', onPress: () => openBackupUrl(backupUrl) },
-            ]
-          );
-        }
+        showFallback(
+          `Автоматическое скачивание не сработало.\nРазмер бэкапа: ${sizeKB} КБ`,
+          serverUrl,
+          jsonString
+        );
       }
 
       console.log('[Backup] === EXPORT COMPLETED ===');
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e);
       console.log('[Backup] UNEXPECTED error:', errMsg);
-      Alert.alert('Ошибка экспорта', `Непредвиденная ошибка:\n${errMsg}\n\nБаза данных НЕ затронута.`);
+      showFallback(
+        `Ошибка при экспорте: ${errMsg}`,
+        serverUrl,
+        null
+      );
     } finally {
       setBackupLoading(false);
     }
-  }, [createBackup, getServerBackupUrl]);
+  }, [createBackup, getServerBackupUrl, showFallback]);
 
   const stripBOM = useCallback((text: string): string => {
     if (text.charCodeAt(0) === 0xFEFF) return text.slice(1);
@@ -812,6 +835,80 @@ export default function SettingsScreen() {
           <Text style={styles.resetBtnText}>Сбросить все данные</Text>
         </TouchableOpacity>
       </View>
+
+      <Modal
+        visible={showFallbackModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowFallbackModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <View style={[styles.modalWarningIcon, { backgroundColor: Colors.warningLight }]}>
+                <Download size={28} color={Colors.warning} />
+              </View>
+              <TouchableOpacity onPress={() => setShowFallbackModal(false)} style={styles.modalCloseBtn}>
+                <X size={20} color={Colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.modalTitle}>Скачивание не удалось</Text>
+            <Text style={styles.modalDesc}>
+              {fallbackError || 'Автоматическое скачивание не сработало.'}
+            </Text>
+            <Text style={styles.modalDesc}>
+              База данных НЕ затронута. Воспользуйтесь одним из способов ниже, чтобы забрать файл вручную.
+            </Text>
+
+            {fallbackUrl ? (
+              <TouchableOpacity
+                style={styles.fallbackLinkBtn}
+                onPress={handleFallbackOpenUrl}
+                activeOpacity={0.7}
+                testID="fallback-open-url-btn"
+              >
+                <ExternalLink size={18} color={Colors.white} />
+                <Text style={styles.fallbackLinkBtnText}>Открыть ссылку на бэкап</Text>
+              </TouchableOpacity>
+            ) : null}
+
+            {fallbackUrl ? (
+              <View style={styles.fallbackUrlContainer}>
+                <Link2 size={14} color={Colors.textMuted} />
+                <Text style={styles.fallbackUrlText} selectable numberOfLines={2}>
+                  {fallbackUrl}
+                </Text>
+              </View>
+            ) : null}
+
+            {fallbackJsonContent ? (
+              <TouchableOpacity
+                style={styles.fallbackCopyBtn}
+                onPress={handleFallbackCopyToClipboard}
+                activeOpacity={0.7}
+                testID="fallback-copy-btn"
+              >
+                <Copy size={18} color={Colors.info} />
+                <Text style={styles.fallbackCopyBtnText}>Скопировать бэкап в буфер</Text>
+              </TouchableOpacity>
+            ) : null}
+
+            {!fallbackUrl && !fallbackJsonContent ? (
+              <Text style={[styles.modalDesc, { color: Colors.danger }]}>
+                Нет доступных способов скачивания. Проверьте соединение с сервером и попробуйте снова.
+              </Text>
+            ) : null}
+
+            <TouchableOpacity
+              style={[styles.modalCancelBtn, { marginTop: 16 }]}
+              onPress={() => setShowFallbackModal(false)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.modalCancelText}>Закрыть</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={showResetModal}
@@ -1455,5 +1552,54 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     lineHeight: 17,
     marginTop: -4,
+  },
+  fallbackLinkBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.info,
+    height: 48,
+    borderRadius: 10,
+    gap: 8,
+    marginTop: 8,
+  },
+  fallbackLinkBtnText: {
+    color: Colors.white,
+    fontSize: 15,
+    fontWeight: '600' as const,
+  },
+  fallbackUrlContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.inputBg,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginTop: 8,
+    gap: 6,
+  },
+  fallbackUrlText: {
+    flex: 1,
+    fontSize: 12,
+    color: Colors.textSecondary,
+  },
+  fallbackCopyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.infoLight,
+    height: 44,
+    borderRadius: 10,
+    gap: 8,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: Colors.info + '30',
+  },
+  fallbackCopyBtnText: {
+    color: Colors.info,
+    fontSize: 14,
+    fontWeight: '600' as const,
   },
 });

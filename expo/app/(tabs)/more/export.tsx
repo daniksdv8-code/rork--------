@@ -1,9 +1,9 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import {
-  View, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator,
+  View, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, Modal, Alert,
 } from 'react-native';
 import { Stack } from 'expo-router';
-import { Download, Users, Receipt, Calendar, Check } from 'lucide-react-native';
+import { Download, Users, Receipt, Calendar, Check, X, Copy, AlertTriangle } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/providers/AuthProvider';
 import { useParking } from '@/providers/ParkingProvider';
@@ -58,6 +58,10 @@ export default function ExportScreen() {
   const [period, setPeriod] = useState<PeriodPreset>('30d');
   const [doneClients, setDoneClients] = useState<boolean>(false);
   const [donePayments, setDonePayments] = useState<boolean>(false);
+  const [showFallback, setShowFallback] = useState<boolean>(false);
+  const [fallbackError, setFallbackError] = useState<string>('');
+  const [fallbackContent, setFallbackContent] = useState<string | null>(null);
+  const [fallbackFileName, setFallbackFileName] = useState<string>('');
 
   const activeClients = useMemo(() => clients.filter(c => !c.deleted), [clients]);
   const activeCars = useMemo(() => cars.filter(c => !c.deleted), [cars]);
@@ -75,6 +79,24 @@ export default function ExportScreen() {
     }).length;
   }, [transactions, dateFrom, dateTo]);
 
+  const openFallback = useCallback((error: string, content: string | null, fileName: string) => {
+    setFallbackError(error);
+    setFallbackContent(content);
+    setFallbackFileName(fileName);
+    setShowFallback(true);
+  }, []);
+
+  const handleFallbackCopy = useCallback(async () => {
+    if (!fallbackContent) return;
+    try {
+      const Clipboard = await import('expo-clipboard');
+      await Clipboard.setStringAsync(fallbackContent);
+      Alert.alert('Скопировано', `Данные скопированы в буфер обмена.\nВставьте в текстовый файл и сохраните как ${fallbackFileName}`);
+    } catch {
+      Alert.alert('Ошибка', 'Не удалось скопировать в буфер.');
+    }
+  }, [fallbackContent, fallbackFileName]);
+
   const handleExportClients = useCallback(async () => {
     setExportingClients(true);
     setDoneClients(false);
@@ -88,15 +110,30 @@ export default function ExportScreen() {
       const csv = buildClientsCsv(data);
       const now = new Date();
       const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-      await shareCsv(csv, `clients_${dateStr}.csv`);
-      setDoneClients(true);
-      setTimeout(() => setDoneClients(false), 3000);
+      const fileName = `clients_${dateStr}.csv`;
+      try {
+        await shareCsv(csv, fileName);
+        setDoneClients(true);
+        setTimeout(() => setDoneClients(false), 3000);
+      } catch (shareErr) {
+        console.log('[Export] Clients share failed:', shareErr);
+        openFallback(
+          `Автоматическое скачивание не сработало.\n${shareErr instanceof Error ? shareErr.message : String(shareErr)}`,
+          csv,
+          fileName
+        );
+      }
     } catch (e) {
       console.log('[Export] Clients export error:', e);
+      openFallback(
+        `Ошибка при формировании экспорта: ${e instanceof Error ? e.message : String(e)}`,
+        null,
+        'clients.csv'
+      );
     } finally {
       setExportingClients(false);
     }
-  }, [activeClients, activeCars, sessions, debts]);
+  }, [activeClients, activeCars, sessions, debts, openFallback]);
 
   const handleExportPayments = useCallback(async () => {
     setExportingPayments(true);
@@ -114,15 +151,30 @@ export default function ExportScreen() {
       const csv = buildPaymentsCsv(data);
       const fromStr = formatDate(dateFrom.toISOString()).replace(/\./g, '-');
       const toStr = formatDate(dateTo.toISOString()).replace(/\./g, '-');
-      await shareCsv(csv, `operations_${fromStr}_${toStr}.csv`);
-      setDonePayments(true);
-      setTimeout(() => setDonePayments(false), 3000);
+      const fileName = `operations_${fromStr}_${toStr}.csv`;
+      try {
+        await shareCsv(csv, fileName);
+        setDonePayments(true);
+        setTimeout(() => setDonePayments(false), 3000);
+      } catch (shareErr) {
+        console.log('[Export] Payments share failed:', shareErr);
+        openFallback(
+          `Автоматическое скачивание не сработало.\n${shareErr instanceof Error ? shareErr.message : String(shareErr)}`,
+          csv,
+          fileName
+        );
+      }
     } catch (e) {
       console.log('[Export] Payments export error:', e);
+      openFallback(
+        `Ошибка при формировании экспорта: ${e instanceof Error ? e.message : String(e)}`,
+        null,
+        'operations.csv'
+      );
     } finally {
       setExportingPayments(false);
     }
-  }, [payments, transactions, activeClients, activeCars, sessions, dateFrom, dateTo]);
+  }, [payments, transactions, activeClients, activeCars, sessions, dateFrom, dateTo, openFallback]);
 
   if (!isAdmin) {
     return (
@@ -244,6 +296,57 @@ export default function ExportScreen() {
           Откройте в Excel, Google Sheets или Numbers.
         </Text>
       </View>
+
+      <Modal
+        visible={showFallback}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowFallback(false)}
+      >
+        <View style={styles.fallbackOverlay}>
+          <View style={styles.fallbackContent}>
+            <View style={styles.fallbackHeader}>
+              <View style={styles.fallbackIconWrap}>
+                <AlertTriangle size={28} color={Colors.warning} />
+              </View>
+              <TouchableOpacity onPress={() => setShowFallback(false)} style={styles.fallbackCloseBtn}>
+                <X size={20} color={Colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.fallbackTitle}>Скачивание не удалось</Text>
+            <Text style={styles.fallbackDesc}>
+              {fallbackError || 'Автоматическое скачивание не сработало.'}
+            </Text>
+            {fallbackContent ? (
+              <>
+                <Text style={styles.fallbackDesc}>
+                  Вы можете скопировать данные в буфер обмена, затем вставить в текстовый редактор и сохранить как {fallbackFileName}.
+                </Text>
+                <TouchableOpacity
+                  style={styles.fallbackCopyBtn}
+                  onPress={handleFallbackCopy}
+                  activeOpacity={0.7}
+                  testID="export-fallback-copy-btn"
+                >
+                  <Copy size={18} color={Colors.white} />
+                  <Text style={styles.fallbackCopyBtnText}>Скопировать данные в буфер</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <Text style={[styles.fallbackDesc, { color: Colors.danger }]}>
+                Не удалось сформировать данные. Попробуйте снова.
+              </Text>
+            )}
+            <TouchableOpacity
+              style={styles.fallbackDismissBtn}
+              onPress={() => setShowFallback(false)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.fallbackDismissText}>Закрыть</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -378,5 +481,78 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: Colors.info,
     lineHeight: 19,
+  },
+  fallbackOverlay: {
+    flex: 1,
+    backgroundColor: Colors.overlay,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  fallbackContent: {
+    backgroundColor: Colors.white,
+    borderRadius: 16,
+    padding: 24,
+    width: '100%',
+    maxWidth: 400,
+  },
+  fallbackHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  fallbackIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: Colors.warningLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fallbackCloseBtn: {
+    padding: 4,
+  },
+  fallbackTitle: {
+    fontSize: 18,
+    fontWeight: '700' as const,
+    color: Colors.text,
+    marginBottom: 8,
+  },
+  fallbackDesc: {
+    fontSize: 14,
+    color: Colors.textSecondary,
+    lineHeight: 20,
+    marginBottom: 8,
+  },
+  fallbackCopyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.info,
+    height: 48,
+    borderRadius: 10,
+    gap: 8,
+    marginTop: 8,
+  },
+  fallbackCopyBtnText: {
+    color: Colors.white,
+    fontSize: 15,
+    fontWeight: '600' as const,
+  },
+  fallbackDismissBtn: {
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: Colors.inputBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Colors.border,
+    marginTop: 12,
+  },
+  fallbackDismissText: {
+    fontSize: 15,
+    fontWeight: '600' as const,
+    color: Colors.textSecondary,
   },
 });
