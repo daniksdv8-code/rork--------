@@ -181,12 +181,6 @@ export default function SettingsScreen() {
     return false;
   }, []);
 
-  const getServerBackupUrl = useCallback((): string => {
-    const base = process.env.EXPO_PUBLIC_RORK_API_BASE_URL;
-    if (!base) throw new Error('API URL not configured');
-    return `${base}/api/backup`;
-  }, []);
-
   const handleCreateBackup = useCallback(async () => {
     setBackupLoading(true);
     console.log('[Backup] === EXPORT STARTED ===');
@@ -195,44 +189,15 @@ export default function SettingsScreen() {
       const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}_${String(date.getHours()).padStart(2, '0')}-${String(date.getMinutes()).padStart(2, '0')}`;
       const fileName = `parking_backup_${dateStr}.json`;
 
-      let jsonString: string | null = null;
-
+      let jsonString: string;
       try {
-        const backupUrl = getServerBackupUrl();
-        console.log(`[Backup] Fetching backup from server: ${backupUrl}`);
-        const resp = await fetch(backupUrl);
-        if (!resp.ok) {
-          throw new Error(`Server responded ${resp.status}: ${resp.statusText}`);
-        }
-        jsonString = await resp.text();
-        console.log(`[Backup] Server backup fetched, length=${jsonString.length}, starts: ${jsonString.substring(0, 60)}`);
-
-        if (!jsonString || jsonString.length < 10) {
-          throw new Error('Server returned empty backup');
-        }
-        if (!jsonString.trim().startsWith('{')) {
-          throw new Error(`Server returned non-JSON: starts with "${jsonString.substring(0, 30)}..."`);
-        }
-
-        try {
-          JSON.parse(jsonString);
-          console.log('[Backup] Server backup JSON validated OK');
-        } catch (valErr) {
-          throw new Error(`Server backup is not valid JSON: ${valErr instanceof Error ? valErr.message : String(valErr)}`);
-        }
-      } catch (serverErr) {
-        const errMsg = serverErr instanceof Error ? serverErr.message : String(serverErr);
-        console.log('[Backup] Server backup failed, falling back to client-side:', errMsg);
-
-        try {
-          jsonString = createBackup();
-          console.log(`[Backup] Client-side backup created, length=${jsonString.length}`);
-        } catch (clientErr) {
-          const clientErrMsg = clientErr instanceof Error ? clientErr.message : String(clientErr);
-          console.log('[Backup] Client-side backup also failed:', clientErrMsg);
-          Alert.alert('Ошибка создания бэкапа', `Не удалось сформировать резервную копию.\n\nСервер: ${errMsg}\nЛокально: ${clientErrMsg}\n\nДанные не затронуты.`);
-          return;
-        }
+        jsonString = createBackup();
+        console.log(`[Backup] Backup created, length=${jsonString.length}, starts: ${jsonString.substring(0, 80)}`);
+      } catch (createErr) {
+        const errMsg = createErr instanceof Error ? createErr.message : String(createErr);
+        console.log('[Backup] createBackup() failed:', errMsg);
+        Alert.alert('Ошибка создания бэкапа', `Не удалось сформировать резервную копию.\n\nПричина: ${errMsg}\n\nДанные не затронуты.`);
+        return;
       }
 
       if (!jsonString || jsonString.length < 10) {
@@ -240,7 +205,17 @@ export default function SettingsScreen() {
         return;
       }
 
+      try {
+        JSON.parse(jsonString);
+        console.log('[Backup] JSON validation passed');
+      } catch (parseErr) {
+        console.log('[Backup] JSON validation failed (should not happen):', parseErr);
+        Alert.alert('Ошибка', 'Сформированный бэкап содержит невалидный JSON. Обратитесь в поддержку.');
+        return;
+      }
+
       const sizeKB = (jsonString.length / 1024).toFixed(1);
+      console.log(`[Backup] Backup size: ${sizeKB} KB, fileName: ${fileName}`);
 
       if (Platform.OS === 'web') {
         console.log('[Backup] Platform is web, triggering download...');
@@ -287,7 +262,7 @@ export default function SettingsScreen() {
     } finally {
       setBackupLoading(false);
     }
-  }, [createBackup, triggerWebDownload, getServerBackupUrl]);
+  }, [createBackup, triggerWebDownload]);
 
   const stripBOM = useCallback((text: string): string => {
     if (text.charCodeAt(0) === 0xFEFF) return text.slice(1);
