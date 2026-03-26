@@ -5,6 +5,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/providers/AuthProvider';
 import { useParking } from '@/providers/ParkingProvider';
+import { vanillaTrpc } from '@/lib/trpc';
 import { Tariffs } from '@/types';
 
 export default function SettingsScreen() {
@@ -116,17 +117,14 @@ export default function SettingsScreen() {
       link.download = fileName;
       link.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0;pointer-events:none;';
       document.body.appendChild(link);
-
-      setTimeout(() => {
-        try { link.click(); } catch (e) { console.log('[Backup] link.click() error:', e); }
-      }, 100);
+      link.click();
 
       setTimeout(() => {
         try {
           document.body.removeChild(link);
           URL.revokeObjectURL(blobUrl);
         } catch {}
-      }, 3000);
+      }, 5000);
 
       console.log(`[Backup] Blob download triggered: ${fileName}, blob size: ${blob.size}`);
       return true;
@@ -141,80 +139,34 @@ export default function SettingsScreen() {
       link.download = fileName;
       link.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0;';
       document.body.appendChild(link);
-      setTimeout(() => { try { link.click(); } catch {} }, 100);
-      setTimeout(() => { try { document.body.removeChild(link); } catch {} }, 3000);
+      link.click();
+      setTimeout(() => { try { document.body.removeChild(link); } catch {} }, 5000);
       console.log(`[Backup] data:URI download triggered: ${fileName}`);
       return true;
     } catch (dataUriErr) {
       console.log('[Backup] data:URI download failed:', dataUriErr);
     }
 
-    try {
-      const w = window.open('', '_blank');
-      if (w) {
-        w.document.write('<pre>' + jsonString.replace(/</g, '&lt;') + '</pre>');
-        w.document.title = fileName;
-        w.document.close();
-        console.log('[Backup] window.open fallback triggered');
-        return true;
-      }
-    } catch (winErr) {
-      console.log('[Backup] window.open fallback failed:', winErr);
-    }
-
     console.log('[Backup] All web download methods failed');
     return false;
   }, []);
 
-  const getBackupApiUrls = useCallback((): string[] => {
-    const baseUrl = process.env.EXPO_PUBLIC_RORK_API_BASE_URL ?? '';
-    const apiBase = baseUrl.replace(/\/api\/trpc\/?$/, '').replace(/\/trpc\/?$/, '').replace(/\/+$/, '');
-    const urls = [
-      `${apiBase}/api/backup`,
-      `${apiBase}/backup`,
-      `${baseUrl.replace(/\/trpc\/?$/, '').replace(/\/+$/, '')}/backup`,
-    ];
-    const unique = [...new Set(urls.filter(u => u.length > 10))];
-    console.log(`[Backup] Backup URLs to try: ${unique.join(', ')}`);
-    return unique;
-  }, []);
-
-  const tryFetchServerBackup = useCallback(async (): Promise<string | null> => {
-    const urls = getBackupApiUrls();
-    for (const backupUrl of urls) {
-      try {
-        console.log(`[Backup] Trying server: ${backupUrl}`);
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 10000);
-        const response = await fetch(backupUrl, {
-          method: 'GET',
-          headers: { 'Accept': 'application/json' },
-          signal: controller.signal,
-        });
-        clearTimeout(timeout);
-        if (!response.ok) {
-          console.log(`[Backup] Server ${backupUrl} returned ${response.status}`);
-          continue;
-        }
-        const text = await response.text();
-        if (!text || text.length < 10) {
-          console.log(`[Backup] Server response too short: ${text.length}`);
-          continue;
-        }
-        const trimmed = text.trim();
-        if (!trimmed.startsWith('{')) {
-          console.log(`[Backup] Server response not JSON object, starts with: ${trimmed.substring(0, 30)}`);
-          continue;
-        }
-        JSON.parse(trimmed);
-        console.log(`[Backup] Server backup validated OK from ${backupUrl}, ${trimmed.length} chars`);
-        return trimmed;
-      } catch (err) {
-        console.log(`[Backup] Server ${backupUrl} failed:`, err instanceof Error ? err.message : String(err));
+  const tryFetchServerBackupViaTrpc = useCallback(async (): Promise<string | null> => {
+    try {
+      console.log('[Backup] Fetching backup via tRPC...');
+      const result = await vanillaTrpc.parking.getBackup.query() as any;
+      if (result && result.success && result.backup) {
+        const jsonStr = JSON.stringify(result.backup);
+        console.log(`[Backup] tRPC backup OK, ${jsonStr.length} chars`);
+        return jsonStr;
       }
+      console.log('[Backup] tRPC backup returned empty or failed:', result?.error);
+      return null;
+    } catch (err) {
+      console.log('[Backup] tRPC backup failed:', err instanceof Error ? err.message : String(err));
+      return null;
     }
-    return null;
-  }, [getBackupApiUrls]);
+  }, []);
 
   const handleCreateBackup = useCallback(async () => {
     setBackupLoading(true);
@@ -230,7 +182,6 @@ export default function SettingsScreen() {
       try {
         jsonString = createBackup();
         if (jsonString && jsonString.length > 10) {
-          JSON.parse(jsonString);
           console.log(`[Backup] Client backup OK, ${jsonString.length} chars`);
         } else {
           console.log('[Backup] Client backup returned empty/short result');
@@ -242,16 +193,23 @@ export default function SettingsScreen() {
       }
 
       if (!jsonString) {
-        console.log('[Backup] Trying server fallback...');
-        const serverJson = await tryFetchServerBackup();
-        if (serverJson) {
-          jsonString = serverJson;
-          source = 'сервер';
+        console.log('[Backup] Client backup failed, trying tRPC server fallback...');
+        try {
+          const serverJson = await tryFetchServerBackupViaTrpc();
+          if (serverJson && serverJson.length > 10) {
+            jsonString = serverJson;
+            source = 'сервер (tRPC)';
+          }
+        } catch (trpcErr) {
+          console.log('[Backup] tRPC fallback error:', trpcErr instanceof Error ? trpcErr.message : String(trpcErr));
         }
       }
 
       if (!jsonString || jsonString.length < 10) {
-        Alert.alert('Ошибка экспорта', 'Не удалось сформировать резервную копию.\n\nДанные ещё не загружены или пусты.\n\nБаза данных НЕ затронута.');
+        Alert.alert(
+          'Ошибка экспорта',
+          'Не удалось сформировать резервную копию.\n\nВозможные причины:\n• Данные ещё не загружены с сервера\n• Нет соединения с сервером\n\nБаза данных НЕ затронута.'
+        );
         return;
       }
 
@@ -295,7 +253,7 @@ export default function SettingsScreen() {
     } finally {
       setBackupLoading(false);
     }
-  }, [createBackup, triggerWebDownload, tryFetchServerBackup]);
+  }, [createBackup, triggerWebDownload, tryFetchServerBackupViaTrpc]);
 
   const stripBOM = useCallback((text: string): string => {
     if (text.charCodeAt(0) === 0xFEFF) return text.slice(1);

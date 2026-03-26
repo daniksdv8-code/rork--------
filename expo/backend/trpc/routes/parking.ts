@@ -492,6 +492,24 @@ export const parkingRouter = createTRPCRouter({
     };
   }),
 
+  getBackup: publicProcedure.query(() => {
+    try {
+      const clientData = getStoreDataForClient();
+      const backupObj = {
+        formatId: 'park_manager_backup',
+        version: 2,
+        createdAt: new Date().toISOString(),
+        createdBy: 'server',
+        data: clientData ?? {},
+      };
+      console.log(`[Backup] tRPC getBackup called, clients=${(clientData as any)?.clients?.length ?? 0}`);
+      return { success: true as const, backup: backupObj };
+    } catch (e) {
+      console.error('[Backup] tRPC getBackup error:', e);
+      return { success: false as const, error: String(e) };
+    }
+  }),
+
   login: publicProcedure
     .input(
       z.object({
