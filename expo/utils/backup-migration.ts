@@ -24,12 +24,28 @@ export function detectBackupVersion(parsed: Record<string, any>): number {
   }
 
   if (parsed.data && typeof parsed.data === 'object' && !Array.isArray(parsed.data)) {
-    if (Array.isArray(parsed.data.clients)) {
+    const d = parsed.data;
+    if (Array.isArray(d.clients) || Array.isArray(d.cars) || Array.isArray(d.sessions) || Array.isArray(d.parking_entries)) {
       return 1;
     }
   }
 
-  if (Array.isArray(parsed.clients)) {
+  if (Array.isArray(parsed.clients) || Array.isArray(parsed.cars)) {
+    return 0;
+  }
+
+  if (Array.isArray(parsed.parking_entries) || Array.isArray(parsed.entries)) {
+    return 0;
+  }
+
+  if (parsed.backup && typeof parsed.backup === 'object') {
+    return 0;
+  }
+
+  const keys = Object.keys(parsed);
+  const knownKeys = ['clients', 'cars', 'sessions', 'parking_entries', 'entries', 'debts', 'payments', 'shifts', 'tariffs', 'transactions', 'data', 'backup', 'expenses', 'users', 'subscriptions'];
+  const matchCount = keys.filter(k => knownKeys.includes(k)).length;
+  if (matchCount >= 2) {
     return 0;
   }
 
@@ -51,6 +67,14 @@ function extractDataObject(parsed: Record<string, any>, version: number): Record
 
   if (parsed.data && typeof parsed.data === 'object' && Array.isArray(parsed.data.clients)) {
     return parsed.data;
+  }
+
+  if (parsed.backup && typeof parsed.backup === 'object') {
+    return parsed.backup;
+  }
+
+  if (Array.isArray(parsed.cars) || Array.isArray(parsed.parking_entries) || Array.isArray(parsed.entries)) {
+    return parsed;
   }
 
   return null;

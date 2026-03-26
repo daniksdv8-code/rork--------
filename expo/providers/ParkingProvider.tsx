@@ -2852,29 +2852,48 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       return { success: false, error: 'Файл пустой или не содержит текста.' };
     }
 
+    let cleanInput = jsonString.trim();
+    if (cleanInput.charCodeAt(0) === 0xFEFF) cleanInput = cleanInput.slice(1);
+
+    if (cleanInput.startsWith('<!') || cleanInput.startsWith('<html') || cleanInput.startsWith('<HTML')) {
+      restoreInProgressRef.current = false;
+      return { success: false, error: 'Файл содержит HTML вместо JSON.\n\nВозможно, ссылка на бэкап вела на страницу ошибки или авторизации, а не на сам файл.\n\nСкачайте файл бэкапа вручную и загрузите локальный .json файл.\n\nБаза данных НЕ затронута.' };
+    }
+
     let parsed: any;
     try {
-      parsed = JSON.parse(jsonString.trim());
+      parsed = JSON.parse(cleanInput);
     } catch (parseErr) {
       restoreInProgressRef.current = false;
-      const snippet = jsonString.trim().substring(0, 100);
-      console.log('[Restore] JSON parse failed:', parseErr, 'snippet:', snippet);
-      return { success: false, error: `Файл не является валидным JSON.\n\nОшибка: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}\n\nНачало файла: «${snippet}…»` };
+      const snippet = cleanInput.substring(0, 120);
+      const errMsg = parseErr instanceof Error ? parseErr.message : String(parseErr);
+      console.log('[Restore] JSON parse failed:', errMsg, 'snippet:', snippet);
+
+      let hint = '';
+      if (snippet.startsWith('<')) {
+        hint = '\n\nФайл похож на XML/HTML — убедитесь, что загружаете именно .json файл бэкапа.';
+      } else if (!snippet.startsWith('{') && !snippet.startsWith('[')) {
+        hint = `\n\nФайл начинается с неожиданных символов.\nНачало: «${snippet.substring(0, 60)}…»`;
+      } else {
+        hint = `\n\nНачало файла: «${snippet.substring(0, 80)}…»`;
+      }
+
+      return { success: false, error: `Не удалось разобрать файл как JSON.\n\nОшибка: ${errMsg}${hint}\n\nБаза данных НЕ затронута.` };
     }
 
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
       restoreInProgressRef.current = false;
-      return { success: false, error: `Файл содержит ${Array.isArray(parsed) ? 'массив' : typeof parsed}, а ожидается объект бэкапа ПаркМенеджера.` };
+      return { success: false, error: `Файл содержит ${Array.isArray(parsed) ? 'массив' : typeof parsed}, а ожидается объект бэкапа ПаркМенеджера.\n\nБаза данных НЕ затронута.` };
     }
 
     const backupVersion = detectBackupVersion(parsed);
-    console.log(`[Restore] Detected backup version: ${backupVersion}`);
+    console.log(`[Restore] Detected backup version: ${backupVersion}, keys: ${Object.keys(parsed).slice(0, 15).join(', ')}`);
 
     if (backupVersion === -1) {
       restoreInProgressRef.current = false;
       const topKeys = Object.keys(parsed).slice(0, 15).join(', ');
       console.log('[Restore] Unrecognized format, top keys:', topKeys);
-      return { success: false, error: `Неизвестный формат файла.\n\nОжидается бэкап ПаркМенеджера (новый или старый формат) с полями: data, clients, cars и др.\n\nВаш файл содержит поля: ${topKeys}\n\nБаза данных НЕ затронута.` };
+      return { success: false, error: `Неизвестный формат файла.\n\nОжидается бэкап ПаркМенеджера (новый или старый формат) с полями: data, clients, cars и др.\n\nВаш файл содержит поля: ${topKeys}\n\nЕсли это старый бэкап — возможно, формат слишком отличается от поддерживаемых версий.\n\nБаза данных НЕ затронута.` };
     }
 
     const migration = migrateBackupData(parsed);

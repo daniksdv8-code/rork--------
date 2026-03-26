@@ -172,8 +172,33 @@ export default function SettingsScreen() {
     }
   }, [createBackup]);
 
+  const stripBOM = useCallback((text: string): string => {
+    if (text.charCodeAt(0) === 0xFEFF) return text.slice(1);
+    if (text.startsWith('\uFEFF')) return text.slice(1);
+    return text;
+  }, []);
+
+  const validateJsonContent = useCallback((text: string): { clean: string | null; error: string | null } => {
+    if (!text || text.trim().length === 0) {
+      return { clean: null, error: 'Файл пустой.' };
+    }
+    const cleaned = stripBOM(text).trim();
+    if (cleaned.startsWith('<!') || cleaned.startsWith('<html') || cleaned.startsWith('<HTML')) {
+      return { clean: null, error: 'Файл содержит HTML вместо JSON. Возможно, ссылка на бэкап ведёт на страницу ошибки или авторизации, а не на сам файл.' };
+    }
+    if (cleaned.startsWith('<')) {
+      return { clean: null, error: 'Файл содержит XML/HTML вместо JSON. Убедитесь, что вы загружаете именно файл бэкапа (.json).' };
+    }
+    if (!cleaned.startsWith('{') && !cleaned.startsWith('[')) {
+      const snippet = cleaned.substring(0, 60);
+      return { clean: null, error: `Файл не начинается с { или [.\n\nНачало файла: «${snippet}…»\n\nОжидается JSON-файл бэкапа ПаркМенеджера.` };
+    }
+    return { clean: cleaned, error: null };
+  }, [stripBOM]);
+
   const readFileContent = useCallback(async (asset: { uri: string; name?: string | null; size?: number | null }): Promise<{ content: string | null; error: string | null }> => {
-    console.log(`[Restore] Reading file: name=${asset.name}, size=${asset.size}, uri=${asset.uri?.substring(0, 80)}...`);
+    console.log(`[Restore] Reading file: name=${asset.name}, size=${asset.size}, uri=${asset.uri?.substring(0, 120)}...`);
+    const errors: string[] = [];
 
     if (Platform.OS === 'web') {
       try {
@@ -182,8 +207,10 @@ export default function SettingsScreen() {
           return { content: null, error: `HTTP ошибка при чтении: ${response.status} ${response.statusText}` };
         }
         const text = await response.text();
-        console.log(`[Restore] Web: read ${text.length} chars`);
-        return { content: text, error: null };
+        console.log(`[Restore] Web: read ${text.length} chars, first 40: ${text.substring(0, 40)}`);
+        const { clean, error } = validateJsonContent(text);
+        if (error) return { content: null, error };
+        return { content: clean, error: null };
       } catch (err) {
         console.log('[Restore] Web read failed:', err);
         return { content: null, error: `Ошибка чтения в браузере: ${err instanceof Error ? err.message : String(err)}` };
@@ -193,27 +220,74 @@ export default function SettingsScreen() {
     try {
       const { File: FSFile } = await import('expo-file-system');
       const file = new FSFile(asset.uri);
-      if (!file.exists) {
-        console.log('[Restore] File does not exist:', asset.uri);
-        return { content: null, error: 'Файл не найден по указанному пути. Попробуйте выбрать файл заново.' };
+      if (file.exists) {
+        const text = file.textSync();
+        console.log(`[Restore] Native (new API): read ${text.length} chars, first 40: ${text.substring(0, 40)}`);
+        const { clean, error } = validateJsonContent(text);
+        if (error) return { content: null, error };
+        return { content: clean, error: null };
+      } else {
+        console.log('[Restore] File does not exist via new API:', asset.uri);
+        errors.push('new API: файл не найден');
       }
-      const text = file.textSync();
-      console.log(`[Restore] Native (new API): read ${text.length} chars`);
-      return { content: text, error: null };
     } catch (primaryErr) {
-      console.log('[Restore] Native primary read failed:', primaryErr);
+      const msg = primaryErr instanceof Error ? primaryErr.message : String(primaryErr);
+      console.log('[Restore] Native primary read failed:', msg);
+      errors.push(`new API: ${msg}`);
     }
 
     try {
       const FSLegacy = await import('expo-file-system/legacy');
       const text = await FSLegacy.readAsStringAsync(asset.uri);
-      console.log(`[Restore] Native (legacy): read ${text.length} chars`);
-      return { content: text, error: null };
+      console.log(`[Restore] Native (legacy text): read ${text.length} chars, first 40: ${text.substring(0, 40)}`);
+      const { clean, error } = validateJsonContent(text);
+      if (error) return { content: null, error };
+      return { content: clean, error: null };
     } catch (legacyErr) {
-      console.log('[Restore] Native legacy read failed:', legacyErr);
-      return { content: null, error: `Не удалось прочитать файл: ${legacyErr instanceof Error ? legacyErr.message : String(legacyErr)}` };
+      const msg = legacyErr instanceof Error ? legacyErr.message : String(legacyErr);
+      console.log('[Restore] Native legacy text read failed:', msg);
+      errors.push(`legacy text: ${msg}`);
     }
-  }, []);
+
+    try {
+      const FSLegacy = await import('expo-file-system/legacy');
+      const base64 = await FSLegacy.readAsStringAsync(asset.uri, { encoding: FSLegacy.EncodingType.Base64 });
+      console.log(`[Restore] Native (legacy base64): read ${base64.length} base64 chars`);
+      const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+      const decoder = new TextDecoder('utf-8');
+      const text = decoder.decode(bytes);
+      console.log(`[Restore] Decoded base64 → ${text.length} chars, first 40: ${text.substring(0, 40)}`);
+      const { clean, error } = validateJsonContent(text);
+      if (error) return { content: null, error };
+      return { content: clean, error: null };
+    } catch (base64Err) {
+      const msg = base64Err instanceof Error ? base64Err.message : String(base64Err);
+      console.log('[Restore] Native base64 read failed:', msg);
+      errors.push(`legacy base64: ${msg}`);
+    }
+
+    try {
+      const response = await fetch(asset.uri);
+      if (response.ok) {
+        const text = await response.text();
+        console.log(`[Restore] Fetch fallback: read ${text.length} chars, first 40: ${text.substring(0, 40)}`);
+        const { clean, error } = validateJsonContent(text);
+        if (error) return { content: null, error };
+        return { content: clean, error: null };
+      } else {
+        errors.push(`fetch: HTTP ${response.status}`);
+      }
+    } catch (fetchErr) {
+      const msg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+      console.log('[Restore] Fetch fallback failed:', msg);
+      errors.push(`fetch: ${msg}`);
+    }
+
+    return {
+      content: null,
+      error: `Не удалось прочитать файл ни одним способом.\n\nПробовали:\n${errors.map(e => `• ${e}`).join('\n')}\n\nПопробуйте:\n• Убедиться, что файл имеет расширение .json\n• Загрузить файл повторно\n• Если бэкап с сайта — скачайте его вручную и затем выберите локальный файл`,
+    };
+  }, [validateJsonContent]);
 
   const handleRestoreBackup = useCallback(async () => {
     setRestoreLoading(true);
