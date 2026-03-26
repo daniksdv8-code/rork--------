@@ -15,6 +15,7 @@ import { calculateDays, addMonths, isExpired, isToday, daysUntil, getMonthlyAmou
 import { formatPlateNumber } from '@/utils/plate';
 import { useAuth } from './AuthProvider';
 import { trpc, vanillaTrpc } from '@/lib/trpc';
+import { migrateBackupData, detectBackupVersion } from '@/utils/backup-migration';
 
 const STORAGE_KEY = 'park_data';
 const MAX_TRANSACTIONS = 10000;
@@ -2866,36 +2867,39 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       return { success: false, error: `Файл содержит ${Array.isArray(parsed) ? 'массив' : typeof parsed}, а ожидается объект бэкапа ПаркМенеджера.` };
     }
 
-    let d: Record<string, any>;
-    let detectedFormat: string;
+    const backupVersion = detectBackupVersion(parsed);
+    console.log(`[Restore] Detected backup version: ${backupVersion}`);
 
-    if (parsed.data && typeof parsed.data === 'object' && !Array.isArray(parsed.data)) {
-      d = parsed.data;
-      detectedFormat = `wrapped (version=${parsed.version ?? '?'}, formatId=${parsed.formatId ?? 'none'})`;
-    } else if (Array.isArray(parsed.clients)) {
-      d = parsed;
-      detectedFormat = 'flat (raw data object)';
-    } else {
+    if (backupVersion === -1) {
       restoreInProgressRef.current = false;
-      const topKeys = Object.keys(parsed).slice(0, 10).join(', ');
+      const topKeys = Object.keys(parsed).slice(0, 15).join(', ');
       console.log('[Restore] Unrecognized format, top keys:', topKeys);
-      return { success: false, error: `Неизвестный формат файла.\n\nОжидается бэкап ПаркМенеджера с полями: data, version (или плоский объект с полями clients, cars, tariffs).\n\nВаш файл содержит поля: ${topKeys}` };
+      return { success: false, error: `Неизвестный формат файла.\n\nОжидается бэкап ПаркМенеджера (новый или старый формат) с полями: data, clients, cars и др.\n\nВаш файл содержит поля: ${topKeys}\n\nБаза данных НЕ затронута.` };
     }
 
-    console.log(`[Restore] Detected format: ${detectedFormat}`);
+    const migration = migrateBackupData(parsed);
 
-    const missingFields: string[] = [];
-    if (!Array.isArray(d.clients)) missingFields.push('clients (массив клиентов)');
-    if (!Array.isArray(d.cars)) missingFields.push('cars (массив машин)');
-    if (!d.tariffs || typeof d.tariffs !== 'object' || Array.isArray(d.tariffs)) missingFields.push('tariffs (объект тарифов)');
-
-    if (missingFields.length > 0) {
+    if (migration.migratedTo === -1) {
       restoreInProgressRef.current = false;
-      console.log('[Restore] Missing required fields:', missingFields);
-      return { success: false, error: `Файл повреждён или неполный. Отсутствуют обязательные поля:\n\n${missingFields.map(f => `• ${f}`).join('\n')}\n\nБаза данных НЕ затронута.` };
+      console.log('[Restore] Migration failed:', migration.warnings);
+      return { success: false, error: `Не удалось обработать файл бэкапа.\n\n${migration.warnings.join('\n')}\n\nБаза данных НЕ затронута.` };
     }
 
-    console.log(`[Restore] Backup validated: clients=${d.clients.length}, cars=${d.cars.length}, sessions=${(d.sessions ?? []).length}, created=${parsed.createdAt ?? 'unknown'}`);
+    const d = migration.data;
+
+    if (!Array.isArray(d.clients) || d.clients.length === 0) {
+      const hasAnything = Array.isArray(d.cars) && d.cars.length > 0;
+      if (!hasAnything) {
+        restoreInProgressRef.current = false;
+        return { success: false, error: 'Файл бэкапа не содержит данных (нет клиентов и машин).\n\nБаза данных НЕ затронута.' };
+      }
+    }
+
+    if (migration.warnings.length > 0) {
+      console.log(`[Restore] Migration warnings: ${migration.warnings.join('; ')}`);
+    }
+
+    console.log(`[Restore] Backup migrated: v${migration.detectedVersion} → v${migration.migratedTo}, clients=${(d.clients ?? []).length}, cars=${(d.cars ?? []).length}, sessions=${(d.sessions ?? []).length}, created=${parsed.createdAt ?? 'unknown'}`);
 
     let preRestoreBackupJson: string;
     try {
@@ -2920,28 +2924,28 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     pushingRef.current = false;
 
     const restorePayload = {
-      clients: d.clients ?? [],
-      cars: d.cars ?? [],
-      sessions: d.sessions ?? [],
-      subscriptions: d.subscriptions ?? [],
-      payments: d.payments ?? [],
-      debts: d.debts ?? [],
-      transactions: d.transactions ?? [],
-      tariffs: d.tariffs ?? EMPTY_DATA.tariffs,
-      shifts: d.shifts ?? [],
-      expenses: d.expenses ?? [],
-      withdrawals: d.withdrawals ?? [],
-      users: (d.users && d.users.length > 0) ? d.users : latestDataRef.current.users,
-      deletedClientIds: d.deletedClientIds ?? [],
-      scheduledShifts: d.scheduledShifts ?? [],
-      actionLogs: d.actionLogs ?? [],
-      adminExpenses: d.adminExpenses ?? [],
-      adminCashOperations: d.adminCashOperations ?? [],
-      expenseCategories: d.expenseCategories ?? [],
-      dailyDebtAccruals: d.dailyDebtAccruals ?? [],
-      clientDebts: d.clientDebts ?? [],
-      cashOperations: d.cashOperations ?? [],
-      teamViolations: d.teamViolations ?? [],
+      clients: Array.isArray(d.clients) ? d.clients : [],
+      cars: Array.isArray(d.cars) ? d.cars : [],
+      sessions: Array.isArray(d.sessions) ? d.sessions : [],
+      subscriptions: Array.isArray(d.subscriptions) ? d.subscriptions : [],
+      payments: Array.isArray(d.payments) ? d.payments : [],
+      debts: Array.isArray(d.debts) ? d.debts : [],
+      transactions: Array.isArray(d.transactions) ? d.transactions : [],
+      tariffs: (d.tariffs && typeof d.tariffs === 'object' && !Array.isArray(d.tariffs)) ? d.tariffs : EMPTY_DATA.tariffs,
+      shifts: Array.isArray(d.shifts) ? d.shifts : [],
+      expenses: Array.isArray(d.expenses) ? d.expenses : [],
+      withdrawals: Array.isArray(d.withdrawals) ? d.withdrawals : [],
+      users: (Array.isArray(d.users) && d.users.length > 0) ? d.users : latestDataRef.current.users,
+      deletedClientIds: Array.isArray(d.deletedClientIds) ? d.deletedClientIds : [],
+      scheduledShifts: Array.isArray(d.scheduledShifts) ? d.scheduledShifts : [],
+      actionLogs: Array.isArray(d.actionLogs) ? d.actionLogs : [],
+      adminExpenses: Array.isArray(d.adminExpenses) ? d.adminExpenses : [],
+      adminCashOperations: Array.isArray(d.adminCashOperations) ? d.adminCashOperations : [],
+      expenseCategories: Array.isArray(d.expenseCategories) ? d.expenseCategories : [],
+      dailyDebtAccruals: Array.isArray(d.dailyDebtAccruals) ? d.dailyDebtAccruals : [],
+      clientDebts: Array.isArray(d.clientDebts) ? d.clientDebts : [],
+      cashOperations: Array.isArray(d.cashOperations) ? d.cashOperations : [],
+      teamViolations: Array.isArray(d.teamViolations) ? d.teamViolations : [],
     };
 
     let serverResetSuccess = false;
@@ -3014,21 +3018,31 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       sessions: restorePayload.sessions.length,
       payments: restorePayload.payments.length,
     };
+    const migrationInfo = migration.detectedVersion < 2 ? `, миграция: v${migration.detectedVersion}→v${migration.migratedTo}` : '';
+    const warningInfo = migration.warnings.length > 0 ? `, предупреждения: ${migration.warnings.length}` : '';
     logAction('backup_restore', 'Восстановление из резервной копии',
       `Дата бэкапа: ${parsed.createdAt ?? '—'}, автор: ${parsed.createdBy ?? '—'}, ` +
       `клиентов: ${stats.clients}, машин: ${stats.cars}, заездов: ${stats.sessions}, ` +
-      `оплат: ${stats.payments}, сервер: ${serverResetSuccess ? 'ОК' : 'ОШИБКА'}`);
+      `оплат: ${stats.payments}, сервер: ${serverResetSuccess ? 'ОК' : 'ОШИБКА'}${migrationInfo}${warningInfo}`);
 
     console.log(`[Restore] Stats: ${JSON.stringify(stats)}, serverOk: ${serverResetSuccess}`);
+
+    const migrationWarningText = migration.warnings.length > 0
+      ? `\n\nПримечания миграции:\n${migration.warnings.map(w => `• ${w}`).join('\n')}`
+      : '';
 
     if (!serverResetSuccess) {
       localDirtyRef.current = true;
       schedulePush();
       return {
         success: true,
-        error: `Данные восстановлены локально, но синхронизация с сервером не удалась (${serverError}). Будет повторная попытка.`,
+        error: `Данные восстановлены локально, но синхронизация с сервером не удалась (${serverError}). Будет повторная попытка.${migrationWarningText}`,
         preRestoreBackup: preRestoreBackupJson,
       };
+    }
+
+    if (migrationWarningText) {
+      return { success: true, error: `Данные успешно восстановлены.${migrationWarningText}`, preRestoreBackup: preRestoreBackupJson };
     }
 
     return { success: true, preRestoreBackup: preRestoreBackupJson };
