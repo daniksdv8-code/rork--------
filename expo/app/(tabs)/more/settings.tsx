@@ -183,8 +183,10 @@ export default function SettingsScreen() {
 
   const getBackupApiUrl = useCallback((): string => {
     const baseUrl = process.env.EXPO_PUBLIC_RORK_API_BASE_URL ?? '';
-    const apiBase = baseUrl.replace(/\/api\/trpc\/?$/, '').replace(/\/+$/, '');
-    return `${apiBase}/api/backup`;
+    const apiBase = baseUrl.replace(/\/api\/trpc\/?$/, '').replace(/\/trpc\/?$/, '').replace(/\/+$/, '');
+    const url = `${apiBase}/api/backup`;
+    console.log(`[Backup] Constructed backup URL: ${url} (from baseUrl: ${baseUrl})`);
+    return url;
   }, []);
 
   const handleCreateBackup = useCallback(async () => {
@@ -198,62 +200,61 @@ export default function SettingsScreen() {
       let jsonString: string | null = null;
       let fetchedFromServer = false;
 
-      const backupUrl = getBackupApiUrl();
-      console.log(`[Backup] Trying server endpoint: ${backupUrl}`);
+      console.log('[Backup] Step 1: Trying client-side backup first (most reliable)');
       try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 15000);
-        const response = await fetch(backupUrl, {
-          method: 'GET',
-          headers: { 'Accept': 'application/json' },
-          signal: controller.signal,
-        });
-        clearTimeout(timeout);
-
-        if (response.ok) {
-          const text = await response.text();
-          console.log(`[Backup] Server response: ${text.length} chars, status=${response.status}`);
-          if (text && text.length > 10 && (text.trim().startsWith('{') || text.trim().startsWith('['))) {
-            try {
-              JSON.parse(text);
-              jsonString = text;
-              fetchedFromServer = true;
-              console.log('[Backup] Server backup validated OK');
-            } catch (parseErr) {
-              console.log('[Backup] Server response is not valid JSON, falling back to client:', parseErr);
-            }
-          } else {
-            console.log(`[Backup] Server response unexpected format (len=${text.length}), falling back to client`);
-          }
-        } else {
-          console.log(`[Backup] Server returned ${response.status}, falling back to client`);
-        }
-      } catch (fetchErr) {
-        const msg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
-        console.log(`[Backup] Server fetch failed: ${msg}, falling back to client`);
+        jsonString = createBackup();
+        console.log(`[Backup] Client backup created OK, length=${jsonString.length}`);
+      } catch (clientErr) {
+        const errMsg = clientErr instanceof Error ? clientErr.message : String(clientErr);
+        console.log('[Backup] Client createBackup() failed:', errMsg);
       }
 
-      if (!jsonString) {
-        console.log('[Backup] Using client-side backup creation');
+      if (!jsonString || jsonString.length < 10) {
+        console.log('[Backup] Step 2: Client backup empty/failed, trying server endpoint');
+        const backupUrl = getBackupApiUrl();
+        console.log(`[Backup] Trying server endpoint: ${backupUrl}`);
         try {
-          jsonString = createBackup();
-          console.log(`[Backup] Client backup created, length=${jsonString.length}`);
-        } catch (createErr) {
-          const errMsg = createErr instanceof Error ? createErr.message : String(createErr);
-          console.log('[Backup] createBackup() failed:', errMsg);
-          Alert.alert('Ошибка создания бэкапа', `Не удалось сформировать резервную копию.\n\nПричина: ${errMsg}\n\nДанные не затронуты.`);
-          return;
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 15000);
+          const response = await fetch(backupUrl, {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' },
+            signal: controller.signal,
+          });
+          clearTimeout(timeout);
+
+          if (response.ok) {
+            const text = await response.text();
+            console.log(`[Backup] Server response: ${text.length} chars, status=${response.status}`);
+            if (text && text.length > 10 && text.trim().startsWith('{')) {
+              try {
+                JSON.parse(text);
+                jsonString = text;
+                fetchedFromServer = true;
+                console.log('[Backup] Server backup validated OK');
+              } catch (parseErr) {
+                console.log('[Backup] Server response is not valid JSON:', parseErr);
+              }
+            } else {
+              console.log(`[Backup] Server response unexpected format (len=${text.length}, starts with: ${text.substring(0, 20)})`);
+            }
+          } else {
+            console.log(`[Backup] Server returned ${response.status}`);
+          }
+        } catch (fetchErr) {
+          const msg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+          console.log(`[Backup] Server fetch failed: ${msg}`);
         }
       }
 
       if (!jsonString || jsonString.length < 10) {
-        Alert.alert('Ошибка', 'Резервная копия пустая. Данные не затронуты.');
+        Alert.alert('Ошибка', 'Не удалось создать резервную копию. Данные ещё не загружены или пусты.\n\nДанные не затронуты.');
         return;
       }
 
       const sizeKB = (jsonString.length / 1024).toFixed(1);
       const source = fetchedFromServer ? 'сервер' : 'клиент';
-      console.log(`[Backup] Backup size: ${sizeKB} KB, source: ${source}, fileName: ${fileName}`);
+      console.log(`[Backup] Backup ready: ${sizeKB} KB, source: ${source}, fileName: ${fileName}`);
 
       if (Platform.OS === 'web') {
         console.log('[Backup] Platform is web, triggering download...');

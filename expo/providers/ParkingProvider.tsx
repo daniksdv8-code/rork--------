@@ -204,7 +204,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     }
 
     if (initialized && restoreEpochRef.current >= 0 && serverEpoch !== restoreEpochRef.current) {
-      const epochGracePeriod = restoreFinishedAtRef.current > 0 && (Date.now() - restoreFinishedAtRef.current) < 30000;
+      const epochGracePeriod = restoreFinishedAtRef.current > 0 && (Date.now() - restoreFinishedAtRef.current) < 120000;
       if (restoreInProgressRef.current || epochGracePeriod) {
         console.log(`[Sync] EPOCH CHANGE detected (local=${restoreEpochRef.current}, server=${serverEpoch}), but restore in progress/grace — skipping resync`);
         return;
@@ -233,10 +233,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       serverInitializedRef.current = true;
       serverDataAppliedRef.current = true;
 
-      const restoreGracePeriod = restoreFinishedAtRef.current > 0 && (Date.now() - restoreFinishedAtRef.current) < 30000;
+      const restoreGracePeriod = restoreFinishedAtRef.current > 0 && (Date.now() - restoreFinishedAtRef.current) < 120000;
       if (restoreInProgressRef.current || restoreGracePeriod) {
         if (restoreGracePeriod && !restoreInProgressRef.current) {
-          console.log(`[Sync] Restore grace period active (${Date.now() - restoreFinishedAtRef.current}ms since restore), skipping server data v${version}`);
+          lastSyncedVersionRef.current = version;
+          console.log(`[Sync] Restore grace period active (${Date.now() - restoreFinishedAtRef.current}ms since restore), accepting version v${version} without applying data`);
         } else {
           console.log(`[Sync] Restore in progress, skipping server data v${version}`);
         }
@@ -2703,6 +2704,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
   useEffect(() => {
     if (isLoaded && currentUser && !restoreInProgressRef.current) {
+      const restoreGrace = restoreFinishedAtRef.current > 0 && (Date.now() - restoreFinishedAtRef.current) < 120000;
+      if (restoreGrace) {
+        console.log('[Violations] Skipping ensureCurrentMonth during restore grace period');
+        return;
+      }
       ensureCurrentMonth();
     }
   }, [isLoaded, currentUser, ensureCurrentMonth]);
@@ -3091,27 +3097,28 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
     console.log('[Restore] === RESTORE COMPLETED ===');
 
+    restoreInProgressRef.current = false;
+    restoreFinishedAtRef.current = Date.now();
+
     setTimeout(() => {
-      restoreInProgressRef.current = false;
-      restoreFinishedAtRef.current = Date.now();
       if (pushTimerRef.current) { clearTimeout(pushTimerRef.current); pushTimerRef.current = null; }
       if (pushRetryTimerRef.current) { clearTimeout(pushRetryTimerRef.current); pushRetryTimerRef.current = null; }
 
       if (restoreServerOkRef.current) {
         if (localDirtyRef.current) {
-          console.log('[Restore] Sync unblocked after delay (15s), server was OK but local changes detected — pushing');
+          console.log('[Restore] Sync unblocked after delay (5s), server was OK but local changes detected — pushing');
           void pushToServer();
         } else {
-          console.log('[Restore] Sync unblocked after delay (15s), server was OK, no local changes');
+          console.log('[Restore] Sync unblocked after delay (5s), server was OK, no local changes');
           void utils.parking.getData.invalidate();
         }
       } else {
-        console.log('[Restore] Sync unblocked after delay (15s), server push FAILED — forcing re-push of restored data');
+        console.log('[Restore] Sync unblocked after delay (5s), server push FAILED — forcing re-push of restored data');
         localDirtyRef.current = true;
         localChangeCounterRef.current++;
         void pushToServer();
       }
-    }, 15000);
+    }, 5000);
 
     void utils.parking.getData.invalidate();
 

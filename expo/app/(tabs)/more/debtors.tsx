@@ -69,9 +69,10 @@ export default function DebtorsScreen() {
     if (!item.client) return null;
 
     const accrualDetails = accrualDetailsByClient[item.client.id] ?? [];
-    const hasOldDebts = item.debts.length > 0;
-    const hasAccrualDebts = accrualDetails.length > 0;
-    const hasAnyDetails = hasOldDebts || hasAccrualDebts;
+    const accrualTotal = roundMoney(accrualDetails.reduce((s, d) => s + d.amount, 0));
+    const _oldDebtsTotal = roundMoney(item.debts.reduce((s, d) => s + d.remainingAmount, 0));
+    const clientDebtAmount = item.clientDebt ? item.clientDebt.totalAmount : 0;
+    const unaccountedClientDebt = roundMoney(Math.max(0, clientDebtAmount - accrualTotal));
 
     return (
       <View style={styles.card}>
@@ -117,18 +118,28 @@ export default function DebtorsScreen() {
           </View>
         ))}
 
-        {!hasAnyDetails && item.clientDebt && item.clientDebt.totalAmount > 0 && (
+        {unaccountedClientDebt > 0 && (
           <View style={styles.debtRow}>
             <View style={styles.debtInfo}>
               <Text style={styles.debtDesc}>Начисленный долг</Text>
               <Text style={styles.debtDate}>
-                {item.clientDebt.frozenAmount > 0
+                {item.clientDebt && item.clientDebt.frozenAmount > 0
                   ? `Активный: ${roundMoney(item.clientDebt.activeAmount)} ₽ · Заморожен: ${roundMoney(item.clientDebt.frozenAmount)} ₽`
-                  : `Обновлено: ${item.clientDebt.lastUpdate ? formatDate(item.clientDebt.lastUpdate) : '—'}`
+                  : `Обновлено: ${item.clientDebt?.lastUpdate ? formatDate(item.clientDebt.lastUpdate) : '—'}`
                 }
               </Text>
             </View>
-            <Text style={styles.debtRowAmount}>{roundMoney(item.clientDebt.totalAmount)} ₽</Text>
+            <Text style={styles.debtRowAmount}>{unaccountedClientDebt} ₽</Text>
+          </View>
+        )}
+
+        {accrualDetails.length === 0 && item.debts.length === 0 && unaccountedClientDebt === 0 && item.totalDebt > 0 && (
+          <View style={styles.debtRow}>
+            <View style={styles.debtInfo}>
+              <Text style={styles.debtDesc}>Задолженность</Text>
+              <Text style={styles.debtDate}>Детали недоступны</Text>
+            </View>
+            <Text style={styles.debtRowAmount}>{item.totalDebt} ₽</Text>
           </View>
         )}
 
