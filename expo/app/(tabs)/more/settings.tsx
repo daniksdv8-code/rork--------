@@ -5,7 +5,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/providers/AuthProvider';
 import { useParking } from '@/providers/ParkingProvider';
-import { vanillaTrpc } from '@/lib/trpc';
+
 import { Tariffs } from '@/types';
 
 export default function SettingsScreen() {
@@ -151,19 +151,48 @@ export default function SettingsScreen() {
     return false;
   }, []);
 
-  const tryFetchServerBackupViaTrpc = useCallback(async (): Promise<string | null> => {
+  const tryFetchServerBackupViaHttp = useCallback(async (): Promise<string | null> => {
     try {
-      console.log('[Backup] Fetching backup via tRPC...');
-      const result = await vanillaTrpc.parking.getBackup.query() as any;
-      if (result && result.success && result.backup) {
-        const jsonStr = JSON.stringify(result.backup);
-        console.log(`[Backup] tRPC backup OK, ${jsonStr.length} chars`);
-        return jsonStr;
+      const baseUrl = process.env.EXPO_PUBLIC_RORK_API_BASE_URL;
+      if (!baseUrl) {
+        console.log('[Backup] No API base URL configured');
+        return null;
       }
-      console.log('[Backup] tRPC backup returned empty or failed:', result?.error);
-      return null;
+      const backupUrl = `${baseUrl}/api/backup`;
+      console.log(`[Backup] Fetching backup via HTTP: ${backupUrl}`);
+      const response = await fetch(backupUrl, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+      });
+      if (!response.ok) {
+        console.log(`[Backup] HTTP backup failed: ${response.status} ${response.statusText}`);
+        return null;
+      }
+      const contentType = response.headers.get('content-type') ?? '';
+      if (!contentType.includes('json')) {
+        console.log(`[Backup] HTTP backup returned non-JSON content-type: ${contentType}`);
+        const text = await response.text();
+        if (text.startsWith('{') || text.startsWith('[')) {
+          console.log(`[Backup] Content looks like JSON despite content-type, using it`);
+          return text;
+        }
+        return null;
+      }
+      const text = await response.text();
+      if (!text || text.length < 10) {
+        console.log('[Backup] HTTP backup returned empty response');
+        return null;
+      }
+      try {
+        JSON.parse(text);
+      } catch {
+        console.log('[Backup] HTTP backup response is not valid JSON');
+        return null;
+      }
+      console.log(`[Backup] HTTP backup OK, ${text.length} chars`);
+      return text;
     } catch (err) {
-      console.log('[Backup] tRPC backup failed:', err instanceof Error ? err.message : String(err));
+      console.log('[Backup] HTTP backup error:', err instanceof Error ? err.message : String(err));
       return null;
     }
   }, []);
@@ -193,15 +222,15 @@ export default function SettingsScreen() {
       }
 
       if (!jsonString) {
-        console.log('[Backup] Client backup failed, trying tRPC server fallback...');
+        console.log('[Backup] Client backup failed, trying HTTP server fallback...');
         try {
-          const serverJson = await tryFetchServerBackupViaTrpc();
+          const serverJson = await tryFetchServerBackupViaHttp();
           if (serverJson && serverJson.length > 10) {
             jsonString = serverJson;
-            source = 'сервер (tRPC)';
+            source = 'сервер (HTTP)';
           }
-        } catch (trpcErr) {
-          console.log('[Backup] tRPC fallback error:', trpcErr instanceof Error ? trpcErr.message : String(trpcErr));
+        } catch (httpErr) {
+          console.log('[Backup] HTTP fallback error:', httpErr instanceof Error ? httpErr.message : String(httpErr));
         }
       }
 
@@ -253,7 +282,7 @@ export default function SettingsScreen() {
     } finally {
       setBackupLoading(false);
     }
-  }, [createBackup, triggerWebDownload, tryFetchServerBackupViaTrpc]);
+  }, [createBackup, triggerWebDownload, tryFetchServerBackupViaHttp]);
 
   const stripBOM = useCallback((text: string): string => {
     if (text.charCodeAt(0) === 0xFEFF) return text.slice(1);
