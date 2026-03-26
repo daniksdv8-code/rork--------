@@ -113,20 +113,23 @@ export default function SettingsScreen() {
       const blobUrl = URL.createObjectURL(blob);
 
       const link = document.createElement('a');
-      link.href = blobUrl;
-      link.download = fileName;
-      link.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0;pointer-events:none;';
+      link.setAttribute('href', blobUrl);
+      link.setAttribute('download', fileName);
+      link.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0;pointer-events:none;visibility:hidden;';
       document.body.appendChild(link);
-      link.click();
+
+      const evt = document.createEvent('MouseEvents');
+      evt.initEvent('click', true, true);
+      link.dispatchEvent(evt);
 
       setTimeout(() => {
         try {
           document.body.removeChild(link);
           URL.revokeObjectURL(blobUrl);
         } catch {}
-      }, 5000);
+      }, 10000);
 
-      console.log(`[Backup] Blob download triggered: ${fileName}, blob size: ${blob.size}`);
+      console.log(`[Backup] Blob download dispatched: ${fileName}, blob size: ${blob.size}`);
       return true;
     } catch (blobErr) {
       console.log('[Backup] Blob download failed:', blobErr);
@@ -135,16 +138,31 @@ export default function SettingsScreen() {
     try {
       const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(jsonString);
       const link = document.createElement('a');
-      link.href = dataUri;
-      link.download = fileName;
-      link.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0;';
+      link.setAttribute('href', dataUri);
+      link.setAttribute('download', fileName);
+      link.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0;visibility:hidden;';
       document.body.appendChild(link);
-      link.click();
-      setTimeout(() => { try { document.body.removeChild(link); } catch {} }, 5000);
-      console.log(`[Backup] data:URI download triggered: ${fileName}`);
+      const evt = document.createEvent('MouseEvents');
+      evt.initEvent('click', true, true);
+      link.dispatchEvent(evt);
+      setTimeout(() => { try { document.body.removeChild(link); } catch {} }, 10000);
+      console.log(`[Backup] data:URI download dispatched: ${fileName}`);
       return true;
     } catch (dataUriErr) {
       console.log('[Backup] data:URI download failed:', dataUriErr);
+    }
+
+    try {
+      const w = window.open('', '_blank');
+      if (w && w.document) {
+        w.document.open();
+        w.document.write('<html><head><title>' + fileName + '</title></head><body><pre>' + jsonString.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</pre></body></html>');
+        w.document.close();
+        console.log('[Backup] window.open fallback triggered');
+        return true;
+      }
+    } catch (winErr) {
+      console.log('[Backup] window.open fallback failed:', winErr);
     }
 
     console.log('[Backup] All web download methods failed');
@@ -152,49 +170,66 @@ export default function SettingsScreen() {
   }, []);
 
   const tryFetchServerBackupViaHttp = useCallback(async (): Promise<string | null> => {
-    try {
-      const baseUrl = process.env.EXPO_PUBLIC_RORK_API_BASE_URL;
-      if (!baseUrl) {
-        console.log('[Backup] No API base URL configured');
-        return null;
-      }
-      const backupUrl = `${baseUrl}/api/backup`;
-      console.log(`[Backup] Fetching backup via HTTP: ${backupUrl}`);
-      const response = await fetch(backupUrl, {
-        method: 'GET',
-        headers: { 'Accept': 'application/json' },
-      });
-      if (!response.ok) {
-        console.log(`[Backup] HTTP backup failed: ${response.status} ${response.statusText}`);
-        return null;
-      }
-      const contentType = response.headers.get('content-type') ?? '';
-      if (!contentType.includes('json')) {
-        console.log(`[Backup] HTTP backup returned non-JSON content-type: ${contentType}`);
-        const text = await response.text();
-        if (text.startsWith('{') || text.startsWith('[')) {
-          console.log(`[Backup] Content looks like JSON despite content-type, using it`);
-          return text;
-        }
-        return null;
-      }
-      const text = await response.text();
-      if (!text || text.length < 10) {
-        console.log('[Backup] HTTP backup returned empty response');
-        return null;
-      }
-      try {
-        JSON.parse(text);
-      } catch {
-        console.log('[Backup] HTTP backup response is not valid JSON');
-        return null;
-      }
-      console.log(`[Backup] HTTP backup OK, ${text.length} chars`);
-      return text;
-    } catch (err) {
-      console.log('[Backup] HTTP backup error:', err instanceof Error ? err.message : String(err));
+    const baseUrl = process.env.EXPO_PUBLIC_RORK_API_BASE_URL;
+    if (!baseUrl) {
+      console.log('[Backup] No API base URL configured');
       return null;
     }
+
+    const stripped = baseUrl.replace(/\/api\/trpc\/?$/, '').replace(/\/trpc\/?$/, '').replace(/\/+$/, '');
+    const urlsToTry = [
+      `${stripped}/api/backup`,
+      `${stripped}/backup`,
+      `${baseUrl.replace(/\/+$/, '')}/backup`,
+    ];
+    const uniqueUrls = [...new Set(urlsToTry.filter(u => u.length > 10))];
+    console.log(`[Backup] Server URLs to try: ${uniqueUrls.join(', ')}`);
+
+    for (const backupUrl of uniqueUrls) {
+      try {
+        console.log(`[Backup] Trying: ${backupUrl}`);
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 12000);
+        const response = await fetch(backupUrl, {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' },
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+          console.log(`[Backup] ${backupUrl} returned ${response.status}`);
+          continue;
+        }
+
+        const text = await response.text();
+        if (!text || text.length < 10) {
+          console.log(`[Backup] ${backupUrl} returned empty/short response`);
+          continue;
+        }
+
+        const trimmed = text.trim();
+        if (!trimmed.startsWith('{')) {
+          console.log(`[Backup] ${backupUrl} response not JSON: starts with '${trimmed.substring(0, 20)}'`);
+          continue;
+        }
+
+        try {
+          JSON.parse(trimmed);
+        } catch {
+          console.log(`[Backup] ${backupUrl} response invalid JSON`);
+          continue;
+        }
+
+        console.log(`[Backup] Server backup OK from ${backupUrl}, ${trimmed.length} chars`);
+        return trimmed;
+      } catch (err) {
+        console.log(`[Backup] ${backupUrl} error:`, err instanceof Error ? err.message : String(err));
+      }
+    }
+
+    console.log('[Backup] All server URLs failed');
+    return null;
   }, []);
 
   const handleCreateBackup = useCallback(async () => {
@@ -209,12 +244,17 @@ export default function SettingsScreen() {
       let source = 'клиент';
 
       try {
-        jsonString = createBackup();
-        if (jsonString && jsonString.length > 10) {
-          console.log(`[Backup] Client backup OK, ${jsonString.length} chars`);
+        const raw = createBackup();
+        if (raw && typeof raw === 'string' && raw.length > 10) {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === 'object' && parsed.formatId === 'park_manager_backup') {
+            jsonString = raw;
+            console.log(`[Backup] Client backup validated OK, ${raw.length} chars, clients=${parsed.data?.clients?.length ?? 0}`);
+          } else {
+            console.log('[Backup] Client backup: unexpected format after parse');
+          }
         } else {
-          console.log('[Backup] Client backup returned empty/short result');
-          jsonString = null;
+          console.log(`[Backup] Client backup: empty or too short (${raw?.length ?? 0})`);
         }
       } catch (clientErr) {
         console.log('[Backup] Client createBackup() error:', clientErr instanceof Error ? clientErr.message : String(clientErr));

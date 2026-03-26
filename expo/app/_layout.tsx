@@ -11,7 +11,18 @@ import Colors from "@/constants/colors";
 
 void SplashScreen.preventAutoHideAsync();
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 2,
+      retryDelay: 1000,
+      throwOnError: false,
+    },
+    mutations: {
+      throwOnError: false,
+    },
+  },
+});
 
 function AuthGate({ children }: { children: React.ReactNode }) {
   const { currentUser, isLoading } = useAuth();

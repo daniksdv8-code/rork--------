@@ -207,7 +207,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     }
 
     if (initialized && restoreEpochRef.current >= 0 && serverEpoch !== restoreEpochRef.current) {
-      const epochGracePeriod = restoreFinishedAtRef.current > 0 && (Date.now() - restoreFinishedAtRef.current) < 300000;
+      const epochGracePeriod = restoreFinishedAtRef.current > 0 && (Date.now() - restoreFinishedAtRef.current) < 600000;
       if (restoreInProgressRef.current || epochGracePeriod) {
         console.log(`[Sync] EPOCH CHANGE detected (local=${restoreEpochRef.current}, server=${serverEpoch}), but restore in progress/grace — skipping resync`);
         return;
@@ -236,7 +236,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       serverInitializedRef.current = true;
       serverDataAppliedRef.current = true;
 
-      const restoreGracePeriod = restoreFinishedAtRef.current > 0 && (Date.now() - restoreFinishedAtRef.current) < 300000;
+      const restoreGracePeriod = restoreFinishedAtRef.current > 0 && (Date.now() - restoreFinishedAtRef.current) < 600000;
       if (restoreInProgressRef.current || restoreGracePeriod) {
         if (restoreGracePeriod && !restoreInProgressRef.current) {
           lastSyncedVersionRef.current = version;
