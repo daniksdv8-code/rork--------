@@ -105,80 +105,100 @@ export default function SettingsScreen() {
   }, [currentUser, profileName, profileLogin, profileCurrentPassword, profileNewPassword, profileConfirmPassword, updateAdminProfile, updateCurrentUser]);
 
   const triggerWebDownload = useCallback((jsonString: string, fileName: string): boolean => {
-    try {
-      const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      a.style.display = 'none';
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => {
-        try {
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
-        } catch {}
-      }, 300);
-      console.log(`[Backup] Web Blob download triggered: ${fileName}, blob size: ${blob.size}`);
-      return true;
-    } catch (blobErr) {
-      console.log('[Backup] Blob download failed:', blobErr);
-    }
+    console.log(`[Backup] triggerWebDownload called, fileName=${fileName}, dataLen=${jsonString.length}`);
+    const errors: string[] = [];
 
     try {
-      const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(jsonString);
-      const a = document.createElement('a');
-      a.href = dataUri;
-      a.download = fileName;
-      a.style.display = 'none';
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => {
-        try { document.body.removeChild(a); } catch {}
-      }, 300);
-      console.log(`[Backup] Web data:URI download triggered: ${fileName}`);
-      return true;
-    } catch (dataUriErr) {
-      console.log('[Backup] data:URI download failed:', dataUriErr);
-    }
-
-    try {
-      const w = window.open('', '_blank');
-      if (w) {
-        w.document.write('<pre>' + jsonString.replace(/</g, '&lt;') + '</pre>');
-        w.document.title = fileName;
-        w.document.close();
-        console.log('[Backup] Web window.open fallback triggered');
+      if (typeof Blob !== 'undefined' && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+        const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          try {
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+          } catch {}
+        }, 500);
+        console.log(`[Backup] Web Blob download triggered: ${fileName}, blob size: ${blob.size}`);
         return true;
+      } else {
+        errors.push('Blob/URL.createObjectURL not available');
+      }
+    } catch (blobErr) {
+      const msg = blobErr instanceof Error ? blobErr.message : String(blobErr);
+      console.log('[Backup] Blob download failed:', msg);
+      errors.push(`Blob: ${msg}`);
+    }
+
+    try {
+      if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
+        const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(jsonString);
+        const a = document.createElement('a');
+        a.href = dataUri;
+        a.download = fileName;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          try { document.body.removeChild(a); } catch {}
+        }, 500);
+        console.log(`[Backup] Web data:URI download triggered: ${fileName}`);
+        return true;
+      } else {
+        errors.push('document.createElement not available');
+      }
+    } catch (dataUriErr) {
+      const msg = dataUriErr instanceof Error ? dataUriErr.message : String(dataUriErr);
+      console.log('[Backup] data:URI download failed:', msg);
+      errors.push(`dataURI: ${msg}`);
+    }
+
+    try {
+      if (typeof window !== 'undefined' && typeof window.open === 'function') {
+        const w = window.open('', '_blank');
+        if (w) {
+          w.document.write('<pre>' + jsonString.replace(/</g, '&lt;') + '</pre>');
+          w.document.title = fileName;
+          w.document.close();
+          console.log('[Backup] Web window.open fallback triggered');
+          return true;
+        } else {
+          errors.push('window.open returned null (popup blocked?)');
+        }
       }
     } catch (winErr) {
-      console.log('[Backup] window.open fallback failed:', winErr);
+      const msg = winErr instanceof Error ? winErr.message : String(winErr);
+      console.log('[Backup] window.open fallback failed:', msg);
+      errors.push(`window.open: ${msg}`);
     }
 
+    console.log('[Backup] All web download methods failed:', errors.join('; '));
     return false;
   }, []);
 
   const handleCreateBackup = useCallback(async () => {
     setBackupLoading(true);
-    console.log('[Backup] === EXPORT STARTED ===' );
+    console.log('[Backup] === EXPORT STARTED ===');
     try {
       let jsonString: string;
       try {
         jsonString = createBackup();
-        console.log(`[Backup] Backup JSON created successfully, length: ${jsonString.length}`);
+        console.log(`[Backup] Backup JSON created, length: ${jsonString.length}, starts with: ${jsonString.substring(0, 50)}`);
       } catch (readErr) {
         const errMsg = readErr instanceof Error ? readErr.message : String(readErr);
         console.log('[Backup] FAILED to create backup data:', errMsg);
         Alert.alert('Ошибка создания бэкапа', `Не удалось сформировать резервную копию.\n\nПричина: ${errMsg}\n\nДанные не затронуты.`);
-        setBackupLoading(false);
         return;
       }
 
       if (!jsonString || jsonString.length < 10) {
         console.log('[Backup] Backup data empty or too short:', jsonString?.length);
-        Alert.alert('Ошибка', 'Резервная копия пустая или содержит слишком мало данных. Данные не затронуты.');
-        setBackupLoading(false);
+        Alert.alert('Ошибка', 'Резервная копия пустая. Данные не затронуты.');
         return;
       }
 
@@ -188,13 +208,21 @@ export default function SettingsScreen() {
       const sizeKB = (jsonString.length / 1024).toFixed(1);
 
       if (Platform.OS === 'web') {
+        console.log('[Backup] Platform is web, triggering download...');
         const downloadOk = triggerWebDownload(jsonString, fileName);
         if (downloadOk) {
           console.log(`[Backup] Web download OK: ${fileName}, size: ${sizeKB} KB`);
           Alert.alert('Готово', `Резервная копия скачана (${fileName}).\nРазмер: ${sizeKB} КБ`);
         } else {
-          console.log('[Backup] All web download methods failed');
-          Alert.alert('Ошибка скачивания', 'Не удалось скачать файл ни одним способом.\n\nПопробуйте использовать другой браузер (Chrome, Firefox).\n\nДанные не затронуты.');
+          console.log('[Backup] All web download methods failed, trying clipboard fallback');
+          try {
+            const Clipboard = await import('expo-clipboard');
+            await Clipboard.setStringAsync(jsonString);
+            Alert.alert('Скопировано', `Не удалось скачать файл напрямую.\n\nДанные бэкапа (${sizeKB} КБ) скопированы в буфер обмена.\n\nОткройте текстовый редактор, вставьте содержимое и сохраните как ${fileName}`);
+          } catch (clipErr) {
+            console.log('[Backup] Clipboard fallback also failed:', clipErr);
+            Alert.alert('Ошибка скачивания', 'Не удалось скачать файл.\n\nПопробуйте другой браузер (Chrome, Firefox).\n\nДанные не затронуты.');
+          }
         }
       } else {
         let nativeSuccess = false;
@@ -203,8 +231,9 @@ export default function SettingsScreen() {
           const SharingModule = await import('expo-sharing');
           console.log('[Backup] Native: creating file in cache...');
           const file = new FSFile(FSPaths.cache, fileName);
+          try { file.create({ overwrite: true }); } catch (createErr) { console.log('[Backup] file.create error (non-fatal):', createErr); }
           file.write(jsonString);
-          console.log(`[Backup] Native: file written, uri: ${file.uri}, exists: ${file.exists}`);
+          console.log(`[Backup] Native: file written, uri: ${file.uri}, exists: ${file.exists}, size: ${file.size}`);
           await SharingModule.shareAsync(file.uri, {
             mimeType: 'application/json',
             dialogTitle: 'Сохранить резервную копию',
@@ -222,11 +251,11 @@ export default function SettingsScreen() {
           try {
             const FSLegacy = await import('expo-file-system/legacy');
             const SharingModule = await import('expo-sharing');
-            const fileUri = FSLegacy.cacheDirectory + fileName;
+            const fileUri = (FSLegacy.cacheDirectory ?? '') + fileName;
             console.log(`[Backup] Native legacy: writing to ${fileUri}`);
             await FSLegacy.writeAsStringAsync(fileUri, jsonString, { encoding: FSLegacy.EncodingType.UTF8 });
             const fileInfo = await FSLegacy.getInfoAsync(fileUri);
-            console.log(`[Backup] Native legacy: file info:`, fileInfo);
+            console.log('[Backup] Native legacy: file info:', JSON.stringify(fileInfo));
             await SharingModule.shareAsync(fileUri, {
               mimeType: 'application/json',
               dialogTitle: 'Сохранить резервную копию',
@@ -245,7 +274,7 @@ export default function SettingsScreen() {
       console.log('[Backup] === EXPORT COMPLETED ===');
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e);
-      console.log('[Backup] UNEXPECTED error:', errMsg);
+      console.log('[Backup] UNEXPECTED error:', errMsg, e);
       Alert.alert('Ошибка', `Непредвиденная ошибка при создании бэкапа.\n\nПричина: ${errMsg}\n\nДанные не затронуты.`);
     } finally {
       setBackupLoading(false);

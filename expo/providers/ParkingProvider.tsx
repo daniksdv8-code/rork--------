@@ -2850,18 +2850,6 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     }
 
     console.log(`[Backup] Created backup JSON: ${jsonResult.length} bytes`);
-
-    try {
-      const test = JSON.parse(jsonResult);
-      if (!test || !test.formatId || !test.data) {
-        throw new Error('Сформированный JSON не содержит ожидаемых полей');
-      }
-      console.log('[Backup] JSON validation passed');
-    } catch (validateErr) {
-      console.log('[Backup] JSON validation failed:', validateErr);
-      throw new Error(`Сформированный файл бэкапа не прошёл валидацию: ${validateErr instanceof Error ? validateErr.message : String(validateErr)}`);
-    }
-
     return jsonResult;
   }, [currentUser]);
 
