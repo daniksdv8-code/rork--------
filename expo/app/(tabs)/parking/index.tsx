@@ -75,6 +75,10 @@ export default function ParkingScreen() {
     );
   }, [cars, cancelCheckIn]);
 
+  const handleCardPress = useCallback((clientId: string) => {
+    router.push({ pathname: '/client-card', params: { clientId } });
+  }, [router]);
+
   const renderItem = useCallback(({ item }: { item: typeof sessionData[0] }) => {
     const isMonthly = item.session.serviceType === 'monthly';
     const isOnetime = item.session.serviceType === 'onetime';
@@ -84,7 +88,7 @@ export default function ParkingScreen() {
     const badgeStyle = isLombard ? styles.typeBadgeLombard : isMonthly ? styles.typeBadgeMonthly : styles.typeBadgeOnetime;
     const badgeTextStyle = isLombard ? styles.typeBadgeTextLombard : isMonthly ? styles.typeBadgeTextMonthly : styles.typeBadgeTextOnetime;
     return (
-      <View style={styles.card}>
+      <TouchableOpacity style={styles.card} activeOpacity={0.7} onPress={() => handleCardPress(item.session.clientId)}>
         <View style={styles.cardHeader}>
           <View style={styles.plateContainer}>
             <Text style={styles.plateText}>{item.car?.plateNumber ?? '—'}</Text>
@@ -148,6 +152,18 @@ export default function ParkingScreen() {
           </View>
         )}
 
+        {isMonthly && isDebt && !isLombard && (
+          <View style={[styles.costRow, { backgroundColor: Colors.dangerLight }]}>
+            <Wallet size={14} color={Colors.danger} />
+            <Text style={[styles.costLabel, { color: Colors.danger }]}>
+              {item.days} сут. × {tariffs.monthlyCash}–{tariffs.monthlyCard} ₽
+            </Text>
+            <Text style={[styles.costValue, { color: Colors.danger }]}>
+              {tariffs.monthlyCash * item.days}–{tariffs.monthlyCard * item.days} ₽
+            </Text>
+          </View>
+        )}
+
         <View style={styles.cardActions}>
           <TouchableOpacity
             style={styles.exitBtn}
@@ -168,9 +184,9 @@ export default function ParkingScreen() {
             </TouchableOpacity>
           )}
         </View>
-      </View>
+      </TouchableOpacity>
     );
-  }, [handleExit, handleCancelCheckIn, tariffs, isAdmin]);
+  }, [handleExit, handleCancelCheckIn, handleCardPress, tariffs, isAdmin]);
 
   const handleClearSearch = useCallback(() => {
     setSearchQuery('');

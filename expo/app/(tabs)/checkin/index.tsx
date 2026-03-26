@@ -483,7 +483,7 @@ export default function CheckinScreen() {
           <View style={styles.debtNotice}>
             <AlertTriangle size={14} color={Colors.danger} />
             <Text style={styles.debtNoticeText}>
-              Ориентировочный долг: {paymentAmount} ₽ (по дневному тарифу {tariffs.onetimeCash} ₽/сут.).{"\n"}Итоговая сумма будет пересчитана при погашении в зависимости от способа оплаты.
+              Ориентировочный долг: {paymentAmount} ₽ (по тарифу {serviceType === 'monthly' ? tariffs.monthlyCash : tariffs.onetimeCash} ₽/сут.).{"\n"}Итоговая сумма будет пересчитана при погашении в зависимости от способа оплаты.
             </Text>
           </View>
         )}
