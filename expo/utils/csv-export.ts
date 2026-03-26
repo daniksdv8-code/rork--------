@@ -1,6 +1,6 @@
-import { Platform, Alert } from 'react-native';
 import { Client, Car, ParkingSession, Payment, Debt, Transaction } from '@/types';
 import { formatDateTime, formatDate } from '@/utils/date';
+import { saveFile } from '@/utils/file-save';
 
 function escapeCsvField(value: string | number | null | undefined): string {
   if (value === null || value === undefined) return '';
@@ -142,90 +142,11 @@ export function buildPaymentsCsv(data: ExportPaymentsData): string {
 
 export async function shareCsv(csvContent: string, fileName: string): Promise<void> {
   console.log(`[Export] Sharing CSV: ${fileName}, size: ${csvContent.length} chars`);
-
-  if (Platform.OS === 'web') {
-    let downloaded = false;
-
-    try {
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const blobUrl = URL.createObjectURL(blob);
-      try {
-        const w = (window.top ?? window.parent ?? window);
-        const link = w.document.createElement('a');
-        link.href = blobUrl;
-        link.download = fileName;
-        link.style.display = 'none';
-        w.document.body.appendChild(link);
-        link.click();
-        setTimeout(() => { try { w.document.body.removeChild(link); URL.revokeObjectURL(blobUrl); } catch {} }, 10000);
-        downloaded = true;
-        console.log('[Export] Web download via parent window triggered');
-      } catch (parentErr) {
-        console.log('[Export] Parent window download failed, trying current window:', parentErr);
-        const link = document.createElement('a');
-        link.href = blobUrl;
-        link.download = fileName;
-        link.style.display = 'none';
-        document.body.appendChild(link);
-        link.click();
-        setTimeout(() => { try { document.body.removeChild(link); URL.revokeObjectURL(blobUrl); } catch {} }, 10000);
-        downloaded = true;
-        console.log('[Export] Web download via current window triggered');
-      }
-    } catch (e) {
-      console.log('[Export] Blob download failed:', e);
-    }
-
-    if (!downloaded) {
-      try {
-        const w = (window.top ?? window.parent ?? window).open('', '_blank');
-        if (w && w.document) {
-          w.document.open();
-          w.document.write('<html><head><meta charset="utf-8"><title>' + fileName + '</title></head><body><pre>' + csvContent.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</pre></body></html>');
-          w.document.close();
-          downloaded = true;
-          console.log('[Export] Opened CSV in new window for manual save');
-        }
-      } catch (winErr) {
-        console.log('[Export] window.open fallback failed:', winErr);
-      }
-    }
-
-    if (!downloaded) {
-      try {
-        const Clipboard = await import('expo-clipboard');
-        await Clipboard.setStringAsync(csvContent);
-        Alert.alert('Скопировано', `Скачивание не сработало в текущем окружении.\n\nДанные CSV скопированы в буфер обмена.\nВставьте в текстовый файл и сохраните как ${fileName}`);
-        return;
-      } catch {
-        Alert.alert('Ошибка', 'Не удалось скачать или скопировать файл. Попробуйте другой браузер.');
-      }
-    }
-    return;
-  }
-
-  try {
-    const { File, Paths } = await import('expo-file-system');
-    const Sharing = await import('expo-sharing');
-
-    const file = new File(Paths.cache, fileName);
-    file.write(csvContent);
-    console.log('[Export] File written to:', file.uri);
-
-    const available = await Sharing.isAvailableAsync();
-    if (available) {
-      await Sharing.shareAsync(file.uri, {
-        mimeType: 'text/csv',
-        dialogTitle: `Экспорт: ${fileName}`,
-      });
-      console.log('[Export] Share dialog opened');
-    } else {
-      Alert.alert('Ошибка', 'Функция «Поделиться» недоступна на этом устройстве');
-    }
-
-    try { file.delete(); } catch { }
-  } catch (e) {
-    console.log('[Export] Native share failed:', e);
-    Alert.alert('Ошибка', 'Не удалось экспортировать файл');
-  }
+  await saveFile({
+    content: csvContent,
+    fileName,
+    mimeType: 'text/csv',
+    dialogTitle: `Экспорт: ${fileName}`,
+    UTI: 'public.comma-separated-values-text',
+  });
 }

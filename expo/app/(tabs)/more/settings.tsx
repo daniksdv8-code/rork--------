@@ -5,6 +5,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/providers/AuthProvider';
 import { useParking } from '@/providers/ParkingProvider';
+import { saveFile } from '@/utils/file-save';
 
 import { Tariffs } from '@/types';
 
@@ -112,84 +113,6 @@ export default function SettingsScreen() {
     return `${stripped}/api/backup`;
   }, []);
 
-  const triggerServerDownload = useCallback((): boolean => {
-    const url = getServerBackupUrl();
-    if (!url) {
-      console.log('[Backup] No server backup URL available');
-      return false;
-    }
-    console.log(`[Backup] Opening server backup URL directly: ${url}`);
-    try {
-      const w = (window.top ?? window.parent ?? window);
-      w.open(url, '_blank');
-      console.log('[Backup] window.top.open succeeded');
-      return true;
-    } catch (e1) {
-      console.log('[Backup] window.top.open failed:', e1);
-    }
-    try {
-      window.open(url, '_blank');
-      console.log('[Backup] window.open succeeded');
-      return true;
-    } catch (e2) {
-      console.log('[Backup] window.open failed:', e2);
-    }
-    try {
-      const link = document.createElement('a');
-      link.href = url;
-      link.target = '_blank';
-      link.rel = 'noopener';
-      document.body.appendChild(link);
-      link.click();
-      setTimeout(() => { try { document.body.removeChild(link); } catch {} }, 5000);
-      console.log('[Backup] anchor click fallback succeeded');
-      return true;
-    } catch (e3) {
-      console.log('[Backup] anchor click fallback failed:', e3);
-    }
-    return false;
-  }, [getServerBackupUrl]);
-
-  const triggerWebDownload = useCallback((jsonString: string, fileName: string): boolean => {
-    console.log(`[Backup] triggerWebDownload called, fileName=${fileName}, dataLen=${jsonString.length}`);
-
-    try {
-      const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8' });
-      const blobUrl = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      link.download = fileName;
-      link.style.display = 'none';
-      document.body.appendChild(link);
-      link.click();
-      setTimeout(() => {
-        try { document.body.removeChild(link); URL.revokeObjectURL(blobUrl); } catch {}
-      }, 10000);
-      console.log(`[Backup] Blob download triggered: ${fileName}, blob size: ${blob.size}`);
-      return true;
-    } catch (blobErr) {
-      console.log('[Backup] Blob download failed:', blobErr);
-    }
-
-    try {
-      const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(jsonString);
-      const link = document.createElement('a');
-      link.href = dataUri;
-      link.download = fileName;
-      link.style.display = 'none';
-      document.body.appendChild(link);
-      link.click();
-      setTimeout(() => { try { document.body.removeChild(link); } catch {} }, 10000);
-      console.log(`[Backup] data:URI download triggered: ${fileName}`);
-      return true;
-    } catch (dataUriErr) {
-      console.log('[Backup] data:URI download failed:', dataUriErr);
-    }
-
-    console.log('[Backup] All client-side download methods failed');
-    return false;
-  }, []);
-
   const tryFetchServerBackupViaHttp = useCallback(async (): Promise<string | null> => {
     const baseUrl = process.env.EXPO_PUBLIC_RORK_API_BASE_URL;
     if (!baseUrl) {
@@ -257,17 +180,6 @@ export default function SettingsScreen() {
     setBackupLoading(true);
     console.log('[Backup] === EXPORT STARTED ===');
     try {
-      if (Platform.OS === 'web') {
-        console.log('[Backup] Web environment detected, trying direct server download first');
-        const serverOk = triggerServerDownload();
-        if (serverOk) {
-          console.log('[Backup] Server download initiated via direct URL');
-          Alert.alert('Скачивание', 'Резервная копия открывается в новой вкладке.\n\nЕсли скачивание не началось автоматически, сохраните страницу как .json файл (Ctrl+S / Cmd+S).\n\nБаза данных НЕ затронута.');
-          return;
-        }
-        console.log('[Backup] Direct server download failed, falling back to client-side');
-      }
-
       const date = new Date();
       const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}_${String(date.getHours()).padStart(2, '0')}-${String(date.getMinutes()).padStart(2, '0')}`;
       const fileName = `parking_backup_${dateStr}.json`;
@@ -325,36 +237,23 @@ export default function SettingsScreen() {
       const sizeKB = (jsonString.length / 1024).toFixed(1);
       console.log(`[Backup] Backup ready: ${sizeKB} KB, source: ${source}, file: ${fileName}`);
 
-      if (Platform.OS === 'web') {
-        const downloadOk = triggerWebDownload(jsonString, fileName);
-        if (downloadOk) {
-          Alert.alert('Готово', `Резервная копия скачивается (${fileName}).\nРазмер: ${sizeKB} КБ\nИсточник: ${source}`);
-        } else {
-          try {
-            const Clipboard = await import('expo-clipboard');
-            await Clipboard.setStringAsync(jsonString);
-            Alert.alert('Скопировано', `Скачивание не сработало.\n\nДанные (${sizeKB} КБ) скопированы в буфер обмена.\nСохраните как ${fileName}`);
-          } catch {
-            const backupUrl = getServerBackupUrl();
-            Alert.alert('Ошибка', `Не удалось скачать файл.\n\n${backupUrl ? `Откройте вручную:\n${backupUrl}` : 'Попробуйте другой браузер.'}\n\nБаза данных НЕ затронута.`);
-          }
-        }
+      const saved = await saveFile({
+        content: jsonString,
+        fileName,
+        mimeType: 'application/json',
+        dialogTitle: 'Сохранить резервную копию',
+        UTI: 'public.json',
+      });
+
+      if (saved) {
+        Alert.alert('Готово', `Резервная копия сохранена (${fileName}).\nРазмер: ${sizeKB} КБ\nИсточник: ${source}\n\nБаза данных НЕ затронута.`);
       } else {
-        try {
-          const FSLegacy = await import('expo-file-system/legacy');
-          const SharingModule = await import('expo-sharing');
-          const fileUri = (FSLegacy.cacheDirectory ?? '') + fileName;
-          await FSLegacy.writeAsStringAsync(fileUri, jsonString, { encoding: FSLegacy.EncodingType.UTF8 });
-          await SharingModule.shareAsync(fileUri, {
-            mimeType: 'application/json',
-            dialogTitle: 'Сохранить резервную копию',
-            UTI: 'public.json',
-          });
-          try { await FSLegacy.deleteAsync(fileUri, { idempotent: true }); } catch {}
-        } catch (nativeErr) {
-          Alert.alert('Ошибка', `Не удалось сохранить файл.\n\n${nativeErr instanceof Error ? nativeErr.message : String(nativeErr)}\n\nБаза данных НЕ затронута.`);
+        const backupUrl = getServerBackupUrl();
+        if (backupUrl) {
+          Alert.alert('Ошибка', `Не удалось сохранить файл.\n\n${backupUrl ? `Откройте вручную:\n${backupUrl}` : 'Попробуйте другой браузер.'}\n\nБаза данных НЕ затронута.`);
         }
       }
+
       console.log('[Backup] === EXPORT COMPLETED ===');
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e);
@@ -363,7 +262,7 @@ export default function SettingsScreen() {
     } finally {
       setBackupLoading(false);
     }
-  }, [createBackup, triggerWebDownload, triggerServerDownload, tryFetchServerBackupViaHttp, getServerBackupUrl]);
+  }, [createBackup, tryFetchServerBackupViaHttp, getServerBackupUrl]);
 
   const stripBOM = useCallback((text: string): string => {
     if (text.charCodeAt(0) === 0xFEFF) return text.slice(1);
