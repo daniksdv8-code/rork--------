@@ -2791,35 +2791,34 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       createdAt: new Date().toISOString(),
       createdBy: currentUser?.name ?? 'unknown',
       data: {
-        clients: snapshot.clients,
-        cars: snapshot.cars,
-        sessions: snapshot.sessions,
-        subscriptions: snapshot.subscriptions,
-        payments: snapshot.payments,
-        debts: snapshot.debts,
-        transactions: snapshot.transactions,
-        tariffs: snapshot.tariffs,
-        shifts: snapshot.shifts,
-        expenses: snapshot.expenses,
-        withdrawals: snapshot.withdrawals,
-        users: snapshot.users,
-        deletedClientIds: snapshot.deletedClientIds,
-        scheduledShifts: snapshot.scheduledShifts,
-        actionLogs: snapshot.actionLogs,
-        adminExpenses: snapshot.adminExpenses,
-        adminCashOperations: snapshot.adminCashOperations,
-        expenseCategories: snapshot.expenseCategories,
-        dailyDebtAccruals: snapshot.dailyDebtAccruals,
-        clientDebts: snapshot.clientDebts,
-        cashOperations: snapshot.cashOperations,
-        teamViolations: snapshot.teamViolations,
+        clients: snapshot.clients ?? [],
+        cars: snapshot.cars ?? [],
+        sessions: snapshot.sessions ?? [],
+        subscriptions: snapshot.subscriptions ?? [],
+        payments: snapshot.payments ?? [],
+        debts: snapshot.debts ?? [],
+        transactions: snapshot.transactions ?? [],
+        tariffs: snapshot.tariffs ?? EMPTY_DATA.tariffs,
+        shifts: snapshot.shifts ?? [],
+        expenses: snapshot.expenses ?? [],
+        withdrawals: snapshot.withdrawals ?? [],
+        users: snapshot.users ?? [],
+        deletedClientIds: snapshot.deletedClientIds ?? [],
+        scheduledShifts: snapshot.scheduledShifts ?? [],
+        actionLogs: snapshot.actionLogs ?? [],
+        adminExpenses: snapshot.adminExpenses ?? [],
+        adminCashOperations: snapshot.adminCashOperations ?? [],
+        expenseCategories: snapshot.expenseCategories ?? [],
+        dailyDebtAccruals: snapshot.dailyDebtAccruals ?? [],
+        clientDebts: snapshot.clientDebts ?? [],
+        cashOperations: snapshot.cashOperations ?? [],
+        teamViolations: snapshot.teamViolations ?? [],
       },
     };
     const jsonResult = JSON.stringify(backupData);
-    console.log(`[Backup] Created backup: ${jsonResult.length} bytes, clients=${snapshot.clients.length}, cars=${snapshot.cars.length}`);
-    logAction('backup_create', 'Создана резервная копия', `Клиентов: ${snapshot.clients.length}, машин: ${snapshot.cars.length}`);
+    console.log(`[Backup] Created backup: ${jsonResult.length} bytes, clients=${(snapshot.clients ?? []).length}, cars=${(snapshot.cars ?? []).length}`);
     return jsonResult;
-  }, [currentUser, logAction]);
+  }, [currentUser]);
 
   const getPreRestoreBackup = useCallback((): string => {
     const snapshot = latestDataRef.current;

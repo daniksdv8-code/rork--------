@@ -110,14 +110,18 @@ export default function SettingsScreen() {
       let jsonString: string;
       try {
         jsonString = createBackup();
-        if (!jsonString || jsonString.length < 10) {
-          throw new Error('Backup data is empty or too short');
-        }
-        JSON.parse(jsonString);
-        console.log(`[Backup] Backup JSON created successfully, length: ${jsonString.length}`);
+        console.log(`[Backup] Backup JSON created, length: ${jsonString.length}`);
       } catch (readErr) {
-        console.log('[Backup] Failed to create backup data:', readErr);
-        Alert.alert('Ошибка', 'Не удалось сформировать резервную копию. Данные не затронуты.');
+        const errMsg = readErr instanceof Error ? readErr.message : String(readErr);
+        console.log('[Backup] Failed to create backup data:', errMsg);
+        Alert.alert('Ошибка создания бэкапа', `Не удалось сформировать резервную копию.\n\nПричина: ${errMsg}\n\nДанные не затронуты.`);
+        setBackupLoading(false);
+        return;
+      }
+
+      if (!jsonString || jsonString.length < 10) {
+        console.log('[Backup] Backup data empty or too short:', jsonString?.length);
+        Alert.alert('Ошибка', 'Резервная копия пустая или содержит слишком мало данных. Данные не затронуты.');
         setBackupLoading(false);
         return;
       }
@@ -128,45 +132,78 @@ export default function SettingsScreen() {
 
       if (Platform.OS === 'web') {
         try {
-          const blob = new Blob([jsonString], { type: 'application/json' });
+          const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8' });
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = url;
           a.download = fileName;
+          a.style.display = 'none';
           document.body.appendChild(a);
           a.click();
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
-          Alert.alert('Готово', 'Резервная копия скачана');
+          setTimeout(() => {
+            try {
+              document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+            } catch {}
+          }, 200);
+          console.log(`[Backup] Web download triggered: ${fileName}, blob size: ${blob.size}`);
+          Alert.alert('Готово', `Резервная копия скачана (${fileName}).\nРазмер: ${(blob.size / 1024).toFixed(1)} КБ`);
         } catch (webErr) {
-          console.log('[Backup] Web download failed:', webErr);
-          Alert.alert('Ошибка', 'Не удалось скачать файл. Данные не затронуты.');
+          const errMsg = webErr instanceof Error ? webErr.message : String(webErr);
+          console.log('[Backup] Web download failed:', errMsg);
+          Alert.alert('Ошибка скачивания', `Не удалось скачать файл в браузере.\n\nПричина: ${errMsg}\n\nДанные не затронуты.`);
         }
       } else {
+        let nativeSuccess = false;
         try {
           const { File: FSFile, Paths: FSPaths } = await import('expo-file-system');
           const SharingModule = await import('expo-sharing');
+          console.log('[Backup] Native: creating file in cache...');
           const file = new FSFile(FSPaths.cache, fileName);
           file.write(jsonString);
-          const verifyContent = file.textSync();
-          if (verifyContent.length !== jsonString.length) {
-            console.log(`[Backup] File verification failed: written=${jsonString.length}, read=${verifyContent.length}`);
-          }
+          console.log(`[Backup] Native: file written, uri: ${file.uri}, exists: ${file.exists}`);
           await SharingModule.shareAsync(file.uri, {
             mimeType: 'application/json',
             dialogTitle: 'Сохранить резервную копию',
             UTI: 'public.json',
           });
           try { file.delete(); } catch {}
+          nativeSuccess = true;
+          console.log('[Backup] Native: share completed successfully');
         } catch (nativeErr) {
-          console.log('[Backup] Native share failed:', nativeErr);
-          Alert.alert('Ошибка', 'Не удалось сохранить файл. Данные не затронуты.');
+          const errMsg = nativeErr instanceof Error ? nativeErr.message : String(nativeErr);
+          console.log('[Backup] Native new API failed, trying legacy:', errMsg);
+        }
+
+        if (!nativeSuccess) {
+          try {
+            const FSLegacy = await import('expo-file-system/legacy');
+            const SharingModule = await import('expo-sharing');
+            const fileUri = FSLegacy.cacheDirectory + fileName;
+            console.log(`[Backup] Native legacy: writing to ${fileUri}`);
+            await FSLegacy.writeAsStringAsync(fileUri, jsonString, { encoding: FSLegacy.EncodingType.UTF8 });
+            const fileInfo = await FSLegacy.getInfoAsync(fileUri);
+            console.log(`[Backup] Native legacy: file info:`, fileInfo);
+            await SharingModule.shareAsync(fileUri, {
+              mimeType: 'application/json',
+              dialogTitle: 'Сохранить резервную копию',
+              UTI: 'public.json',
+            });
+            try { await FSLegacy.deleteAsync(fileUri, { idempotent: true }); } catch {}
+            nativeSuccess = true;
+            console.log('[Backup] Native legacy: share completed successfully');
+          } catch (legacyErr) {
+            const errMsg = legacyErr instanceof Error ? legacyErr.message : String(legacyErr);
+            console.log('[Backup] Native legacy also failed:', errMsg);
+            Alert.alert('Ошибка сохранения', `Не удалось сохранить файл бэкапа.\n\nПричина: ${errMsg}\n\nДанные не затронуты.`);
+          }
         }
       }
-      console.log('[Backup] Backup file shared/downloaded successfully');
+      console.log('[Backup] Backup operation completed');
     } catch (e) {
-      console.log('[Backup] Unexpected error:', e);
-      Alert.alert('Ошибка', 'Непредвиденная ошибка. Данные не затронуты.');
+      const errMsg = e instanceof Error ? e.message : String(e);
+      console.log('[Backup] Unexpected error:', errMsg);
+      Alert.alert('Ошибка', `Непредвиденная ошибка при создании бэкапа.\n\nПричина: ${errMsg}\n\nДанные не затронуты.`);
     } finally {
       setBackupLoading(false);
     }
