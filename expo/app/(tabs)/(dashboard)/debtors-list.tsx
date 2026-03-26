@@ -7,7 +7,7 @@ import { useParking } from '@/providers/ParkingProvider';
 
 export default function DebtorsListScreen() {
   const router = useRouter();
-  const { debtors, sessions } = useParking();
+  const { debtors, sessions, dailyDebtAccruals } = useParking();
   const [search, setSearch] = useState<string>('');
 
   const totalDebt = useMemo(() => debtors.reduce((s, d) => s + d.totalDebt, 0), [debtors]);
@@ -31,6 +31,15 @@ export default function DebtorsListScreen() {
       (s.tariffType === 'lombard' || s.serviceType === 'lombard') &&
       (s.status === 'active_debt' || s.status === 'released_debt')
     ) : false;
+
+    const accrualSessionCount = item.client ? sessions.filter(s =>
+      s.clientId === item.client!.id &&
+      (s.status === 'active_debt' || s.status === 'released_debt') &&
+      !s.cancelled &&
+      dailyDebtAccruals.some(a => a.parkingEntryId === s.id)
+    ).length : 0;
+
+    const totalDebtSources = item.debts.length + accrualSessionCount;
 
     return (
       <TouchableOpacity
@@ -56,12 +65,12 @@ export default function DebtorsListScreen() {
           <Text style={styles.carsText}>
             {item.cars.map(c => c.plateNumber).join(', ') || '—'}
           </Text>
-          <Text style={styles.metaText}>Долгов: {item.debts.length}</Text>
+          <Text style={styles.metaText}>Записей долга: {totalDebtSources}</Text>
         </View>
         <ChevronRight size={16} color={Colors.textMuted} />
       </TouchableOpacity>
     );
-  }, [handlePress, sessions]);
+  }, [handlePress, sessions, dailyDebtAccruals]);
 
   return (
     <>

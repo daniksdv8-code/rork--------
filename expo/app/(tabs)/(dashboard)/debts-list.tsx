@@ -1,80 +1,167 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
-import { Search, Wallet, ChevronRight, Inbox } from 'lucide-react-native';
+import { Search, Wallet, ChevronRight, Inbox, Clock } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useParking } from '@/providers/ParkingProvider';
 import { formatDate } from '@/utils/date';
-import { Debt } from '@/types';
+import { roundMoney } from '@/utils/money';
+import { Client, Car } from '@/types';
+
+interface DebtRow {
+  id: string;
+  clientId: string;
+  client: Client | undefined;
+  car: Car | undefined;
+  plateNumber: string;
+  amount: number;
+  description: string;
+  date: string;
+  source: 'old_debt' | 'accrual';
+  status: string;
+  isFrozen: boolean;
+  days?: number;
+  rate?: number;
+  serviceType?: string;
+}
 
 export default function DebtsListScreen() {
   const router = useRouter();
-  const { debts, clients, cars } = useParking();
+  const {
+    debts, clients, cars, sessions,
+    dailyDebtAccruals, clientDebts, tariffs,
+  } = useParking();
   const [search, setSearch] = useState<string>('');
 
-  const activeDebts = useMemo(() => debts.filter(d => d.remainingAmount > 0), [debts]);
+  const allDebtRows = useMemo(() => {
+    const rows: DebtRow[] = [];
 
-  const enrichedDebts = useMemo(() => {
-    return activeDebts.map(d => {
+    const activeOldDebts = debts.filter(d => d.remainingAmount > 0);
+    for (const d of activeOldDebts) {
       const client = clients.find(c => c.id === d.clientId);
       const car = cars.find(c => c.id === d.carId);
-      return { ...d, client, car };
-    }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [activeDebts, clients, cars]);
+      const isPartial = d.totalAmount > d.remainingAmount;
+      rows.push({
+        id: d.id,
+        clientId: d.clientId,
+        client,
+        car,
+        plateNumber: car?.plateNumber ?? '—',
+        amount: d.remainingAmount,
+        description: d.description || 'Долг',
+        date: d.createdAt,
+        source: 'old_debt',
+        status: isPartial ? 'Частично' : 'Активен',
+        isFrozen: false,
+      });
+    }
 
-  const totalDebt = useMemo(() => enrichedDebts.reduce((s, d) => s + d.remainingAmount, 0), [enrichedDebts]);
+    const debtSessions = sessions.filter(s =>
+      (s.status === 'active_debt' || s.status === 'released_debt') && !s.cancelled
+    );
+
+    for (const session of debtSessions) {
+      const sessionAccruals = dailyDebtAccruals.filter(a => a.parkingEntryId === session.id);
+      if (sessionAccruals.length === 0) continue;
+
+      const client = clients.find(c => c.id === session.clientId);
+      const car = cars.find(c => c.id === session.carId);
+      const isLombard = session.serviceType === 'lombard';
+      let rate: number;
+      if (isLombard) {
+        rate = session.lombardRateApplied ?? tariffs.lombardRate;
+      } else if (session.serviceType === 'monthly') {
+        rate = tariffs.monthlyCash;
+      } else {
+        rate = tariffs.onetimeCash;
+      }
+
+      const days = sessionAccruals.length;
+      const amount = roundMoney(days * rate);
+      const isFrozen = session.status === 'released_debt';
+      const serviceLabel = isLombard ? 'ломбард' : session.serviceType === 'monthly' ? 'месяц' : 'разово';
+
+      rows.push({
+        id: `accrual_${session.id}`,
+        clientId: session.clientId,
+        client,
+        car,
+        plateNumber: car?.plateNumber ?? '—',
+        amount,
+        description: `${serviceLabel} · ${days} дн. × ${rate} ₽`,
+        date: sessionAccruals[0]?.createdAt ?? session.entryTime,
+        source: 'accrual',
+        status: isFrozen ? 'Заморожен' : 'На парковке',
+        isFrozen,
+        days,
+        rate,
+        serviceType: serviceLabel,
+      });
+    }
+
+    rows.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return rows;
+  }, [debts, clients, cars, sessions, dailyDebtAccruals, tariffs]);
+
+  const totalDebt = useMemo(() => {
+    const oldTotal = debts.filter(d => d.remainingAmount > 0).reduce((s, d) => s + d.remainingAmount, 0);
+    const cdTotal = clientDebts.reduce((s, cd) => s + cd.totalAmount, 0);
+    return roundMoney(oldTotal + cdTotal);
+  }, [debts, clientDebts]);
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return enrichedDebts;
+    if (!search.trim()) return allDebtRows;
     const q = search.toLowerCase();
-    return enrichedDebts.filter(d =>
+    return allDebtRows.filter(d =>
       (d.client?.name ?? '').toLowerCase().includes(q) ||
-      (d.car?.plateNumber ?? '').toLowerCase().includes(q) ||
+      d.plateNumber.toLowerCase().includes(q) ||
       d.description.toLowerCase().includes(q)
     );
-  }, [enrichedDebts, search]);
-
-  const getStatus = useCallback((debt: Debt) => {
-    if (debt.remainingAmount <= 0) return 'Погашен';
-    if (debt.totalAmount > debt.remainingAmount) return 'Частично';
-    return 'Активен';
-  }, []);
+  }, [allDebtRows, search]);
 
   const handlePress = useCallback((clientId: string) => {
     router.push({ pathname: '/client-card', params: { clientId } });
   }, [router]);
 
-  const renderItem = useCallback(({ item, index }: { item: typeof filtered[0]; index: number }) => {
-    const status = getStatus(item);
+  const renderItem = useCallback(({ item, index }: { item: DebtRow; index: number }) => {
     return (
       <TouchableOpacity
         style={styles.row}
         activeOpacity={0.7}
         onPress={() => item.clientId && handlePress(item.clientId)}
       >
-        <View style={styles.rowNum}>
-          <Text style={styles.rowNumText}>{index + 1}</Text>
+        <View style={[styles.rowNum, item.source === 'accrual' && styles.rowNumAccrual]}>
+          <Text style={[styles.rowNumText, item.source === 'accrual' && styles.rowNumTextAccrual]}>{index + 1}</Text>
         </View>
         <View style={styles.rowContent}>
           <View style={styles.rowTop}>
-            <Text style={styles.clientText}>{item.client?.name ?? '—'}</Text>
-            <Text style={styles.debtAmount}>{item.remainingAmount} ₽</Text>
+            <Text style={styles.clientText} numberOfLines={1}>{item.client?.name ?? '—'}</Text>
+            <Text style={styles.debtAmount}>{item.amount} ₽</Text>
           </View>
-          {item.car && <Text style={styles.plateText}>{item.car.plateNumber}</Text>}
+          <Text style={styles.plateText}>{item.plateNumber}</Text>
           <View style={styles.rowBottom}>
-            <Text style={styles.metaText}>{formatDate(item.createdAt)}</Text>
-            <Text style={[
-              styles.statusBadge,
-              status === 'Активен' ? styles.statusActive :
-              status === 'Частично' ? styles.statusPartial : styles.statusClosed,
-            ]}>{status}</Text>
+            <Text style={styles.metaText}>{formatDate(item.date)}</Text>
+            <View style={[
+              styles.statusBadgeWrap,
+              item.status === 'Активен' || item.status === 'На парковке' ? styles.statusActiveBg :
+              item.status === 'Частично' ? styles.statusPartialBg :
+              item.isFrozen ? styles.statusFrozenBg : styles.statusActiveBg,
+            ]}>
+              {item.isFrozen && <Clock size={10} color={Colors.info} />}
+              <Text style={[
+                styles.statusBadgeText,
+                item.status === 'Активен' || item.status === 'На парковке' ? styles.statusActiveColor :
+                item.status === 'Частично' ? styles.statusPartialColor :
+                item.isFrozen ? styles.statusFrozenColor : styles.statusActiveColor,
+              ]}>{item.status}</Text>
+            </View>
           </View>
-          {item.description ? <Text style={styles.descText} numberOfLines={1}>{item.description}</Text> : null}
+          <Text style={styles.descText} numberOfLines={1}>{item.description}</Text>
         </View>
         <ChevronRight size={16} color={Colors.textMuted} />
       </TouchableOpacity>
     );
-  }, [getStatus, handlePress]);
+  }, [handlePress]);
 
   return (
     <>
@@ -85,6 +172,9 @@ export default function DebtsListScreen() {
             <Wallet size={18} color={Colors.danger} />
             <Text style={styles.headerTitle}>ВСЕ ДОЛГИ (итого: {totalDebt} ₽)</Text>
           </View>
+          <Text style={styles.headerSubtitle}>
+            Записей: {filtered.length}
+          </Text>
         </View>
 
         <View style={styles.searchWrap}>
@@ -106,7 +196,7 @@ export default function DebtsListScreen() {
           ListEmptyComponent={
             <View style={styles.empty}>
               <Inbox size={48} color={Colors.textMuted} />
-              <Text style={styles.emptyText}>Нет данных за выбранный период</Text>
+              <Text style={styles.emptyText}>Нет активных долгов</Text>
             </View>
           }
         />
@@ -120,6 +210,7 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8 },
   headerBadge: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   headerTitle: { fontSize: 14, fontWeight: '700' as const, color: Colors.text, letterSpacing: 0.5 },
+  headerSubtitle: { fontSize: 12, color: Colors.textMuted, marginTop: 4 },
   searchWrap: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.card,
     marginHorizontal: 16, borderRadius: 10, paddingHorizontal: 12, height: 42,
@@ -136,19 +227,30 @@ const styles = StyleSheet.create({
     width: 28, height: 28, borderRadius: 14, backgroundColor: Colors.dangerLight,
     alignItems: 'center', justifyContent: 'center', marginRight: 10,
   },
+  rowNumAccrual: {
+    backgroundColor: Colors.warningLight,
+  },
   rowNumText: { fontSize: 12, fontWeight: '600' as const, color: Colors.danger },
+  rowNumTextAccrual: { color: Colors.warning },
   rowContent: { flex: 1 },
   rowTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 },
   clientText: { fontSize: 15, fontWeight: '600' as const, color: Colors.text, flex: 1, marginRight: 8 },
   debtAmount: { fontSize: 15, fontWeight: '700' as const, color: Colors.danger },
   plateText: { fontSize: 13, color: Colors.textSecondary, marginBottom: 2 },
-  rowBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  rowBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 },
   metaText: { fontSize: 12, color: Colors.textMuted },
-  descText: { fontSize: 12, color: Colors.textMuted, marginTop: 2, fontStyle: 'italic' as const },
-  statusBadge: { fontSize: 11, fontWeight: '600' as const, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, overflow: 'hidden' },
-  statusActive: { backgroundColor: Colors.dangerLight, color: Colors.danger },
-  statusPartial: { backgroundColor: Colors.warningLight, color: Colors.warning },
-  statusClosed: { backgroundColor: Colors.successLight, color: Colors.success },
+  descText: { fontSize: 12, color: Colors.textMuted, fontStyle: 'italic' as const },
+  statusBadgeWrap: {
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6,
+  },
+  statusBadgeText: { fontSize: 11, fontWeight: '600' as const },
+  statusActiveBg: { backgroundColor: Colors.dangerLight },
+  statusActiveColor: { color: Colors.danger },
+  statusPartialBg: { backgroundColor: Colors.warningLight },
+  statusPartialColor: { color: Colors.warning },
+  statusFrozenBg: { backgroundColor: Colors.infoLight },
+  statusFrozenColor: { color: Colors.info },
   empty: { alignItems: 'center', justifyContent: 'center', paddingVertical: 60 },
   emptyText: { fontSize: 14, color: Colors.textMuted, marginTop: 12 },
 });

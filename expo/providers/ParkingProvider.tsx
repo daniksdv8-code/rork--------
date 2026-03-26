@@ -60,6 +60,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   const localChangeCounterRef = useRef<number>(0);
   const restoreEpochRef = useRef<number>(-1);
   const restoreInProgressRef = useRef<boolean>(false);
+  const restoreServerOkRef = useRef<boolean>(false);
+  const restoreFinishedAtRef = useRef<number>(0);
 
   const latestDataRef = useRef({
     clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories, dailyDebtAccruals, clientDebts, cashOperations, teamViolations,
@@ -230,8 +232,13 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       serverInitializedRef.current = true;
       serverDataAppliedRef.current = true;
 
-      if (restoreInProgressRef.current) {
-        console.log(`[Sync] Restore in progress, skipping server data v${version}`);
+      const restoreGracePeriod = restoreFinishedAtRef.current > 0 && (Date.now() - restoreFinishedAtRef.current) < 10000;
+      if (restoreInProgressRef.current || restoreGracePeriod) {
+        if (restoreGracePeriod && !restoreInProgressRef.current) {
+          console.log(`[Sync] Restore grace period active (${Date.now() - restoreFinishedAtRef.current}ms since restore), skipping server data v${version}`);
+        } else {
+          console.log(`[Sync] Restore in progress, skipping server data v${version}`);
+        }
       } else if (pushingRef.current) {
         if (skipLogVersionRef.current !== version) {
           console.log(`[Sync] Server v${version} available, push in progress — will apply after push completes`);
@@ -2977,12 +2984,14 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
     let serverResetSuccess = false;
     let serverError = '';
+    restoreServerOkRef.current = false;
     try {
       const result = await vanillaTrpc.parking.resetData.mutate(restorePayload as any) as any;
       lastSyncedVersionRef.current = result.version;
       restoreEpochRef.current = result.restoreEpoch;
       localDirtyRef.current = false;
       serverResetSuccess = true;
+      restoreServerOkRef.current = true;
       console.log(`[Restore] Server reset OK, version: ${result.version}, epoch: ${result.restoreEpoch}`);
     } catch (e) {
       serverError = e instanceof Error ? e.message : String(e);
@@ -2993,6 +3002,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         restoreEpochRef.current = fallbackResult.restoreEpoch ?? restoreEpochRef.current;
         localDirtyRef.current = false;
         serverResetSuccess = true;
+        restoreServerOkRef.current = true;
         console.log(`[Restore] Fallback push OK, version: ${fallbackResult.version}`);
       } catch (e2) {
         console.log('[Restore] Fallback push also failed:', e2);
@@ -3033,11 +3043,20 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
     setTimeout(() => {
       restoreInProgressRef.current = false;
-      localDirtyRef.current = false;
+      restoreFinishedAtRef.current = Date.now();
       if (pushTimerRef.current) { clearTimeout(pushTimerRef.current); pushTimerRef.current = null; }
       if (pushRetryTimerRef.current) { clearTimeout(pushRetryTimerRef.current); pushRetryTimerRef.current = null; }
-      console.log('[Restore] Sync unblocked after delay (120s)');
-      void utils.parking.getData.invalidate();
+
+      if (restoreServerOkRef.current) {
+        localDirtyRef.current = false;
+        console.log('[Restore] Sync unblocked after delay (120s), server was OK');
+        void utils.parking.getData.invalidate();
+      } else {
+        console.log('[Restore] Sync unblocked after delay (120s), server push FAILED — forcing re-push of restored data');
+        localDirtyRef.current = true;
+        localChangeCounterRef.current++;
+        void pushToServer();
+      }
     }, 120000);
 
     void utils.parking.getData.invalidate();
@@ -3076,7 +3095,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     }
 
     return { success: true, preRestoreBackup: preRestoreBackupJson };
-  }, [schedulePush, utils, logAction, getPreRestoreBackup]);
+  }, [schedulePush, pushToServer, utils, logAction, getPreRestoreBackup]);
 
   const resetAllData = useCallback(async () => {
     const adminUsers = users.filter(u => u.role === 'admin');
