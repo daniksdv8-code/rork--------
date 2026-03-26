@@ -104,16 +104,72 @@ export default function SettingsScreen() {
     }
   }, [currentUser, profileName, profileLogin, profileCurrentPassword, profileNewPassword, profileConfirmPassword, updateAdminProfile, updateCurrentUser]);
 
+  const triggerWebDownload = useCallback((jsonString: string, fileName: string): boolean => {
+    try {
+      const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        try {
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        } catch {}
+      }, 300);
+      console.log(`[Backup] Web Blob download triggered: ${fileName}, blob size: ${blob.size}`);
+      return true;
+    } catch (blobErr) {
+      console.log('[Backup] Blob download failed:', blobErr);
+    }
+
+    try {
+      const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(jsonString);
+      const a = document.createElement('a');
+      a.href = dataUri;
+      a.download = fileName;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        try { document.body.removeChild(a); } catch {}
+      }, 300);
+      console.log(`[Backup] Web data:URI download triggered: ${fileName}`);
+      return true;
+    } catch (dataUriErr) {
+      console.log('[Backup] data:URI download failed:', dataUriErr);
+    }
+
+    try {
+      const w = window.open('', '_blank');
+      if (w) {
+        w.document.write('<pre>' + jsonString.replace(/</g, '&lt;') + '</pre>');
+        w.document.title = fileName;
+        w.document.close();
+        console.log('[Backup] Web window.open fallback triggered');
+        return true;
+      }
+    } catch (winErr) {
+      console.log('[Backup] window.open fallback failed:', winErr);
+    }
+
+    return false;
+  }, []);
+
   const handleCreateBackup = useCallback(async () => {
     setBackupLoading(true);
+    console.log('[Backup] === EXPORT STARTED ===' );
     try {
       let jsonString: string;
       try {
         jsonString = createBackup();
-        console.log(`[Backup] Backup JSON created, length: ${jsonString.length}`);
+        console.log(`[Backup] Backup JSON created successfully, length: ${jsonString.length}`);
       } catch (readErr) {
         const errMsg = readErr instanceof Error ? readErr.message : String(readErr);
-        console.log('[Backup] Failed to create backup data:', errMsg);
+        console.log('[Backup] FAILED to create backup data:', errMsg);
         Alert.alert('Ошибка создания бэкапа', `Не удалось сформировать резервную копию.\n\nПричина: ${errMsg}\n\nДанные не затронуты.`);
         setBackupLoading(false);
         return;
@@ -129,29 +185,16 @@ export default function SettingsScreen() {
       const date = new Date();
       const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}_${String(date.getHours()).padStart(2, '0')}-${String(date.getMinutes()).padStart(2, '0')}`;
       const fileName = `parking_backup_${dateStr}.json`;
+      const sizeKB = (jsonString.length / 1024).toFixed(1);
 
       if (Platform.OS === 'web') {
-        try {
-          const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = fileName;
-          a.style.display = 'none';
-          document.body.appendChild(a);
-          a.click();
-          setTimeout(() => {
-            try {
-              document.body.removeChild(a);
-              URL.revokeObjectURL(url);
-            } catch {}
-          }, 200);
-          console.log(`[Backup] Web download triggered: ${fileName}, blob size: ${blob.size}`);
-          Alert.alert('Готово', `Резервная копия скачана (${fileName}).\nРазмер: ${(blob.size / 1024).toFixed(1)} КБ`);
-        } catch (webErr) {
-          const errMsg = webErr instanceof Error ? webErr.message : String(webErr);
-          console.log('[Backup] Web download failed:', errMsg);
-          Alert.alert('Ошибка скачивания', `Не удалось скачать файл в браузере.\n\nПричина: ${errMsg}\n\nДанные не затронуты.`);
+        const downloadOk = triggerWebDownload(jsonString, fileName);
+        if (downloadOk) {
+          console.log(`[Backup] Web download OK: ${fileName}, size: ${sizeKB} KB`);
+          Alert.alert('Готово', `Резервная копия скачана (${fileName}).\nРазмер: ${sizeKB} КБ`);
+        } else {
+          console.log('[Backup] All web download methods failed');
+          Alert.alert('Ошибка скачивания', 'Не удалось скачать файл ни одним способом.\n\nПопробуйте использовать другой браузер (Chrome, Firefox).\n\nДанные не затронуты.');
         }
       } else {
         let nativeSuccess = false;
@@ -199,15 +242,15 @@ export default function SettingsScreen() {
           }
         }
       }
-      console.log('[Backup] Backup operation completed');
+      console.log('[Backup] === EXPORT COMPLETED ===');
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e);
-      console.log('[Backup] Unexpected error:', errMsg);
+      console.log('[Backup] UNEXPECTED error:', errMsg);
       Alert.alert('Ошибка', `Непредвиденная ошибка при создании бэкапа.\n\nПричина: ${errMsg}\n\nДанные не затронуты.`);
     } finally {
       setBackupLoading(false);
     }
-  }, [createBackup]);
+  }, [createBackup, triggerWebDownload]);
 
   const stripBOM = useCallback((text: string): string => {
     if (text.charCodeAt(0) === 0xFEFF) return text.slice(1);

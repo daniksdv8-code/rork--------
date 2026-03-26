@@ -2784,39 +2784,84 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   }, [currentUser, getCurrentMonth, logAction, schedulePush]);
 
   const createBackup = useCallback((): string => {
+    console.log('[Backup] createBackup() called');
     const snapshot = latestDataRef.current;
+    if (!snapshot) {
+      throw new Error('Данные ещё не загружены. Дождитесь синхронизации.');
+    }
+
+    const safeArr = (val: any): any[] => {
+      if (Array.isArray(val)) return val;
+      return [];
+    };
+
+    const dataPayload: Record<string, any> = {
+      clients: safeArr(snapshot.clients),
+      cars: safeArr(snapshot.cars),
+      sessions: safeArr(snapshot.sessions),
+      subscriptions: safeArr(snapshot.subscriptions),
+      payments: safeArr(snapshot.payments),
+      debts: safeArr(snapshot.debts),
+      transactions: safeArr(snapshot.transactions),
+      tariffs: (snapshot.tariffs && typeof snapshot.tariffs === 'object') ? snapshot.tariffs : EMPTY_DATA.tariffs,
+      shifts: safeArr(snapshot.shifts),
+      expenses: safeArr(snapshot.expenses),
+      withdrawals: safeArr(snapshot.withdrawals),
+      users: safeArr(snapshot.users),
+      deletedClientIds: safeArr(snapshot.deletedClientIds),
+      scheduledShifts: safeArr(snapshot.scheduledShifts),
+      actionLogs: safeArr(snapshot.actionLogs),
+      adminExpenses: safeArr(snapshot.adminExpenses),
+      adminCashOperations: safeArr(snapshot.adminCashOperations),
+      expenseCategories: safeArr(snapshot.expenseCategories),
+      dailyDebtAccruals: safeArr(snapshot.dailyDebtAccruals),
+      clientDebts: safeArr(snapshot.clientDebts),
+      cashOperations: safeArr(snapshot.cashOperations),
+      teamViolations: safeArr(snapshot.teamViolations),
+    };
+
     const backupData = {
       formatId: 'park_manager_backup',
       version: 2,
       createdAt: new Date().toISOString(),
       createdBy: currentUser?.name ?? 'unknown',
-      data: {
-        clients: snapshot.clients ?? [],
-        cars: snapshot.cars ?? [],
-        sessions: snapshot.sessions ?? [],
-        subscriptions: snapshot.subscriptions ?? [],
-        payments: snapshot.payments ?? [],
-        debts: snapshot.debts ?? [],
-        transactions: snapshot.transactions ?? [],
-        tariffs: snapshot.tariffs ?? EMPTY_DATA.tariffs,
-        shifts: snapshot.shifts ?? [],
-        expenses: snapshot.expenses ?? [],
-        withdrawals: snapshot.withdrawals ?? [],
-        users: snapshot.users ?? [],
-        deletedClientIds: snapshot.deletedClientIds ?? [],
-        scheduledShifts: snapshot.scheduledShifts ?? [],
-        actionLogs: snapshot.actionLogs ?? [],
-        adminExpenses: snapshot.adminExpenses ?? [],
-        adminCashOperations: snapshot.adminCashOperations ?? [],
-        expenseCategories: snapshot.expenseCategories ?? [],
-        dailyDebtAccruals: snapshot.dailyDebtAccruals ?? [],
-        clientDebts: snapshot.clientDebts ?? [],
-        cashOperations: snapshot.cashOperations ?? [],
-        teamViolations: snapshot.teamViolations ?? [],
-      },
+      data: dataPayload,
     };
-    const jsonResult = JSON.stringify(backupData);
-    console.log(`[Backup] Created backup: ${jsonResult.length} bytes, clients=${(snapshot.clients ?? []).length}, cars=${(snapshot.cars ?? []).length}`);
+
+    console.log(`[Backup] Prepared backup object, clients=${dataPayload.clients.length}, cars=${dataPayload.cars.length}, sessions=${dataPayload.sessions.length}`);
+
+    let jsonResult: string;
+    try {
+      jsonResult = JSON.stringify(backupData);
+    } catch (stringifyErr) {
+      console.log('[Backup] JSON.stringify failed:', stringifyErr);
+      try {
+        jsonResult = JSON.stringify(backupData, (_key, value) => {
+          if (typeof value === 'bigint') return Number(value);
+          if (value === undefined) return null;
+          if (typeof value === 'function') return undefined;
+          if (value !== value) return null;
+          if (value === Infinity || value === -Infinity) return null;
+          return value;
+        });
+      } catch (fallbackErr) {
+        throw new Error(`Не удалось сериализовать данные: ${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)}`);
+      }
+    }
+
+    console.log(`[Backup] Created backup JSON: ${jsonResult.length} bytes`);
+
+    try {
+      const test = JSON.parse(jsonResult);
+      if (!test || !test.formatId || !test.data) {
+        throw new Error('Сформированный JSON не содержит ожидаемых полей');
+      }
+      console.log('[Backup] JSON validation passed');
+    } catch (validateErr) {
+      console.log('[Backup] JSON validation failed:', validateErr);
+      throw new Error(`Сформированный файл бэкапа не прошёл валидацию: ${validateErr instanceof Error ? validateErr.message : String(validateErr)}`);
+    }
+
     return jsonResult;
   }, [currentUser]);
 
