@@ -1,18 +1,85 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { View, Text, TouchableOpacity, FlatList, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
-import { AlertTriangle, Phone, CreditCard } from 'lucide-react-native';
+import { AlertTriangle, Phone, CreditCard, Clock } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useParking } from '@/providers/ParkingProvider';
 import ShiftGuard from '@/components/ShiftGuard';
 import { formatDate } from '@/utils/date';
+import { roundMoney } from '@/utils/money';
 
 export default function DebtorsScreen() {
   const router = useRouter();
-  const { debtors } = useParking();
+  const { debtors, dailyDebtAccruals, sessions, cars, tariffs } = useParking();
+
+  const accrualDetailsByClient = useMemo(() => {
+    const map: Record<string, Array<{
+      sessionId: string;
+      carId: string;
+      plateNumber: string;
+      days: number;
+      rate: number;
+      amount: number;
+      serviceType: string;
+      isFrozen: boolean;
+    }>> = {};
+
+    const clientIds = new Set(debtors.map(d => d.client?.id).filter(Boolean) as string[]);
+
+    for (const clientId of clientIds) {
+      const clientSessions = sessions.filter(s =>
+        s.clientId === clientId &&
+        (s.status === 'active_debt' || s.status === 'released_debt') &&
+        !s.cancelled
+      );
+
+      const details: typeof map[string] = [];
+
+      for (const session of clientSessions) {
+        const sessionAccruals = dailyDebtAccruals.filter(a => a.parkingEntryId === session.id);
+        if (sessionAccruals.length === 0) continue;
+
+        const days = sessionAccruals.length;
+        const car = cars.find(c => c.id === session.carId);
+        const isLombard = session.serviceType === 'lombard';
+        let rate: number;
+        if (isLombard) {
+          rate = session.lombardRateApplied ?? tariffs.lombardRate;
+        } else if (session.serviceType === 'monthly') {
+          rate = tariffs.monthlyCash;
+        } else {
+          rate = tariffs.onetimeCash;
+        }
+
+        const amount = roundMoney(days * rate);
+        details.push({
+          sessionId: session.id,
+          carId: session.carId,
+          plateNumber: car?.plateNumber ?? '—',
+          days,
+          rate,
+          amount,
+          serviceType: isLombard ? 'ломбард' : session.serviceType === 'monthly' ? 'месяц' : 'разово',
+          isFrozen: session.status === 'released_debt',
+        });
+      }
+
+      if (details.length > 0) {
+        map[clientId] = details;
+      }
+    }
+
+    return map;
+  }, [debtors, dailyDebtAccruals, sessions, cars, tariffs]);
 
   const renderItem = useCallback(({ item }: { item: typeof debtors[0] }) => {
     if (!item.client) return null;
+
+    const accrualDetails = accrualDetailsByClient[item.client.id] ?? [];
+    const hasOldDebts = item.debts.length > 0;
+    const hasAccrualDebts = accrualDetails.length > 0;
+    const hasAnyDetails = hasOldDebts || hasAccrualDebts;
+
     return (
       <View style={styles.card}>
         <View style={styles.cardHeader}>
@@ -29,6 +96,24 @@ export default function DebtorsScreen() {
         <Text style={styles.carsText}>
           {item.cars.map(c => c.carModel ? `${c.plateNumber} (${c.carModel})` : c.plateNumber).join(', ')}
         </Text>
+
+        {accrualDetails.map(detail => (
+          <View key={detail.sessionId} style={styles.debtRow}>
+            <View style={styles.debtInfo}>
+              <Text style={styles.debtDesc}>
+                {detail.plateNumber} · {detail.serviceType} · {detail.days} дн. × {detail.rate} ₽
+              </Text>
+              <View style={styles.statusRow}>
+                <Clock size={11} color={Colors.textMuted} />
+                <Text style={styles.debtDate}>
+                  {detail.isFrozen ? 'Выпущен в долг (заморожен)' : 'На парковке'}
+                </Text>
+              </View>
+            </View>
+            <Text style={styles.debtRowAmount}>{detail.amount} ₽</Text>
+          </View>
+        ))}
+
         {item.debts.map(debt => (
           <View key={debt.id} style={styles.debtRow}>
             <View style={styles.debtInfo}>
@@ -38,6 +123,22 @@ export default function DebtorsScreen() {
             <Text style={styles.debtRowAmount}>{debt.remainingAmount} ₽</Text>
           </View>
         ))}
+
+        {!hasAnyDetails && item.clientDebt && item.clientDebt.totalAmount > 0 && (
+          <View style={styles.debtRow}>
+            <View style={styles.debtInfo}>
+              <Text style={styles.debtDesc}>Начисленный долг</Text>
+              <Text style={styles.debtDate}>
+                {item.clientDebt.frozenAmount > 0
+                  ? `Активный: ${roundMoney(item.clientDebt.activeAmount)} ₽ · Заморожен: ${roundMoney(item.clientDebt.frozenAmount)} ₽`
+                  : `Обновлено: ${item.clientDebt.lastUpdate ? formatDate(item.clientDebt.lastUpdate) : '—'}`
+                }
+              </Text>
+            </View>
+            <Text style={styles.debtRowAmount}>{roundMoney(item.clientDebt.totalAmount)} ₽</Text>
+          </View>
+        )}
+
         <TouchableOpacity
           style={styles.payBtn}
           onPress={() => {
@@ -53,6 +154,11 @@ export default function DebtorsScreen() {
                   pathname: '/pay-debt-modal',
                   params: { debtId: firstDebt.id, clientId: item.client!.id, clientName: item.client!.name, totalDebt: String(item.totalDebt) },
                 });
+              } else {
+                router.push({
+                  pathname: '/pay-debt-modal',
+                  params: { clientId: item.client!.id, clientName: item.client!.name, totalDebt: String(item.totalDebt), mode: 'client_debt' },
+                });
               }
             }
           }}
@@ -63,7 +169,7 @@ export default function DebtorsScreen() {
         </TouchableOpacity>
       </View>
     );
-  }, [router]);
+  }, [router, accrualDetailsByClient]);
 
   if (debtors.length === 0) {
     return (
@@ -204,6 +310,12 @@ const styles = StyleSheet.create({
   debtDesc: {
     fontSize: 13,
     color: Colors.text,
+  },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 2,
   },
   debtDate: {
     fontSize: 12,

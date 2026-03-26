@@ -262,6 +262,10 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   }, [dataQuery.data, isLoaded, isServerSynced, applyServerData]);
 
   const pushToServer = useCallback(async () => {
+    if (restoreInProgressRef.current) {
+      console.log('[Sync] Push blocked: restore in progress');
+      return;
+    }
     if (pushingRef.current) {
       console.log('[Sync] Push already in progress, will retry after');
       return;
@@ -333,6 +337,10 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   }, [utils, applyServerData]);
 
   const schedulePush = useCallback(() => {
+    if (restoreInProgressRef.current) {
+      console.log('[Sync] schedulePush blocked: restore in progress');
+      return;
+    }
     localDirtyRef.current = true;
     localChangeCounterRef.current++;
     if (pushTimerRef.current) {
@@ -2684,7 +2692,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   }, [teamViolations, getCurrentMonth, schedulePush]);
 
   useEffect(() => {
-    if (isLoaded && currentUser) {
+    if (isLoaded && currentUser && !restoreInProgressRef.current) {
       ensureCurrentMonth();
     }
   }, [isLoaded, currentUser, ensureCurrentMonth]);
@@ -3025,9 +3033,12 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
     setTimeout(() => {
       restoreInProgressRef.current = false;
-      console.log('[Restore] Sync unblocked after delay');
+      localDirtyRef.current = false;
+      if (pushTimerRef.current) { clearTimeout(pushTimerRef.current); pushTimerRef.current = null; }
+      if (pushRetryTimerRef.current) { clearTimeout(pushRetryTimerRef.current); pushRetryTimerRef.current = null; }
+      console.log('[Restore] Sync unblocked after delay (120s)');
       void utils.parking.getData.invalidate();
-    }, 10000);
+    }, 120000);
 
     void utils.parking.getData.invalidate();
 
