@@ -5,7 +5,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/providers/AuthProvider';
 import { useParking } from '@/providers/ParkingProvider';
-import { saveFile } from '@/utils/file-save';
+import { saveFile, openBackupUrl } from '@/utils/file-save';
 
 import { Tariffs } from '@/types';
 
@@ -113,90 +113,32 @@ export default function SettingsScreen() {
     return `${stripped}/api/backup`;
   }, []);
 
-  const tryFetchServerBackupViaHttp = useCallback(async (): Promise<string | null> => {
-    const baseUrl = process.env.EXPO_PUBLIC_RORK_API_BASE_URL;
-    if (!baseUrl) {
-      console.log('[Backup] No API base URL configured');
-      return null;
-    }
-
-    const stripped = baseUrl.replace(/\/api\/trpc\/?$/, '').replace(/\/trpc\/?$/, '').replace(/\/+$/, '');
-    const urlsToTry = [
-      `${stripped}/api/backup`,
-      `${stripped}/backup`,
-      `${baseUrl.replace(/\/+$/, '')}/backup`,
-    ];
-    const uniqueUrls = [...new Set(urlsToTry.filter(u => u.length > 10))];
-    console.log(`[Backup] Server URLs to try: ${uniqueUrls.join(', ')}`);
-
-    for (const backupUrl of uniqueUrls) {
-      try {
-        console.log(`[Backup] Trying: ${backupUrl}`);
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 12000);
-        const response = await fetch(backupUrl, {
-          method: 'GET',
-          headers: { 'Accept': 'application/json' },
-          signal: controller.signal,
-        });
-        clearTimeout(timeout);
-
-        if (!response.ok) {
-          console.log(`[Backup] ${backupUrl} returned ${response.status}`);
-          continue;
-        }
-
-        const text = await response.text();
-        if (!text || text.length < 10) {
-          console.log(`[Backup] ${backupUrl} returned empty/short response`);
-          continue;
-        }
-
-        const trimmed = text.trim();
-        if (!trimmed.startsWith('{')) {
-          console.log(`[Backup] ${backupUrl} response not JSON: starts with '${trimmed.substring(0, 20)}'`);
-          continue;
-        }
-
-        try {
-          JSON.parse(trimmed);
-        } catch {
-          console.log(`[Backup] ${backupUrl} response invalid JSON`);
-          continue;
-        }
-
-        console.log(`[Backup] Server backup OK from ${backupUrl}, ${trimmed.length} chars`);
-        return trimmed;
-      } catch (err) {
-        console.log(`[Backup] ${backupUrl} error:`, err instanceof Error ? err.message : String(err));
-      }
-    }
-
-    console.log('[Backup] All server URLs failed');
-    return null;
-  }, []);
-
   const handleCreateBackup = useCallback(async () => {
     setBackupLoading(true);
     console.log('[Backup] === EXPORT STARTED ===');
     try {
+      if (Platform.OS === 'web') {
+        const backupUrl = getServerBackupUrl();
+        if (backupUrl) {
+          console.log(`[Backup] Web: opening direct backup URL: ${backupUrl}`);
+          openBackupUrl(backupUrl);
+          Alert.alert('Скачивание', 'Открывается ссылка на бэкап в новой вкладке.\nФайл скачается автоматически.\n\nБаза данных НЕ затронута.');
+          return;
+        }
+        console.log('[Backup] Web: no server URL, falling back to client-side backup');
+      }
+
       const date = new Date();
       const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}_${String(date.getHours()).padStart(2, '0')}-${String(date.getMinutes()).padStart(2, '0')}`;
       const fileName = `parking_backup_${dateStr}.json`;
 
       let jsonString: string | null = null;
-      let source = 'клиент';
 
       try {
         const raw = createBackup();
         if (raw && typeof raw === 'string' && raw.length > 10) {
-          const parsed = JSON.parse(raw);
-          if (parsed && typeof parsed === 'object' && parsed.formatId === 'park_manager_backup') {
-            jsonString = raw;
-            console.log(`[Backup] Client backup validated OK, ${raw.length} chars, clients=${parsed.data?.clients?.length ?? 0}`);
-          } else {
-            console.log('[Backup] Client backup: unexpected format after parse');
-          }
+          jsonString = raw;
+          console.log(`[Backup] Client backup created OK, ${raw.length} chars`);
         } else {
           console.log(`[Backup] Client backup: empty or too short (${raw?.length ?? 0})`);
         }
@@ -205,25 +147,16 @@ export default function SettingsScreen() {
         jsonString = null;
       }
 
-      if (!jsonString) {
-        console.log('[Backup] Client backup failed, trying HTTP server fallback...');
-        try {
-          const serverJson = await tryFetchServerBackupViaHttp();
-          if (serverJson && serverJson.length > 10) {
-            jsonString = serverJson;
-            source = 'сервер (HTTP)';
-          }
-        } catch (httpErr) {
-          console.log('[Backup] HTTP fallback error:', httpErr instanceof Error ? httpErr.message : String(httpErr));
-        }
-      }
-
       if (!jsonString || jsonString.length < 10) {
         const backupUrl = getServerBackupUrl();
         if (backupUrl) {
           Alert.alert(
             'Альтернативное скачивание',
-            `Не удалось сформировать бэкап программно.\n\nОткройте эту ссылку вручную в новой вкладке браузера:\n\n${backupUrl}\n\nБаза данных НЕ затронута.`
+            `Не удалось сформировать бэкап локально.\n\nОткроется ссылка для скачивания бэкапа напрямую с сервера.\n\nБаза данных НЕ затронута.`,
+            [
+              { text: 'Отмена', style: 'cancel' },
+              { text: 'Открыть ссылку', onPress: () => openBackupUrl(backupUrl) },
+            ]
           );
         } else {
           Alert.alert(
@@ -235,7 +168,7 @@ export default function SettingsScreen() {
       }
 
       const sizeKB = (jsonString.length / 1024).toFixed(1);
-      console.log(`[Backup] Backup ready: ${sizeKB} KB, source: ${source}, file: ${fileName}`);
+      console.log(`[Backup] Backup ready: ${sizeKB} KB, file: ${fileName}`);
 
       const saved = await saveFile({
         content: jsonString,
@@ -246,11 +179,18 @@ export default function SettingsScreen() {
       });
 
       if (saved) {
-        Alert.alert('Готово', `Резервная копия сохранена (${fileName}).\nРазмер: ${sizeKB} КБ\nИсточник: ${source}\n\nБаза данных НЕ затронута.`);
+        Alert.alert('Готово', `Резервная копия сохранена (${fileName}).\nРазмер: ${sizeKB} КБ\n\nБаза данных НЕ затронута.`);
       } else {
         const backupUrl = getServerBackupUrl();
         if (backupUrl) {
-          Alert.alert('Ошибка', `Не удалось сохранить файл.\n\n${backupUrl ? `Откройте вручную:\n${backupUrl}` : 'Попробуйте другой браузер.'}\n\nБаза данных НЕ затронута.`);
+          Alert.alert(
+            'Ошибка сохранения',
+            `Не удалось сохранить файл на устройство.\n\nОткроется ссылка для скачивания бэкапа напрямую.\n\nБаза данных НЕ затронута.`,
+            [
+              { text: 'Отмена', style: 'cancel' },
+              { text: 'Открыть ссылку', onPress: () => openBackupUrl(backupUrl) },
+            ]
+          );
         }
       }
 
@@ -262,7 +202,7 @@ export default function SettingsScreen() {
     } finally {
       setBackupLoading(false);
     }
-  }, [createBackup, tryFetchServerBackupViaHttp, getServerBackupUrl]);
+  }, [createBackup, getServerBackupUrl]);
 
   const stripBOM = useCallback((text: string): string => {
     if (text.charCodeAt(0) === 0xFEFF) return text.slice(1);
