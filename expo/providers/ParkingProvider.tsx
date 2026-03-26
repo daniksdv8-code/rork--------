@@ -2901,6 +2901,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
     let cleanInput = jsonString.trim();
     if (cleanInput.charCodeAt(0) === 0xFEFF) cleanInput = cleanInput.slice(1);
+    cleanInput = cleanInput.replace(/^\s+/, '');
 
     if (cleanInput.startsWith('<!') || cleanInput.startsWith('<html') || cleanInput.startsWith('<HTML')) {
       restoreInProgressRef.current = false;
@@ -2910,22 +2911,36 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     let parsed: any;
     try {
       parsed = JSON.parse(cleanInput);
-    } catch (parseErr) {
-      restoreInProgressRef.current = false;
-      const snippet = cleanInput.substring(0, 120);
-      const errMsg = parseErr instanceof Error ? parseErr.message : String(parseErr);
-      console.log('[Restore] JSON parse failed:', errMsg, 'snippet:', snippet);
+    } catch (parseErr1) {
+      console.log('[Restore] First JSON.parse failed, trying to fix common issues...');
+      try {
+        if (cleanInput.startsWith('"') && cleanInput.endsWith('"')) {
+          const unescaped = JSON.parse(cleanInput) as string;
+          if (typeof unescaped === 'string') {
+            parsed = JSON.parse(unescaped);
+            console.log('[Restore] Successfully parsed double-encoded JSON');
+          }
+        } else {
+          throw parseErr1;
+        }
+      } catch {
+        restoreInProgressRef.current = false;
+        const snippet = cleanInput.substring(0, 120);
+        const errMsg = parseErr1 instanceof Error ? parseErr1.message : String(parseErr1);
+        console.log('[Restore] JSON parse failed:', errMsg, 'snippet:', snippet);
+        console.log('[Restore] First 20 char codes:', Array.from(cleanInput.substring(0, 20)).map(c => c.charCodeAt(0)).join(','));
 
-      let hint = '';
-      if (snippet.startsWith('<')) {
-        hint = '\n\nФайл похож на XML/HTML — убедитесь, что загружаете именно .json файл бэкапа.';
-      } else if (!snippet.startsWith('{') && !snippet.startsWith('[')) {
-        hint = `\n\nФайл начинается с неожиданных символов.\nНачало: «${snippet.substring(0, 60)}…»`;
-      } else {
-        hint = `\n\nНачало файла: «${snippet.substring(0, 80)}…»`;
+        let hint = '';
+        if (snippet.startsWith('<')) {
+          hint = '\n\nФайл похож на XML/HTML — убедитесь, что загружаете именно .json файл бэкапа.';
+        } else if (!snippet.startsWith('{') && !snippet.startsWith('[')) {
+          hint = `\n\nФайл начинается с неожиданных символов.\nНачало: «${snippet.substring(0, 60)}…»\nКоды: ${Array.from(snippet.substring(0, 10)).map(c => c.charCodeAt(0)).join(',')}`;
+        } else {
+          hint = `\n\nНачало файла: «${snippet.substring(0, 80)}…»`;
+        }
+
+        return { success: false, error: `Не удалось разобрать файл как JSON.\n\nОшибка парсинга: ${errMsg}${hint}\n\nБаза данных НЕ затронута.` };
       }
-
-      return { success: false, error: `Не удалось разобрать файл как JSON.\n\nОшибка: ${errMsg}${hint}\n\nБаза данных НЕ затронута.` };
     }
 
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {

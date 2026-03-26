@@ -4,6 +4,7 @@ import { cors } from "hono/cors";
 
 import { appRouter } from "./trpc/app-router";
 import { createContext } from "./trpc/create-context";
+import { getBackupJson } from "./trpc/routes/parking";
 
 const app = new Hono();
 
@@ -20,6 +21,22 @@ app.use(
 
 app.get("/", (c) => {
   return c.json({ status: "ok", message: "Parking API is running" });
+});
+
+app.get("/backup", (c) => {
+  try {
+    const json = getBackupJson();
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}`;
+    const fileName = `parking_backup_${dateStr}.json`;
+    c.header('Content-Type', 'application/json; charset=utf-8');
+    c.header('Content-Disposition', `attachment; filename="${fileName}"`);
+    console.log(`[Backup] Server backup endpoint called, json length=${json.length}`);
+    return c.body(json);
+  } catch (e) {
+    console.error('[Backup] Server backup endpoint error:', e);
+    return c.json({ error: 'Failed to create backup', details: String(e) }, 500);
+  }
 });
 
 export default app;

@@ -181,30 +181,65 @@ export default function SettingsScreen() {
     return false;
   }, []);
 
+  const getServerBackupUrl = useCallback((): string => {
+    const base = process.env.EXPO_PUBLIC_RORK_API_BASE_URL;
+    if (!base) throw new Error('API URL not configured');
+    return `${base}/api/backup`;
+  }, []);
+
   const handleCreateBackup = useCallback(async () => {
     setBackupLoading(true);
     console.log('[Backup] === EXPORT STARTED ===');
     try {
-      let jsonString: string;
+      const date = new Date();
+      const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}_${String(date.getHours()).padStart(2, '0')}-${String(date.getMinutes()).padStart(2, '0')}`;
+      const fileName = `parking_backup_${dateStr}.json`;
+
+      let jsonString: string | null = null;
+
       try {
-        jsonString = createBackup();
-        console.log(`[Backup] Backup JSON created, length: ${jsonString.length}, starts with: ${jsonString.substring(0, 50)}`);
-      } catch (readErr) {
-        const errMsg = readErr instanceof Error ? readErr.message : String(readErr);
-        console.log('[Backup] FAILED to create backup data:', errMsg);
-        Alert.alert('Ошибка создания бэкапа', `Не удалось сформировать резервную копию.\n\nПричина: ${errMsg}\n\nДанные не затронуты.`);
-        return;
+        const backupUrl = getServerBackupUrl();
+        console.log(`[Backup] Fetching backup from server: ${backupUrl}`);
+        const resp = await fetch(backupUrl);
+        if (!resp.ok) {
+          throw new Error(`Server responded ${resp.status}: ${resp.statusText}`);
+        }
+        jsonString = await resp.text();
+        console.log(`[Backup] Server backup fetched, length=${jsonString.length}, starts: ${jsonString.substring(0, 60)}`);
+
+        if (!jsonString || jsonString.length < 10) {
+          throw new Error('Server returned empty backup');
+        }
+        if (!jsonString.trim().startsWith('{')) {
+          throw new Error(`Server returned non-JSON: starts with "${jsonString.substring(0, 30)}..."`);
+        }
+
+        try {
+          JSON.parse(jsonString);
+          console.log('[Backup] Server backup JSON validated OK');
+        } catch (valErr) {
+          throw new Error(`Server backup is not valid JSON: ${valErr instanceof Error ? valErr.message : String(valErr)}`);
+        }
+      } catch (serverErr) {
+        const errMsg = serverErr instanceof Error ? serverErr.message : String(serverErr);
+        console.log('[Backup] Server backup failed, falling back to client-side:', errMsg);
+
+        try {
+          jsonString = createBackup();
+          console.log(`[Backup] Client-side backup created, length=${jsonString.length}`);
+        } catch (clientErr) {
+          const clientErrMsg = clientErr instanceof Error ? clientErr.message : String(clientErr);
+          console.log('[Backup] Client-side backup also failed:', clientErrMsg);
+          Alert.alert('Ошибка создания бэкапа', `Не удалось сформировать резервную копию.\n\nСервер: ${errMsg}\nЛокально: ${clientErrMsg}\n\nДанные не затронуты.`);
+          return;
+        }
       }
 
       if (!jsonString || jsonString.length < 10) {
-        console.log('[Backup] Backup data empty or too short:', jsonString?.length);
         Alert.alert('Ошибка', 'Резервная копия пустая. Данные не затронуты.');
         return;
       }
 
-      const date = new Date();
-      const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}_${String(date.getHours()).padStart(2, '0')}-${String(date.getMinutes()).padStart(2, '0')}`;
-      const fileName = `parking_backup_${dateStr}.json`;
       const sizeKB = (jsonString.length / 1024).toFixed(1);
 
       if (Platform.OS === 'web') {
@@ -214,61 +249,34 @@ export default function SettingsScreen() {
           console.log(`[Backup] Web download OK: ${fileName}, size: ${sizeKB} KB`);
           Alert.alert('Готово', `Резервная копия скачана (${fileName}).\nРазмер: ${sizeKB} КБ`);
         } else {
-          console.log('[Backup] All web download methods failed, trying clipboard fallback');
+          console.log('[Backup] Web download methods failed, trying clipboard fallback');
           try {
             const Clipboard = await import('expo-clipboard');
             await Clipboard.setStringAsync(jsonString);
-            Alert.alert('Скопировано', `Не удалось скачать файл напрямую.\n\nДанные бэкапа (${sizeKB} КБ) скопированы в буфер обмена.\n\nОткройте текстовый редактор, вставьте содержимое и сохраните как ${fileName}`);
+            Alert.alert('Скопировано', `Не удалось скачать файл напрямую.\n\nДанные бэкапа (${sizeKB} КБ) скопированы в буфер обмена.\n\nСохраните как ${fileName}`);
           } catch (clipErr) {
             console.log('[Backup] Clipboard fallback also failed:', clipErr);
-            Alert.alert('Ошибка скачивания', 'Не удалось скачать файл.\n\nПопробуйте другой браузер (Chrome, Firefox).\n\nДанные не затронуты.');
+            Alert.alert('Ошибка скачивания', 'Не удалось скачать файл.\n\nПопробуйте другой браузер.\n\nДанные не затронуты.');
           }
         }
       } else {
-        let nativeSuccess = false;
         try {
-          const { File: FSFile, Paths: FSPaths } = await import('expo-file-system');
+          const FSLegacy = await import('expo-file-system/legacy');
           const SharingModule = await import('expo-sharing');
-          console.log('[Backup] Native: creating file in cache...');
-          const file = new FSFile(FSPaths.cache, fileName);
-          try { file.create({ overwrite: true }); } catch (createErr) { console.log('[Backup] file.create error (non-fatal):', createErr); }
-          file.write(jsonString);
-          console.log(`[Backup] Native: file written, uri: ${file.uri}, exists: ${file.exists}, size: ${file.size}`);
-          await SharingModule.shareAsync(file.uri, {
+          const fileUri = (FSLegacy.cacheDirectory ?? '') + fileName;
+          console.log(`[Backup] Native: writing to ${fileUri}`);
+          await FSLegacy.writeAsStringAsync(fileUri, jsonString, { encoding: FSLegacy.EncodingType.UTF8 });
+          await SharingModule.shareAsync(fileUri, {
             mimeType: 'application/json',
             dialogTitle: 'Сохранить резервную копию',
             UTI: 'public.json',
           });
-          try { file.delete(); } catch {}
-          nativeSuccess = true;
+          try { await FSLegacy.deleteAsync(fileUri, { idempotent: true }); } catch {}
           console.log('[Backup] Native: share completed successfully');
         } catch (nativeErr) {
           const errMsg = nativeErr instanceof Error ? nativeErr.message : String(nativeErr);
-          console.log('[Backup] Native new API failed, trying legacy:', errMsg);
-        }
-
-        if (!nativeSuccess) {
-          try {
-            const FSLegacy = await import('expo-file-system/legacy');
-            const SharingModule = await import('expo-sharing');
-            const fileUri = (FSLegacy.cacheDirectory ?? '') + fileName;
-            console.log(`[Backup] Native legacy: writing to ${fileUri}`);
-            await FSLegacy.writeAsStringAsync(fileUri, jsonString, { encoding: FSLegacy.EncodingType.UTF8 });
-            const fileInfo = await FSLegacy.getInfoAsync(fileUri);
-            console.log('[Backup] Native legacy: file info:', JSON.stringify(fileInfo));
-            await SharingModule.shareAsync(fileUri, {
-              mimeType: 'application/json',
-              dialogTitle: 'Сохранить резервную копию',
-              UTI: 'public.json',
-            });
-            try { await FSLegacy.deleteAsync(fileUri, { idempotent: true }); } catch {}
-            nativeSuccess = true;
-            console.log('[Backup] Native legacy: share completed successfully');
-          } catch (legacyErr) {
-            const errMsg = legacyErr instanceof Error ? legacyErr.message : String(legacyErr);
-            console.log('[Backup] Native legacy also failed:', errMsg);
-            Alert.alert('Ошибка сохранения', `Не удалось сохранить файл бэкапа.\n\nПричина: ${errMsg}\n\nДанные не затронуты.`);
-          }
+          console.log('[Backup] Native share failed:', errMsg);
+          Alert.alert('Ошибка сохранения', `Не удалось сохранить файл бэкапа.\n\nПричина: ${errMsg}\n\nДанные не затронуты.`);
         }
       }
       console.log('[Backup] === EXPORT COMPLETED ===');
@@ -279,7 +287,7 @@ export default function SettingsScreen() {
     } finally {
       setBackupLoading(false);
     }
-  }, [createBackup, triggerWebDownload]);
+  }, [createBackup, triggerWebDownload, getServerBackupUrl]);
 
   const stripBOM = useCallback((text: string): string => {
     if (text.charCodeAt(0) === 0xFEFF) return text.slice(1);

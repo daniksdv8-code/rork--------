@@ -445,6 +445,18 @@ function getStoreDataForClient(): Record<string, any> | null {
   };
 }
 
+export function getBackupJson(): string {
+  const clientData = getStoreDataForClient();
+  const backupObj = {
+    formatId: 'park_manager_backup',
+    version: 2,
+    createdAt: new Date().toISOString(),
+    createdBy: 'server',
+    data: clientData ?? {},
+  };
+  return JSON.stringify(backupObj);
+}
+
 const dataSchema = z.object({
   clients: z.array(z.any()),
   cars: z.array(z.any()),
