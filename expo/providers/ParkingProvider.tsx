@@ -89,11 +89,14 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   const utils = trpc.useUtils();
 
   const dataQuery = trpc.parking.getData.useQuery(undefined, {
-    refetchInterval: 2000,
+    refetchInterval: 3000,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
     refetchOnMount: true,
     staleTime: 0,
+    retry: 2,
+    retryDelay: 1000,
+    throwOnError: false,
   });
 
   const applyServerData = useCallback((d: Record<string, any>) => {
@@ -2795,38 +2798,44 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   const createBackup = useCallback((): string => {
     console.log('[Backup] createBackup() called');
     const snapshot = latestDataRef.current;
-    if (!snapshot) {
-      throw new Error('Данные ещё не загружены. Дождитесь синхронизации.');
-    }
 
     const safeArr = (val: any): any[] => {
-      if (Array.isArray(val)) return val;
+      try {
+        if (Array.isArray(val)) return val;
+      } catch {}
       return [];
     };
 
+    const safeObj = (val: any, fallback: any): any => {
+      try {
+        if (val && typeof val === 'object' && !Array.isArray(val)) return val;
+      } catch {}
+      return fallback;
+    };
+
     const dataPayload: Record<string, any> = {
-      clients: safeArr(snapshot.clients),
-      cars: safeArr(snapshot.cars),
-      sessions: safeArr(snapshot.sessions),
-      subscriptions: safeArr(snapshot.subscriptions),
-      payments: safeArr(snapshot.payments),
-      debts: safeArr(snapshot.debts),
-      transactions: safeArr(snapshot.transactions),
-      tariffs: (snapshot.tariffs && typeof snapshot.tariffs === 'object') ? snapshot.tariffs : EMPTY_DATA.tariffs,
-      shifts: safeArr(snapshot.shifts),
-      expenses: safeArr(snapshot.expenses),
-      withdrawals: safeArr(snapshot.withdrawals),
-      users: safeArr(snapshot.users),
-      deletedClientIds: safeArr(snapshot.deletedClientIds),
-      scheduledShifts: safeArr(snapshot.scheduledShifts),
-      actionLogs: safeArr(snapshot.actionLogs),
-      adminExpenses: safeArr(snapshot.adminExpenses),
-      adminCashOperations: safeArr(snapshot.adminCashOperations),
-      expenseCategories: safeArr(snapshot.expenseCategories),
-      dailyDebtAccruals: safeArr(snapshot.dailyDebtAccruals),
-      clientDebts: safeArr(snapshot.clientDebts),
-      cashOperations: safeArr(snapshot.cashOperations),
-      teamViolations: safeArr(snapshot.teamViolations),
+      clients: safeArr(snapshot?.clients ?? clients),
+      cars: safeArr(snapshot?.cars ?? cars),
+      sessions: safeArr(snapshot?.sessions ?? sessions),
+      subscriptions: safeArr(snapshot?.subscriptions ?? subscriptions),
+      payments: safeArr(snapshot?.payments ?? payments),
+      debts: safeArr(snapshot?.debts ?? debts),
+      transactions: safeArr(snapshot?.transactions ?? transactions),
+      tariffs: safeObj(snapshot?.tariffs ?? tariffs, EMPTY_DATA.tariffs),
+      shifts: safeArr(snapshot?.shifts ?? shifts),
+      expenses: safeArr(snapshot?.expenses ?? expenses),
+      withdrawals: safeArr(snapshot?.withdrawals ?? withdrawals),
+      users: safeArr(snapshot?.users ?? users),
+      deletedClientIds: safeArr(snapshot?.deletedClientIds ?? deletedClientIds),
+      scheduledShifts: safeArr(snapshot?.scheduledShifts ?? scheduledShifts),
+      actionLogs: safeArr(snapshot?.actionLogs ?? actionLogs),
+      adminExpenses: safeArr(snapshot?.adminExpenses ?? adminExpenses),
+      adminCashOperations: safeArr(snapshot?.adminCashOperations ?? adminCashOperations),
+      expenseCategories: safeArr(snapshot?.expenseCategories ?? expenseCategories),
+      dailyDebtAccruals: safeArr(snapshot?.dailyDebtAccruals ?? dailyDebtAccruals),
+      clientDebts: safeArr(snapshot?.clientDebts ?? clientDebts),
+      cashOperations: safeArr(snapshot?.cashOperations ?? cashOperations),
+      teamViolations: safeArr(snapshot?.teamViolations ?? teamViolations),
     };
 
     const backupData = {
@@ -2837,30 +2846,20 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       data: dataPayload,
     };
 
-    console.log(`[Backup] Prepared backup object, clients=${dataPayload.clients.length}, cars=${dataPayload.cars.length}, sessions=${dataPayload.sessions.length}`);
+    console.log(`[Backup] Prepared backup: clients=${dataPayload.clients.length}, cars=${dataPayload.cars.length}, sessions=${dataPayload.sessions.length}`);
 
-    let jsonResult: string;
-    try {
-      jsonResult = JSON.stringify(backupData);
-    } catch (stringifyErr) {
-      console.log('[Backup] JSON.stringify failed:', stringifyErr);
-      try {
-        jsonResult = JSON.stringify(backupData, (_key, value) => {
-          if (typeof value === 'bigint') return Number(value);
-          if (value === undefined) return null;
-          if (typeof value === 'function') return undefined;
-          if (value !== value) return null;
-          if (value === Infinity || value === -Infinity) return null;
-          return value;
-        });
-      } catch (fallbackErr) {
-        throw new Error(`Не удалось сериализовать данные: ${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)}`);
-      }
-    }
+    const safeReplacer = (_key: string, value: any): any => {
+      if (typeof value === 'bigint') return Number(value);
+      if (value === undefined) return null;
+      if (typeof value === 'function') return undefined;
+      if (typeof value === 'number' && !isFinite(value)) return null;
+      return value;
+    };
 
+    const jsonResult = JSON.stringify(backupData, safeReplacer);
     console.log(`[Backup] Created backup JSON: ${jsonResult.length} bytes`);
     return jsonResult;
-  }, [currentUser]);
+  }, [currentUser, clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories, dailyDebtAccruals, clientDebts, cashOperations, teamViolations]);
 
   const getPreRestoreBackup = useCallback((): string => {
     const snapshot = latestDataRef.current;

@@ -23,7 +23,7 @@ app.get("/", (c) => {
   return c.json({ status: "ok", message: "Parking API is running" });
 });
 
-app.get("/backup", (c) => {
+function handleBackup(c: any) {
   try {
     const json = getBackupJson();
     const now = new Date();
@@ -40,6 +40,9 @@ app.get("/backup", (c) => {
     c.header('Access-Control-Allow-Origin', '*');
     return c.json({ error: 'Failed to create backup', details: String(e) }, 500);
   }
-});
+}
+
+app.get("/backup", handleBackup);
+app.get("/api/backup", handleBackup);
 
 export default app;

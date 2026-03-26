@@ -106,88 +106,115 @@ export default function SettingsScreen() {
 
   const triggerWebDownload = useCallback((jsonString: string, fileName: string): boolean => {
     console.log(`[Backup] triggerWebDownload called, fileName=${fileName}, dataLen=${jsonString.length}`);
-    const errors: string[] = [];
 
     try {
-      if (typeof Blob !== 'undefined' && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
-        const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = fileName;
-        a.style.display = 'none';
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(() => {
-          try {
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-          } catch {}
-        }, 500);
-        console.log(`[Backup] Web Blob download triggered: ${fileName}, blob size: ${blob.size}`);
-        return true;
-      } else {
-        errors.push('Blob/URL.createObjectURL not available');
-      }
+      const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8' });
+      const blobUrl = URL.createObjectURL(blob);
+
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = fileName;
+      link.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0;pointer-events:none;';
+      document.body.appendChild(link);
+
+      setTimeout(() => {
+        try { link.click(); } catch (e) { console.log('[Backup] link.click() error:', e); }
+      }, 100);
+
+      setTimeout(() => {
+        try {
+          document.body.removeChild(link);
+          URL.revokeObjectURL(blobUrl);
+        } catch {}
+      }, 3000);
+
+      console.log(`[Backup] Blob download triggered: ${fileName}, blob size: ${blob.size}`);
+      return true;
     } catch (blobErr) {
-      const msg = blobErr instanceof Error ? blobErr.message : String(blobErr);
-      console.log('[Backup] Blob download failed:', msg);
-      errors.push(`Blob: ${msg}`);
+      console.log('[Backup] Blob download failed:', blobErr);
     }
 
     try {
-      if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
-        const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(jsonString);
-        const a = document.createElement('a');
-        a.href = dataUri;
-        a.download = fileName;
-        a.style.display = 'none';
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(() => {
-          try { document.body.removeChild(a); } catch {}
-        }, 500);
-        console.log(`[Backup] Web data:URI download triggered: ${fileName}`);
-        return true;
-      } else {
-        errors.push('document.createElement not available');
-      }
+      const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(jsonString);
+      const link = document.createElement('a');
+      link.href = dataUri;
+      link.download = fileName;
+      link.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0;';
+      document.body.appendChild(link);
+      setTimeout(() => { try { link.click(); } catch {} }, 100);
+      setTimeout(() => { try { document.body.removeChild(link); } catch {} }, 3000);
+      console.log(`[Backup] data:URI download triggered: ${fileName}`);
+      return true;
     } catch (dataUriErr) {
-      const msg = dataUriErr instanceof Error ? dataUriErr.message : String(dataUriErr);
-      console.log('[Backup] data:URI download failed:', msg);
-      errors.push(`dataURI: ${msg}`);
+      console.log('[Backup] data:URI download failed:', dataUriErr);
     }
 
     try {
-      if (typeof window !== 'undefined' && typeof window.open === 'function') {
-        const w = window.open('', '_blank');
-        if (w) {
-          w.document.write('<pre>' + jsonString.replace(/</g, '&lt;') + '</pre>');
-          w.document.title = fileName;
-          w.document.close();
-          console.log('[Backup] Web window.open fallback triggered');
-          return true;
-        } else {
-          errors.push('window.open returned null (popup blocked?)');
-        }
+      const w = window.open('', '_blank');
+      if (w) {
+        w.document.write('<pre>' + jsonString.replace(/</g, '&lt;') + '</pre>');
+        w.document.title = fileName;
+        w.document.close();
+        console.log('[Backup] window.open fallback triggered');
+        return true;
       }
     } catch (winErr) {
-      const msg = winErr instanceof Error ? winErr.message : String(winErr);
-      console.log('[Backup] window.open fallback failed:', msg);
-      errors.push(`window.open: ${msg}`);
+      console.log('[Backup] window.open fallback failed:', winErr);
     }
 
-    console.log('[Backup] All web download methods failed:', errors.join('; '));
+    console.log('[Backup] All web download methods failed');
     return false;
   }, []);
 
-  const getBackupApiUrl = useCallback((): string => {
+  const getBackupApiUrls = useCallback((): string[] => {
     const baseUrl = process.env.EXPO_PUBLIC_RORK_API_BASE_URL ?? '';
     const apiBase = baseUrl.replace(/\/api\/trpc\/?$/, '').replace(/\/trpc\/?$/, '').replace(/\/+$/, '');
-    const url = `${apiBase}/api/backup`;
-    console.log(`[Backup] Constructed backup URL: ${url} (from baseUrl: ${baseUrl})`);
-    return url;
+    const urls = [
+      `${apiBase}/api/backup`,
+      `${apiBase}/backup`,
+      `${baseUrl.replace(/\/trpc\/?$/, '').replace(/\/+$/, '')}/backup`,
+    ];
+    const unique = [...new Set(urls.filter(u => u.length > 10))];
+    console.log(`[Backup] Backup URLs to try: ${unique.join(', ')}`);
+    return unique;
   }, []);
+
+  const tryFetchServerBackup = useCallback(async (): Promise<string | null> => {
+    const urls = getBackupApiUrls();
+    for (const backupUrl of urls) {
+      try {
+        console.log(`[Backup] Trying server: ${backupUrl}`);
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 10000);
+        const response = await fetch(backupUrl, {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' },
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+        if (!response.ok) {
+          console.log(`[Backup] Server ${backupUrl} returned ${response.status}`);
+          continue;
+        }
+        const text = await response.text();
+        if (!text || text.length < 10) {
+          console.log(`[Backup] Server response too short: ${text.length}`);
+          continue;
+        }
+        const trimmed = text.trim();
+        if (!trimmed.startsWith('{')) {
+          console.log(`[Backup] Server response not JSON object, starts with: ${trimmed.substring(0, 30)}`);
+          continue;
+        }
+        JSON.parse(trimmed);
+        console.log(`[Backup] Server backup validated OK from ${backupUrl}, ${trimmed.length} chars`);
+        return trimmed;
+      } catch (err) {
+        console.log(`[Backup] Server ${backupUrl} failed:`, err instanceof Error ? err.message : String(err));
+      }
+    }
+    return null;
+  }, [getBackupApiUrls]);
 
   const handleCreateBackup = useCallback(async () => {
     setBackupLoading(true);
@@ -198,79 +225,50 @@ export default function SettingsScreen() {
       const fileName = `parking_backup_${dateStr}.json`;
 
       let jsonString: string | null = null;
-      let fetchedFromServer = false;
+      let source = 'клиент';
 
-      console.log('[Backup] Step 1: Trying client-side backup first (most reliable)');
       try {
         jsonString = createBackup();
-        console.log(`[Backup] Client backup created OK, length=${jsonString.length}`);
+        if (jsonString && jsonString.length > 10) {
+          JSON.parse(jsonString);
+          console.log(`[Backup] Client backup OK, ${jsonString.length} chars`);
+        } else {
+          console.log('[Backup] Client backup returned empty/short result');
+          jsonString = null;
+        }
       } catch (clientErr) {
-        const errMsg = clientErr instanceof Error ? clientErr.message : String(clientErr);
-        console.log('[Backup] Client createBackup() failed:', errMsg);
+        console.log('[Backup] Client createBackup() error:', clientErr instanceof Error ? clientErr.message : String(clientErr));
+        jsonString = null;
       }
 
-      if (!jsonString || jsonString.length < 10) {
-        console.log('[Backup] Step 2: Client backup empty/failed, trying server endpoint');
-        const backupUrl = getBackupApiUrl();
-        console.log(`[Backup] Trying server endpoint: ${backupUrl}`);
-        try {
-          const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 15000);
-          const response = await fetch(backupUrl, {
-            method: 'GET',
-            headers: { 'Accept': 'application/json' },
-            signal: controller.signal,
-          });
-          clearTimeout(timeout);
-
-          if (response.ok) {
-            const text = await response.text();
-            console.log(`[Backup] Server response: ${text.length} chars, status=${response.status}`);
-            if (text && text.length > 10 && text.trim().startsWith('{')) {
-              try {
-                JSON.parse(text);
-                jsonString = text;
-                fetchedFromServer = true;
-                console.log('[Backup] Server backup validated OK');
-              } catch (parseErr) {
-                console.log('[Backup] Server response is not valid JSON:', parseErr);
-              }
-            } else {
-              console.log(`[Backup] Server response unexpected format (len=${text.length}, starts with: ${text.substring(0, 20)})`);
-            }
-          } else {
-            console.log(`[Backup] Server returned ${response.status}`);
-          }
-        } catch (fetchErr) {
-          const msg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
-          console.log(`[Backup] Server fetch failed: ${msg}`);
+      if (!jsonString) {
+        console.log('[Backup] Trying server fallback...');
+        const serverJson = await tryFetchServerBackup();
+        if (serverJson) {
+          jsonString = serverJson;
+          source = 'сервер';
         }
       }
 
       if (!jsonString || jsonString.length < 10) {
-        Alert.alert('Ошибка', 'Не удалось создать резервную копию. Данные ещё не загружены или пусты.\n\nДанные не затронуты.');
+        Alert.alert('Ошибка экспорта', 'Не удалось сформировать резервную копию.\n\nДанные ещё не загружены или пусты.\n\nБаза данных НЕ затронута.');
         return;
       }
 
       const sizeKB = (jsonString.length / 1024).toFixed(1);
-      const source = fetchedFromServer ? 'сервер' : 'клиент';
-      console.log(`[Backup] Backup ready: ${sizeKB} KB, source: ${source}, fileName: ${fileName}`);
+      console.log(`[Backup] Backup ready: ${sizeKB} KB, source: ${source}, file: ${fileName}`);
 
       if (Platform.OS === 'web') {
-        console.log('[Backup] Platform is web, triggering download...');
         const downloadOk = triggerWebDownload(jsonString, fileName);
         if (downloadOk) {
-          console.log(`[Backup] Web download OK: ${fileName}, size: ${sizeKB} KB`);
-          Alert.alert('Готово', `Резервная копия скачана (${fileName}).\nРазмер: ${sizeKB} КБ\nИсточник: ${source}`);
+          Alert.alert('Готово', `Резервная копия скачивается (${fileName}).\nРазмер: ${sizeKB} КБ\nИсточник: ${source}`);
         } else {
-          console.log('[Backup] Web download methods failed, trying clipboard fallback');
           try {
             const Clipboard = await import('expo-clipboard');
             await Clipboard.setStringAsync(jsonString);
-            Alert.alert('Скопировано', `Не удалось скачать файл напрямую.\n\nДанные бэкапа (${sizeKB} КБ) скопированы в буфер обмена.\n\nСохраните как ${fileName}`);
-          } catch (clipErr) {
-            console.log('[Backup] Clipboard fallback also failed:', clipErr);
-            Alert.alert('Ошибка скачивания', 'Не удалось скачать файл.\n\nПопробуйте другой браузер.\n\nДанные не затронуты.');
+            Alert.alert('Скопировано', `Скачивание не сработало.\n\nДанные (${sizeKB} КБ) скопированы в буфер обмена.\nСохраните как ${fileName}`);
+          } catch {
+            Alert.alert('Ошибка', 'Не удалось скачать файл.\nПопробуйте другой браузер.\n\nБаза данных НЕ затронута.');
           }
         }
       } else {
@@ -278,7 +276,6 @@ export default function SettingsScreen() {
           const FSLegacy = await import('expo-file-system/legacy');
           const SharingModule = await import('expo-sharing');
           const fileUri = (FSLegacy.cacheDirectory ?? '') + fileName;
-          console.log(`[Backup] Native: writing to ${fileUri}`);
           await FSLegacy.writeAsStringAsync(fileUri, jsonString, { encoding: FSLegacy.EncodingType.UTF8 });
           await SharingModule.shareAsync(fileUri, {
             mimeType: 'application/json',
@@ -286,22 +283,19 @@ export default function SettingsScreen() {
             UTI: 'public.json',
           });
           try { await FSLegacy.deleteAsync(fileUri, { idempotent: true }); } catch {}
-          console.log('[Backup] Native: share completed successfully');
         } catch (nativeErr) {
-          const errMsg = nativeErr instanceof Error ? nativeErr.message : String(nativeErr);
-          console.log('[Backup] Native share failed:', errMsg);
-          Alert.alert('Ошибка сохранения', `Не удалось сохранить файл бэкапа.\n\nПричина: ${errMsg}\n\nДанные не затронуты.`);
+          Alert.alert('Ошибка', `Не удалось сохранить файл.\n\n${nativeErr instanceof Error ? nativeErr.message : String(nativeErr)}\n\nБаза данных НЕ затронута.`);
         }
       }
       console.log('[Backup] === EXPORT COMPLETED ===');
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e);
-      console.log('[Backup] UNEXPECTED error:', errMsg, e);
-      Alert.alert('Ошибка', `Непредвиденная ошибка при создании бэкапа.\n\nПричина: ${errMsg}\n\nДанные не затронуты.`);
+      console.log('[Backup] UNEXPECTED error:', errMsg);
+      Alert.alert('Ошибка экспорта', `Непредвиденная ошибка:\n${errMsg}\n\nБаза данных НЕ затронута.`);
     } finally {
       setBackupLoading(false);
     }
-  }, [createBackup, triggerWebDownload, getBackupApiUrl]);
+  }, [createBackup, triggerWebDownload, tryFetchServerBackup]);
 
   const stripBOM = useCallback((text: string): string => {
     if (text.charCodeAt(0) === 0xFEFF) return text.slice(1);
