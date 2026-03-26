@@ -345,7 +345,9 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
   const schedulePush = useCallback(() => {
     if (restoreInProgressRef.current) {
-      console.log('[Sync] schedulePush blocked: restore in progress');
+      console.log('[Sync] schedulePush blocked: restore in progress, marking dirty for later');
+      localDirtyRef.current = true;
+      localChangeCounterRef.current++;
       return;
     }
     localDirtyRef.current = true;
@@ -3095,16 +3097,20 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       if (pushRetryTimerRef.current) { clearTimeout(pushRetryTimerRef.current); pushRetryTimerRef.current = null; }
 
       if (restoreServerOkRef.current) {
-        localDirtyRef.current = false;
-        console.log('[Restore] Sync unblocked after delay (120s), server was OK');
-        void utils.parking.getData.invalidate();
+        if (localDirtyRef.current) {
+          console.log('[Restore] Sync unblocked after delay (10s), server was OK but local changes detected — pushing');
+          void pushToServer();
+        } else {
+          console.log('[Restore] Sync unblocked after delay (10s), server was OK, no local changes');
+          void utils.parking.getData.invalidate();
+        }
       } else {
-        console.log('[Restore] Sync unblocked after delay (120s), server push FAILED — forcing re-push of restored data');
+        console.log('[Restore] Sync unblocked after delay (10s), server push FAILED — forcing re-push of restored data');
         localDirtyRef.current = true;
         localChangeCounterRef.current++;
         void pushToServer();
       }
-    }, 120000);
+    }, 10000);
 
     void utils.parking.getData.invalidate();
 

@@ -10,7 +10,7 @@ import { roundMoney } from '@/utils/money';
 
 export default function DebtorsScreen() {
   const router = useRouter();
-  const { debtors, dailyDebtAccruals, sessions, cars, tariffs } = useParking();
+  const { debtors, dailyDebtAccruals, sessions, cars } = useParking();
 
   const accrualDetailsByClient = useMemo(() => {
     const map: Record<string, Array<{
@@ -42,23 +42,16 @@ export default function DebtorsScreen() {
         const days = sessionAccruals.length;
         const car = cars.find(c => c.id === session.carId);
         const isLombard = session.serviceType === 'lombard';
-        let rate: number;
-        if (isLombard) {
-          rate = session.lombardRateApplied ?? tariffs.lombardRate;
-        } else if (session.serviceType === 'monthly') {
-          rate = tariffs.monthlyCash;
-        } else {
-          rate = tariffs.onetimeCash;
-        }
+        const accrualSum = roundMoney(sessionAccruals.reduce((s, a) => s + a.amount, 0));
+        const avgRate = days > 0 ? roundMoney(accrualSum / days) : 0;
 
-        const amount = roundMoney(days * rate);
         details.push({
           sessionId: session.id,
           carId: session.carId,
           plateNumber: car?.plateNumber ?? '—',
           days,
-          rate,
-          amount,
+          rate: avgRate,
+          amount: accrualSum,
           serviceType: isLombard ? 'ломбард' : session.serviceType === 'monthly' ? 'месяц' : 'разово',
           isFrozen: session.status === 'released_debt',
         });
@@ -70,7 +63,7 @@ export default function DebtorsScreen() {
     }
 
     return map;
-  }, [debtors, dailyDebtAccruals, sessions, cars, tariffs]);
+  }, [debtors, dailyDebtAccruals, sessions, cars]);
 
   const renderItem = useCallback(({ item }: { item: typeof debtors[0] }) => {
     if (!item.client) return null;
