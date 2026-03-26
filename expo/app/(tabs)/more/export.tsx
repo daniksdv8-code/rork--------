@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import {
-  View, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, Modal, Alert,
+  View, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, Modal, Alert, Platform,
 } from 'react-native';
 import { Stack } from 'expo-router';
 import { Download, Users, Receipt, Calendar, Check, X, Copy, AlertTriangle } from 'lucide-react-native';
@@ -113,8 +113,16 @@ export default function ExportScreen() {
       const fileName = `clients_${dateStr}.csv`;
       try {
         await shareCsv(csv, fileName);
-        setDoneClients(true);
-        setTimeout(() => setDoneClients(false), 3000);
+        if (Platform.OS !== 'web') {
+          setDoneClients(true);
+          setTimeout(() => setDoneClients(false), 3000);
+        } else {
+          openFallback(
+            `Экспорт сформирован (${(csv.length / 1024).toFixed(1)} КБ).\nЕсли скачивание не началось, скопируйте данные вручную.`,
+            csv,
+            fileName
+          );
+        }
       } catch (shareErr) {
         console.log('[Export] Clients share failed:', shareErr);
         openFallback(
@@ -154,8 +162,16 @@ export default function ExportScreen() {
       const fileName = `operations_${fromStr}_${toStr}.csv`;
       try {
         await shareCsv(csv, fileName);
-        setDonePayments(true);
-        setTimeout(() => setDonePayments(false), 3000);
+        if (Platform.OS !== 'web') {
+          setDonePayments(true);
+          setTimeout(() => setDonePayments(false), 3000);
+        } else {
+          openFallback(
+            `Экспорт сформирован (${(csv.length / 1024).toFixed(1)} КБ).\nЕсли скачивание не началось, скопируйте данные вручную.`,
+            csv,
+            fileName
+          );
+        }
       } catch (shareErr) {
         console.log('[Export] Payments share failed:', shareErr);
         openFallback(

@@ -203,11 +203,13 @@ export default function SettingsScreen() {
         saved = false;
       }
 
-      if (saved) {
+      if (saved && Platform.OS !== 'web') {
         Alert.alert('Готово', `Резервная копия сохранена (${fileName}).\nРазмер: ${sizeKB} КБ\n\nБаза данных НЕ затронута.`);
       } else {
         showFallback(
-          `Автоматическое скачивание не сработало.\nРазмер бэкапа: ${sizeKB} КБ`,
+          saved
+            ? `Бэкап сформирован (${sizeKB} КБ).\nЕсли скачивание не началось автоматически, воспользуйтесь способами ниже.`
+            : `Автоматическое скачивание не сработало.\nРазмер бэкапа: ${sizeKB} КБ`,
           serverUrl,
           jsonString
         );

@@ -16,7 +16,6 @@ async function saveNative(options: FileSaveOptions): Promise<boolean> {
     const cacheDir = FSLegacy.cacheDirectory;
     if (!cacheDir) {
       console.log('[FileSave] cacheDirectory is null');
-      Alert.alert('Ошибка', 'Не удалось получить директорию кэша устройства.');
       return false;
     }
 
@@ -30,7 +29,6 @@ async function saveNative(options: FileSaveOptions): Promise<boolean> {
     const info = await FSLegacy.getInfoAsync(fileUri);
     if (!info.exists) {
       console.log('[FileSave] File not found after write');
-      Alert.alert('Ошибка', 'Файл не найден после записи.');
       return false;
     }
     console.log(`[FileSave] File written OK, size: ${info.size} bytes`);
@@ -67,18 +65,19 @@ async function saveNative(options: FileSaveOptions): Promise<boolean> {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.log('[FileSave] Native save failed:', msg);
-    Alert.alert(
-      'Ошибка сохранения',
-      `Не удалось сохранить файл на устройство.\n\nОшибка: ${msg}\n\nПопробуйте скачать бэкап через браузер, открыв ссылку на бэкап вручную.`
-    );
     return false;
   }
 }
 
-function saveWeb(options: FileSaveOptions): boolean {
-  const { content, fileName, mimeType } = options;
-  console.log(`[FileSave] Web save: ${fileName}, ${content.length} chars`);
+function isInsideIframe(): boolean {
+  try {
+    return typeof window !== 'undefined' && window.self !== window.top;
+  } catch {
+    return true;
+  }
+}
 
+function saveWebViaBlob(content: string, fileName: string, mimeType: string): boolean {
   try {
     const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
     const blobUrl = URL.createObjectURL(blob);
@@ -89,16 +88,40 @@ function saveWeb(options: FileSaveOptions): boolean {
     link.style.display = 'none';
     document.body.appendChild(link);
     link.click();
+
     setTimeout(() => {
       try { document.body.removeChild(link); } catch {}
       try { URL.revokeObjectURL(blobUrl); } catch {}
     }, 10000);
-    console.log('[FileSave] Web blob download triggered via document');
-    return true;
-  } catch (blobErr) {
-    console.log('[FileSave] Blob creation/click failed:', blobErr);
-  }
 
+    console.log('[FileSave] Web blob download triggered');
+    return true;
+  } catch (err) {
+    console.log('[FileSave] Blob download failed:', err);
+    return false;
+  }
+}
+
+function saveWebViaNewWindow(content: string, fileName: string, mimeType: string): boolean {
+  try {
+    const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
+    const blobUrl = URL.createObjectURL(blob);
+    const win = window.open(blobUrl, '_blank');
+    if (win) {
+      setTimeout(() => { try { URL.revokeObjectURL(blobUrl); } catch {} }, 30000);
+      console.log('[FileSave] window.open with blob URL succeeded');
+      return true;
+    }
+    URL.revokeObjectURL(blobUrl);
+    console.log('[FileSave] window.open returned null (blocked)');
+    return false;
+  } catch (err) {
+    console.log('[FileSave] window.open blob failed:', err);
+    return false;
+  }
+}
+
+function saveWebViaDataUri(content: string, fileName: string, mimeType: string): boolean {
   try {
     const dataUri = `data:${mimeType};charset=utf-8,` + encodeURIComponent(content);
     const link = document.createElement('a');
@@ -110,9 +133,49 @@ function saveWeb(options: FileSaveOptions): boolean {
     setTimeout(() => { try { document.body.removeChild(link); } catch {} }, 10000);
     console.log('[FileSave] Web data URI download triggered');
     return true;
-  } catch (dataErr) {
-    console.log('[FileSave] Data URI failed:', dataErr);
+  } catch (err) {
+    console.log('[FileSave] Data URI failed:', err);
+    return false;
   }
+}
+
+function saveWebViaPostMessage(content: string, fileName: string, mimeType: string): boolean {
+  try {
+    if (typeof window === 'undefined' || !window.parent || window.parent === window) {
+      return false;
+    }
+    const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
+    const blobUrl = URL.createObjectURL(blob);
+    window.parent.postMessage({
+      type: 'download',
+      url: blobUrl,
+      fileName,
+    }, '*');
+    console.log('[FileSave] postMessage to parent sent for download');
+    setTimeout(() => { try { URL.revokeObjectURL(blobUrl); } catch {} }, 60000);
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function saveWeb(options: FileSaveOptions): boolean {
+  const { content, fileName, mimeType } = options;
+  console.log(`[FileSave] Web save: ${fileName}, ${content.length} chars, iframe=${isInsideIframe()}`);
+
+  if (!isInsideIframe()) {
+    if (saveWebViaBlob(content, fileName, mimeType)) return true;
+    if (saveWebViaDataUri(content, fileName, mimeType)) return true;
+    return false;
+  }
+
+  if (saveWebViaBlob(content, fileName, mimeType)) {
+    console.log('[FileSave] Blob download attempted in iframe (may not work)');
+  }
+
+  saveWebViaPostMessage(content, fileName, mimeType);
+
+  if (saveWebViaNewWindow(content, fileName, mimeType)) return true;
 
   return false;
 }
@@ -133,20 +196,6 @@ export function openBackupUrl(url: string): void {
   });
 }
 
-async function copyToClipboardFallback(content: string, fileName: string): Promise<boolean> {
-  try {
-    const Clipboard = await import('expo-clipboard');
-    await Clipboard.setStringAsync(content);
-    Alert.alert(
-      'Скопировано в буфер',
-      `Скачивание не сработало в текущем окружении.\n\nДанные скопированы в буфер обмена.\nВставьте в текстовый файл и сохраните как ${fileName}`
-    );
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export async function saveFile(options: FileSaveOptions): Promise<boolean> {
   console.log(`[FileSave] saveFile called: platform=${Platform.OS}, file=${options.fileName}, size=${options.content.length}`);
 
@@ -155,11 +204,7 @@ export async function saveFile(options: FileSaveOptions): Promise<boolean> {
   }
 
   const webOk = saveWeb(options);
-  if (webOk) return true;
+  if (webOk && !isInsideIframe()) return true;
 
-  const clipOk = await copyToClipboardFallback(options.content, options.fileName);
-  if (clipOk) return true;
-
-  Alert.alert('Ошибка', 'Не удалось скачать или скопировать файл. Попробуйте другой браузер.');
   return false;
 }

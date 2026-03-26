@@ -62,6 +62,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   const restoreInProgressRef = useRef<boolean>(false);
   const restoreServerOkRef = useRef<boolean>(false);
   const restoreFinishedAtRef = useRef<number>(0);
+  const RESTORE_GRACE_MS = 1800000;
 
   const latestDataRef = useRef({
     clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories, dailyDebtAccruals, clientDebts, cashOperations, teamViolations,
@@ -207,7 +208,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     }
 
     if (initialized && restoreEpochRef.current >= 0 && serverEpoch !== restoreEpochRef.current) {
-      const epochGracePeriod = restoreFinishedAtRef.current > 0 && (Date.now() - restoreFinishedAtRef.current) < 600000;
+      const epochGracePeriod = restoreFinishedAtRef.current > 0 && (Date.now() - restoreFinishedAtRef.current) < RESTORE_GRACE_MS;
       if (restoreInProgressRef.current || epochGracePeriod) {
         console.log(`[Sync] EPOCH CHANGE detected (local=${restoreEpochRef.current}, server=${serverEpoch}), but restore in progress/grace — skipping resync`);
         return;
@@ -236,7 +237,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       serverInitializedRef.current = true;
       serverDataAppliedRef.current = true;
 
-      const restoreGracePeriod = restoreFinishedAtRef.current > 0 && (Date.now() - restoreFinishedAtRef.current) < 600000;
+      const restoreGracePeriod = restoreFinishedAtRef.current > 0 && (Date.now() - restoreFinishedAtRef.current) < RESTORE_GRACE_MS;
       if (restoreInProgressRef.current || restoreGracePeriod) {
         if (restoreGracePeriod && !restoreInProgressRef.current) {
           lastSyncedVersionRef.current = version;
@@ -254,7 +255,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         const localClients = latestDataRef.current.clients;
         const serverEmpty = !Array.isArray(serverClients) || serverClients.length === 0;
         const localHasData = Array.isArray(localClients) && localClients.length > 3;
-        if (serverEmpty && localHasData) {
+        const recentRestore = restoreFinishedAtRef.current > 0 && (Date.now() - restoreFinishedAtRef.current) < RESTORE_GRACE_MS;
+        if (serverEmpty && localHasData && !recentRestore) {
           console.log(`[Sync] WARNING: Server has 0 clients but local has ${localClients.length}. Refusing to apply empty server data. Pushing local data instead.`);
           lastSyncedVersionRef.current = version;
           skipLogVersionRef.current = -1;
@@ -2719,7 +2721,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
   useEffect(() => {
     if (isLoaded && currentUser && !restoreInProgressRef.current) {
-      const restoreGrace = restoreFinishedAtRef.current > 0 && (Date.now() - restoreFinishedAtRef.current) < 120000;
+      const restoreGrace = restoreFinishedAtRef.current > 0 && (Date.now() - restoreFinishedAtRef.current) < RESTORE_GRACE_MS;
       if (restoreGrace) {
         console.log('[Violations] Skipping ensureCurrentMonth during restore grace period');
         return;
