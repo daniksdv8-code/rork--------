@@ -31,10 +31,13 @@ app.get("/backup", (c) => {
     const fileName = `parking_backup_${dateStr}.json`;
     c.header('Content-Type', 'application/json; charset=utf-8');
     c.header('Content-Disposition', `attachment; filename="${fileName}"`);
+    c.header('Cache-Control', 'no-store, no-cache, must-revalidate');
+    c.header('Access-Control-Allow-Origin', '*');
     console.log(`[Backup] Server backup endpoint called, json length=${json.length}`);
     return c.body(json);
   } catch (e) {
     console.error('[Backup] Server backup endpoint error:', e);
+    c.header('Access-Control-Allow-Origin', '*');
     return c.json({ error: 'Failed to create backup', details: String(e) }, 500);
   }
 });

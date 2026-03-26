@@ -204,8 +204,9 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     }
 
     if (initialized && restoreEpochRef.current >= 0 && serverEpoch !== restoreEpochRef.current) {
-      if (restoreInProgressRef.current) {
-        console.log(`[Sync] EPOCH CHANGE detected (local=${restoreEpochRef.current}, server=${serverEpoch}), but restore in progress — skipping resync`);
+      const epochGracePeriod = restoreFinishedAtRef.current > 0 && (Date.now() - restoreFinishedAtRef.current) < 30000;
+      if (restoreInProgressRef.current || epochGracePeriod) {
+        console.log(`[Sync] EPOCH CHANGE detected (local=${restoreEpochRef.current}, server=${serverEpoch}), but restore in progress/grace — skipping resync`);
         return;
       }
       console.log(`[Sync] EPOCH CHANGE detected: local=${restoreEpochRef.current}, server=${serverEpoch}. Forcing full resync.`);
@@ -232,7 +233,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       serverInitializedRef.current = true;
       serverDataAppliedRef.current = true;
 
-      const restoreGracePeriod = restoreFinishedAtRef.current > 0 && (Date.now() - restoreFinishedAtRef.current) < 10000;
+      const restoreGracePeriod = restoreFinishedAtRef.current > 0 && (Date.now() - restoreFinishedAtRef.current) < 30000;
       if (restoreInProgressRef.current || restoreGracePeriod) {
         if (restoreGracePeriod && !restoreInProgressRef.current) {
           console.log(`[Sync] Restore grace period active (${Date.now() - restoreFinishedAtRef.current}ms since restore), skipping server data v${version}`);
@@ -3098,19 +3099,19 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
       if (restoreServerOkRef.current) {
         if (localDirtyRef.current) {
-          console.log('[Restore] Sync unblocked after delay (10s), server was OK but local changes detected — pushing');
+          console.log('[Restore] Sync unblocked after delay (15s), server was OK but local changes detected — pushing');
           void pushToServer();
         } else {
-          console.log('[Restore] Sync unblocked after delay (10s), server was OK, no local changes');
+          console.log('[Restore] Sync unblocked after delay (15s), server was OK, no local changes');
           void utils.parking.getData.invalidate();
         }
       } else {
-        console.log('[Restore] Sync unblocked after delay (10s), server push FAILED — forcing re-push of restored data');
+        console.log('[Restore] Sync unblocked after delay (15s), server push FAILED — forcing re-push of restored data');
         localDirtyRef.current = true;
         localChangeCounterRef.current++;
         void pushToServer();
       }
-    }, 10000);
+    }, 15000);
 
     void utils.parking.getData.invalidate();
 

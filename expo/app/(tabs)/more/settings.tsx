@@ -181,6 +181,12 @@ export default function SettingsScreen() {
     return false;
   }, []);
 
+  const getBackupApiUrl = useCallback((): string => {
+    const baseUrl = process.env.EXPO_PUBLIC_RORK_API_BASE_URL ?? '';
+    const apiBase = baseUrl.replace(/\/api\/trpc\/?$/, '').replace(/\/+$/, '');
+    return `${apiBase}/api/backup`;
+  }, []);
+
   const handleCreateBackup = useCallback(async () => {
     setBackupLoading(true);
     console.log('[Backup] === EXPORT STARTED ===');
@@ -189,15 +195,55 @@ export default function SettingsScreen() {
       const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}_${String(date.getHours()).padStart(2, '0')}-${String(date.getMinutes()).padStart(2, '0')}`;
       const fileName = `parking_backup_${dateStr}.json`;
 
-      let jsonString: string;
+      let jsonString: string | null = null;
+      let fetchedFromServer = false;
+
+      const backupUrl = getBackupApiUrl();
+      console.log(`[Backup] Trying server endpoint: ${backupUrl}`);
       try {
-        jsonString = createBackup();
-        console.log(`[Backup] Backup created, length=${jsonString.length}, starts: ${jsonString.substring(0, 80)}`);
-      } catch (createErr) {
-        const errMsg = createErr instanceof Error ? createErr.message : String(createErr);
-        console.log('[Backup] createBackup() failed:', errMsg);
-        Alert.alert('Ошибка создания бэкапа', `Не удалось сформировать резервную копию.\n\nПричина: ${errMsg}\n\nДанные не затронуты.`);
-        return;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15000);
+        const response = await fetch(backupUrl, {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' },
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+
+        if (response.ok) {
+          const text = await response.text();
+          console.log(`[Backup] Server response: ${text.length} chars, status=${response.status}`);
+          if (text && text.length > 10 && (text.trim().startsWith('{') || text.trim().startsWith('['))) {
+            try {
+              JSON.parse(text);
+              jsonString = text;
+              fetchedFromServer = true;
+              console.log('[Backup] Server backup validated OK');
+            } catch (parseErr) {
+              console.log('[Backup] Server response is not valid JSON, falling back to client:', parseErr);
+            }
+          } else {
+            console.log(`[Backup] Server response unexpected format (len=${text.length}), falling back to client`);
+          }
+        } else {
+          console.log(`[Backup] Server returned ${response.status}, falling back to client`);
+        }
+      } catch (fetchErr) {
+        const msg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+        console.log(`[Backup] Server fetch failed: ${msg}, falling back to client`);
+      }
+
+      if (!jsonString) {
+        console.log('[Backup] Using client-side backup creation');
+        try {
+          jsonString = createBackup();
+          console.log(`[Backup] Client backup created, length=${jsonString.length}`);
+        } catch (createErr) {
+          const errMsg = createErr instanceof Error ? createErr.message : String(createErr);
+          console.log('[Backup] createBackup() failed:', errMsg);
+          Alert.alert('Ошибка создания бэкапа', `Не удалось сформировать резервную копию.\n\nПричина: ${errMsg}\n\nДанные не затронуты.`);
+          return;
+        }
       }
 
       if (!jsonString || jsonString.length < 10) {
@@ -205,24 +251,16 @@ export default function SettingsScreen() {
         return;
       }
 
-      try {
-        JSON.parse(jsonString);
-        console.log('[Backup] JSON validation passed');
-      } catch (parseErr) {
-        console.log('[Backup] JSON validation failed (should not happen):', parseErr);
-        Alert.alert('Ошибка', 'Сформированный бэкап содержит невалидный JSON. Обратитесь в поддержку.');
-        return;
-      }
-
       const sizeKB = (jsonString.length / 1024).toFixed(1);
-      console.log(`[Backup] Backup size: ${sizeKB} KB, fileName: ${fileName}`);
+      const source = fetchedFromServer ? 'сервер' : 'клиент';
+      console.log(`[Backup] Backup size: ${sizeKB} KB, source: ${source}, fileName: ${fileName}`);
 
       if (Platform.OS === 'web') {
         console.log('[Backup] Platform is web, triggering download...');
         const downloadOk = triggerWebDownload(jsonString, fileName);
         if (downloadOk) {
           console.log(`[Backup] Web download OK: ${fileName}, size: ${sizeKB} KB`);
-          Alert.alert('Готово', `Резервная копия скачана (${fileName}).\nРазмер: ${sizeKB} КБ`);
+          Alert.alert('Готово', `Резервная копия скачана (${fileName}).\nРазмер: ${sizeKB} КБ\nИсточник: ${source}`);
         } else {
           console.log('[Backup] Web download methods failed, trying clipboard fallback');
           try {
@@ -262,7 +300,7 @@ export default function SettingsScreen() {
     } finally {
       setBackupLoading(false);
     }
-  }, [createBackup, triggerWebDownload]);
+  }, [createBackup, triggerWebDownload, getBackupApiUrl]);
 
   const stripBOM = useCallback((text: string): string => {
     if (text.charCodeAt(0) === 0xFEFF) return text.slice(1);
