@@ -105,31 +105,67 @@ export default function SettingsScreen() {
     }
   }, [currentUser, profileName, profileLogin, profileCurrentPassword, profileNewPassword, profileConfirmPassword, updateAdminProfile, updateCurrentUser]);
 
+  const getServerBackupUrl = useCallback((): string | null => {
+    const baseUrl = process.env.EXPO_PUBLIC_RORK_API_BASE_URL;
+    if (!baseUrl) return null;
+    const stripped = baseUrl.replace(/\/api\/trpc\/?$/, '').replace(/\/trpc\/?$/, '').replace(/\/+$/, '');
+    return `${stripped}/api/backup`;
+  }, []);
+
+  const triggerServerDownload = useCallback((): boolean => {
+    const url = getServerBackupUrl();
+    if (!url) {
+      console.log('[Backup] No server backup URL available');
+      return false;
+    }
+    console.log(`[Backup] Opening server backup URL directly: ${url}`);
+    try {
+      const w = (window.top ?? window.parent ?? window);
+      w.open(url, '_blank');
+      console.log('[Backup] window.top.open succeeded');
+      return true;
+    } catch (e1) {
+      console.log('[Backup] window.top.open failed:', e1);
+    }
+    try {
+      window.open(url, '_blank');
+      console.log('[Backup] window.open succeeded');
+      return true;
+    } catch (e2) {
+      console.log('[Backup] window.open failed:', e2);
+    }
+    try {
+      const link = document.createElement('a');
+      link.href = url;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => { try { document.body.removeChild(link); } catch {} }, 5000);
+      console.log('[Backup] anchor click fallback succeeded');
+      return true;
+    } catch (e3) {
+      console.log('[Backup] anchor click fallback failed:', e3);
+    }
+    return false;
+  }, [getServerBackupUrl]);
+
   const triggerWebDownload = useCallback((jsonString: string, fileName: string): boolean => {
     console.log(`[Backup] triggerWebDownload called, fileName=${fileName}, dataLen=${jsonString.length}`);
 
     try {
       const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8' });
       const blobUrl = URL.createObjectURL(blob);
-
       const link = document.createElement('a');
-      link.setAttribute('href', blobUrl);
-      link.setAttribute('download', fileName);
-      link.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0;pointer-events:none;visibility:hidden;';
+      link.href = blobUrl;
+      link.download = fileName;
+      link.style.display = 'none';
       document.body.appendChild(link);
-
-      const evt = document.createEvent('MouseEvents');
-      evt.initEvent('click', true, true);
-      link.dispatchEvent(evt);
-
+      link.click();
       setTimeout(() => {
-        try {
-          document.body.removeChild(link);
-          URL.revokeObjectURL(blobUrl);
-        } catch {}
+        try { document.body.removeChild(link); URL.revokeObjectURL(blobUrl); } catch {}
       }, 10000);
-
-      console.log(`[Backup] Blob download dispatched: ${fileName}, blob size: ${blob.size}`);
+      console.log(`[Backup] Blob download triggered: ${fileName}, blob size: ${blob.size}`);
       return true;
     } catch (blobErr) {
       console.log('[Backup] Blob download failed:', blobErr);
@@ -138,34 +174,19 @@ export default function SettingsScreen() {
     try {
       const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(jsonString);
       const link = document.createElement('a');
-      link.setAttribute('href', dataUri);
-      link.setAttribute('download', fileName);
-      link.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0;visibility:hidden;';
+      link.href = dataUri;
+      link.download = fileName;
+      link.style.display = 'none';
       document.body.appendChild(link);
-      const evt = document.createEvent('MouseEvents');
-      evt.initEvent('click', true, true);
-      link.dispatchEvent(evt);
+      link.click();
       setTimeout(() => { try { document.body.removeChild(link); } catch {} }, 10000);
-      console.log(`[Backup] data:URI download dispatched: ${fileName}`);
+      console.log(`[Backup] data:URI download triggered: ${fileName}`);
       return true;
     } catch (dataUriErr) {
       console.log('[Backup] data:URI download failed:', dataUriErr);
     }
 
-    try {
-      const w = window.open('', '_blank');
-      if (w && w.document) {
-        w.document.open();
-        w.document.write('<html><head><title>' + fileName + '</title></head><body><pre>' + jsonString.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</pre></body></html>');
-        w.document.close();
-        console.log('[Backup] window.open fallback triggered');
-        return true;
-      }
-    } catch (winErr) {
-      console.log('[Backup] window.open fallback failed:', winErr);
-    }
-
-    console.log('[Backup] All web download methods failed');
+    console.log('[Backup] All client-side download methods failed');
     return false;
   }, []);
 
@@ -236,6 +257,17 @@ export default function SettingsScreen() {
     setBackupLoading(true);
     console.log('[Backup] === EXPORT STARTED ===');
     try {
+      if (Platform.OS === 'web') {
+        console.log('[Backup] Web environment detected, trying direct server download first');
+        const serverOk = triggerServerDownload();
+        if (serverOk) {
+          console.log('[Backup] Server download initiated via direct URL');
+          Alert.alert('Скачивание', 'Резервная копия открывается в новой вкладке.\n\nЕсли скачивание не началось автоматически, сохраните страницу как .json файл (Ctrl+S / Cmd+S).\n\nБаза данных НЕ затронута.');
+          return;
+        }
+        console.log('[Backup] Direct server download failed, falling back to client-side');
+      }
+
       const date = new Date();
       const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}_${String(date.getHours()).padStart(2, '0')}-${String(date.getMinutes()).padStart(2, '0')}`;
       const fileName = `parking_backup_${dateStr}.json`;
@@ -275,10 +307,18 @@ export default function SettingsScreen() {
       }
 
       if (!jsonString || jsonString.length < 10) {
-        Alert.alert(
-          'Ошибка экспорта',
-          'Не удалось сформировать резервную копию.\n\nВозможные причины:\n• Данные ещё не загружены с сервера\n• Нет соединения с сервером\n\nБаза данных НЕ затронута.'
-        );
+        const backupUrl = getServerBackupUrl();
+        if (backupUrl) {
+          Alert.alert(
+            'Альтернативное скачивание',
+            `Не удалось сформировать бэкап программно.\n\nОткройте эту ссылку вручную в новой вкладке браузера:\n\n${backupUrl}\n\nБаза данных НЕ затронута.`
+          );
+        } else {
+          Alert.alert(
+            'Ошибка экспорта',
+            'Не удалось сформировать резервную копию.\n\nВозможные причины:\n• Данные ещё не загружены с сервера\n• Нет соединения с сервером\n\nБаза данных НЕ затронута.'
+          );
+        }
         return;
       }
 
@@ -295,7 +335,8 @@ export default function SettingsScreen() {
             await Clipboard.setStringAsync(jsonString);
             Alert.alert('Скопировано', `Скачивание не сработало.\n\nДанные (${sizeKB} КБ) скопированы в буфер обмена.\nСохраните как ${fileName}`);
           } catch {
-            Alert.alert('Ошибка', 'Не удалось скачать файл.\nПопробуйте другой браузер.\n\nБаза данных НЕ затронута.');
+            const backupUrl = getServerBackupUrl();
+            Alert.alert('Ошибка', `Не удалось скачать файл.\n\n${backupUrl ? `Откройте вручную:\n${backupUrl}` : 'Попробуйте другой браузер.'}\n\nБаза данных НЕ затронута.`);
           }
         }
       } else {
@@ -322,7 +363,7 @@ export default function SettingsScreen() {
     } finally {
       setBackupLoading(false);
     }
-  }, [createBackup, triggerWebDownload, tryFetchServerBackupViaHttp]);
+  }, [createBackup, triggerWebDownload, triggerServerDownload, tryFetchServerBackupViaHttp, getServerBackupUrl]);
 
   const stripBOM = useCallback((text: string): string => {
     if (text.charCodeAt(0) === 0xFEFF) return text.slice(1);
