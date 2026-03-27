@@ -1919,6 +1919,49 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     return roundMoney(oldDebtsTotal + clientDebtTotal);
   }, [activeDebts, clientDebts]);
 
+  const payWithDebtPriority = useCallback((clientId: string, totalPayment: number, method: PaymentMethod, targetCarId?: string, serviceType?: ServiceType, months?: number, paidUntilDate?: string): { debtPaid: number; advancePaid: number; remainingDebt: number } => {
+    const clientTotalDebt = getClientTotalDebt(clientId);
+
+    if (clientTotalDebt <= 0) {
+      if (targetCarId && serviceType === 'monthly') {
+        payMonthly(clientId, targetCarId, method, months ?? 1, totalPayment, paidUntilDate);
+      }
+      console.log(`[PayWithDebtPriority] No debt for ${clientId}, full amount ${totalPayment} goes to advance/payment`);
+      return { debtPaid: 0, advancePaid: totalPayment, remainingDebt: 0 };
+    }
+
+    const debtToPay = roundMoney(Math.min(totalPayment, clientTotalDebt));
+    const advanceAmount = roundMoney(totalPayment - debtToPay);
+
+    if (debtToPay > 0) {
+      payClientDebt(clientId, debtToPay, method, clientTotalDebt);
+    }
+
+    if (advanceAmount > 0 && targetCarId && serviceType === 'monthly') {
+      payMonthly(clientId, targetCarId, method, months ?? 1, advanceAmount, paidUntilDate);
+    }
+
+    const newRemainingDebt = roundMoney(Math.max(0, clientTotalDebt - debtToPay));
+    const debtPayLabel = `\u041f\u043b\u0430\u0442\u0451\u0436 ${totalPayment} \u20bd: \u0434\u043e\u043b\u0433 ${debtToPay} \u20bd \u2192 \u043f\u043e\u0433\u0430\u0448\u0435\u043d${advanceAmount > 0 ? `, \u0430\u0432\u0430\u043d\u0441 ${advanceAmount} \u20bd` : ''}`;
+    logAction('debt_payment', 'Платёж с приоритетом долга', debtPayLabel, clientId, 'client');
+    console.log(`[PayWithDebtPriority] Client ${clientId}: total=${totalPayment}, debtPaid=${debtToPay}, advance=${advanceAmount}, remainingDebt=${newRemainingDebt}`);
+    return { debtPaid: debtToPay, advancePaid: advanceAmount, remainingDebt: newRemainingDebt };
+  }, [getClientTotalDebt, payMonthly, payClientDebt, logAction]);
+
+  const releaseWithDebtWarning = useCallback((sessionId: string): { hasDebt: boolean; clientDebt: number; clientName: string; sessionCarPlate: string } => {
+    const session = sessions.find(s => s.id === sessionId);
+    if (!session) return { hasDebt: false, clientDebt: 0, clientName: '', sessionCarPlate: '' };
+    const clientDebt = getClientTotalDebt(session.clientId);
+    const client = clients.find(c => c.id === session.clientId);
+    const car = cars.find(c => c.id === session.carId);
+    return {
+      hasDebt: clientDebt > 0,
+      clientDebt,
+      clientName: client?.name ?? '',
+      sessionCarPlate: car?.plateNumber ?? '',
+    };
+  }, [sessions, clients, cars, getClientTotalDebt]);
+
   const getClientDebtInfo = useCallback((clientId: string): ClientDebt | null => {
     return clientDebts.find(c => c.clientId === clientId) ?? null;
   }, [clientDebts]);
@@ -3343,6 +3386,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     dailyDebtAccruals,
     clientDebts,
     payClientDebt,
+    payWithDebtPriority,
+    releaseWithDebtWarning,
     getClientDebtInfo,
     runDebtAccrual,
     cashOperations,
@@ -3373,7 +3418,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     adminExpenses, adminCashOperations, expenseCategories,
     addAdminExpense, addExpenseCategory, updateExpenseCategory, deleteExpenseCategory,
     getManagerCategories, getAdminCategories, getManagerCashRegister, getAdminCashRegister,
-    dailyDebtAccruals, clientDebts, payClientDebt, getClientDebtInfo, runDebtAccrual,
+    dailyDebtAccruals, clientDebts, payClientDebt, payWithDebtPriority, releaseWithDebtWarning, getClientDebtInfo, runDebtAccrual,
     cashOperations, getShiftCashBalance, addCashOperation,
     teamViolations, getCurrentMonthViolations, addViolation, deleteViolation,
     addManualDebt, deleteManualDebt,

@@ -7,6 +7,7 @@ import { useParking } from '@/providers/ParkingProvider';
 import { useAuth } from '@/providers/AuthProvider';
 import { PaymentMethod } from '@/types';
 import { roundMoney } from '@/utils/money';
+import { Wallet } from 'lucide-react-native';
 
 export default function PayDebtModal() {
   const router = useRouter();
@@ -223,6 +224,31 @@ export default function PayDebtModal() {
         </TouchableOpacity>
       )}
 
+      {Number(amount) > displayDebt && displayDebt > 0 && (
+        <View style={styles.overpayNotice}>
+          <Wallet size={14} color={Colors.success} />
+          <Text style={styles.overpayNoticeText}>
+            {roundMoney(Number(amount) - displayDebt)} ₽ пойдёт как аванс по активным заездам
+          </Text>
+        </View>
+      )}
+
+      {Number(amount) > 0 && displayDebt > 0 && (
+        <View style={styles.distributionCard}>
+          <Text style={styles.distributionTitle}>Авто-распределение:</Text>
+          <View style={styles.distributionRow}>
+            <Text style={[styles.distributionLabel, { color: Colors.danger }]}>→ Долг:</Text>
+            <Text style={[styles.distributionValue, { color: Colors.danger }]}>{roundMoney(Math.min(Number(amount), displayDebt))} ₽</Text>
+          </View>
+          {Number(amount) > displayDebt && (
+            <View style={styles.distributionRow}>
+              <Text style={[styles.distributionLabel, { color: Colors.success }]}>→ Аванс:</Text>
+              <Text style={[styles.distributionValue, { color: Colors.success }]}>{roundMoney(Number(amount) - displayDebt)} ₽</Text>
+            </View>
+          )}
+        </View>
+      )}
+
       <TouchableOpacity style={styles.payBtn} onPress={handlePay} activeOpacity={0.7} testID="pay-debt-btn">
         <Check size={20} color={Colors.white} />
         <Text style={styles.payBtnText}>
@@ -430,6 +456,52 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: Colors.primary,
     fontWeight: '500' as const,
+  },
+  overpayNotice: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 8,
+    backgroundColor: Colors.successLight,
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: Colors.success + '30',
+  },
+  overpayNoticeText: {
+    fontSize: 13,
+    color: Colors.success,
+    fontWeight: '500' as const,
+    flex: 1,
+    lineHeight: 18,
+  },
+  distributionCard: {
+    backgroundColor: Colors.card,
+    borderRadius: 12,
+    padding: 14,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: Colors.cardBorder,
+    gap: 8,
+  },
+  distributionTitle: {
+    fontSize: 13,
+    fontWeight: '600' as const,
+    color: Colors.textSecondary,
+    marginBottom: 4,
+  },
+  distributionRow: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
+  },
+  distributionLabel: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+  },
+  distributionValue: {
+    fontSize: 14,
+    fontWeight: '700' as const,
   },
   payBtn: {
     flexDirection: 'row' as const,

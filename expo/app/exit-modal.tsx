@@ -12,7 +12,7 @@ import { PaymentMethod } from '@/types';
 export default function ExitModal() {
   const router = useRouter();
   const { sessionId } = useLocalSearchParams<{ sessionId: string }>();
-  const { sessions, cars, clients, tariffs, subscriptions, payments, checkOut, needsShiftCheck, earlyExitWithRefund, getClientTotalDebt, dailyDebtAccruals } = useParking();
+  const { sessions, cars, clients, tariffs, subscriptions, payments, checkOut, needsShiftCheck, earlyExitWithRefund, getClientTotalDebt, dailyDebtAccruals, logAction } = useParking();
   const { isAdmin } = useAuth();
   const [method, setMethod] = useState<PaymentMethod>('cash');
   const [refundMethod, setRefundMethod] = useState<PaymentMethod>('cash');
@@ -148,6 +148,32 @@ export default function ExitModal() {
       return;
     }
     if (!session) return;
+
+    if (existingDebt > 0) {
+      Alert.alert(
+        '⚠️ ВЫПУСК С ДОЛГОМ',
+        `У владельца ${client?.name ?? ''} долг: ${existingDebt} ₽\n\nВы уверены, что хотите выпустить авто в долг?`,
+        [
+          { text: 'Отмена', style: 'cancel' },
+          {
+            text: 'Выпустить в долг',
+            style: 'destructive',
+            onPress: () => {
+              const result = checkOut(session.id);
+              logAction('checkout', 'Выпуск авто С ДОЛГОМ', `${car?.plateNumber ?? ''} (${client?.name ?? ''}), долг клиента: ${existingDebt} ₽`, session.id, 'session');
+              if (result.amount > 0) {
+                Alert.alert('Готово', `Выезд зафиксирован. Начислен долг: ${result.amount} ₽`);
+              } else {
+                Alert.alert('Готово', 'Выезд зафиксирован');
+              }
+              router.back();
+            },
+          },
+        ]
+      );
+      return;
+    }
+
     const result = checkOut(session.id);
     if (result.amount > 0) {
       Alert.alert('Готово', `Выезд зафиксирован. Начислен долг: ${result.amount} ₽`);
@@ -155,7 +181,7 @@ export default function ExitModal() {
       Alert.alert('Готово', 'Выезд зафиксирован');
     }
     router.back();
-  }, [session, checkOut, router, shiftRequired, isAdmin]);
+  }, [session, checkOut, router, shiftRequired, isAdmin, existingDebt, client, car, logAction]);
 
   const handlePartialPayAndExit = useCallback(() => {
     if (!isAdmin && shiftRequired) {
@@ -356,6 +382,18 @@ export default function ExitModal() {
           </>
         )}
       </View>
+
+      {existingDebt > 0 && (
+        <View style={styles.clientDebtWarning}>
+          <AlertTriangle size={18} color={Colors.danger} />
+          <View style={styles.clientDebtWarningContent}>
+            <Text style={styles.clientDebtWarningTitle}>⚠️ ДОЛГ ВЛАДЕЛЬЦА: {existingDebt} ₽</Text>
+            <Text style={styles.clientDebtWarningText}>
+              При выпуске без оплаты будет записано в журнал.
+            </Text>
+          </View>
+        </View>
+      )}
 
       {!isAdmin && shiftRequired && (
         <View style={styles.shiftWarning}>
@@ -897,6 +935,31 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700' as const,
     color: Colors.success,
+  },
+  clientDebtWarning: {
+    flexDirection: 'row' as const,
+    backgroundColor: Colors.dangerLight,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 12,
+    gap: 10,
+    borderWidth: 2,
+    borderColor: Colors.danger + '50',
+  },
+  clientDebtWarningContent: {
+    flex: 1,
+    gap: 4,
+  },
+  clientDebtWarningTitle: {
+    fontSize: 15,
+    fontWeight: '800' as const,
+    color: Colors.danger,
+  },
+  clientDebtWarningText: {
+    fontSize: 13,
+    color: Colors.danger,
+    opacity: 0.8,
+    lineHeight: 18,
   },
   shiftWarning: {
     flexDirection: 'row',

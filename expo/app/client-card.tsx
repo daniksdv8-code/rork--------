@@ -311,6 +311,39 @@ export default function ClientCardScreen() {
       : undefined;
     const hasActiveSub = sub && !isExpired(sub.paidUntil);
 
+    if (totalDebt > 0) {
+      Alert.alert(
+        '⚠️ У ВЛАДЕЛЬЦА ДОЛГ',
+        `Долг клиента: ${totalDebt} ₽\nАвто: ${car?.plateNumber ?? ''}\n\nВыберите действие:`,
+        [
+          { text: 'Отмена', style: 'cancel' },
+          {
+            text: '💳 Сначала оплатить',
+            onPress: () => {
+              router.push({
+                pathname: '/exit-modal',
+                params: { sessionId },
+              });
+            },
+          },
+          {
+            text: '⚠️ Выпустить в ДОЛГ',
+            style: 'destructive',
+            onPress: () => {
+              const result = checkOut(sessionId);
+              logAction('checkout', 'Выпуск авто С ДОЛГОМ (подтверждено)', `${car?.plateNumber ?? ''} (${client?.name ?? ''}), долг клиента: ${totalDebt} ₽`, sessionId, 'session');
+              if (result.debtId) {
+                Alert.alert('Начислен долг', `Сумма: ${result.amount} ₽ (${result.days} сут.)`);
+              } else {
+                Alert.alert('Готово', 'Выезд зафиксирован (долг не погашен)');
+              }
+            },
+          },
+        ]
+      );
+      return;
+    }
+
     const message = session.serviceType === 'monthly' && hasActiveSub
       ? `Зафиксировать выезд ${car?.plateNumber ?? ''}?\nМесячная аренда оплачена, долг не создается.`
       : `Зафиксировать выезд ${car?.plateNumber ?? ''}?\nБудет рассчитана сумма по тарифу.`;
@@ -329,7 +362,7 @@ export default function ClientCardScreen() {
         },
       },
     ]);
-  }, [clientActiveSessions, cars, clientId, getSubscription, checkOut, shiftRequired, isAdmin]);
+  }, [clientActiveSessions, cars, clientId, getSubscription, checkOut, shiftRequired, isAdmin, totalDebt, client, router, logAction]);
 
   const handleCancelCheckIn = useCallback((sessionId: string) => {
     const session = clientActiveSessions.find(s => s.id === sessionId);
@@ -551,6 +584,17 @@ export default function ClientCardScreen() {
             </View>
           )}
         </View>
+
+        {totalDebt > 0 && !isDeleted && (
+          <TouchableOpacity
+            style={styles.payDebtFirstBtn}
+            onPress={handlePayClientDebt}
+            activeOpacity={0.7}
+          >
+            <CreditCard size={16} color={Colors.white} />
+            <Text style={styles.payDebtFirstBtnText}>Оплатить ДОЛГ {totalDebt} ₽ сначала</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {!isDeleted && <View style={styles.actionsBlock}>
@@ -885,6 +929,18 @@ export default function ClientCardScreen() {
             >
               <X size={16} color={Colors.textSecondary} />
             </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {totalDebt > 0 && clientActiveSessions.length > 0 && !isDeleted && (
+        <View style={styles.debtWarningBanner}>
+          <AlertTriangle size={16} color={Colors.danger} />
+          <View style={styles.debtWarningContent}>
+            <Text style={styles.debtWarningTitle}>Долг клиента: {totalDebt} ₽</Text>
+            <Text style={styles.debtWarningText}>
+              Любой платёж сначала пойдёт на погашение долга. Остаток — на оплату заездов.
+            </Text>
           </View>
         </View>
       )}
@@ -1373,6 +1429,46 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600' as const,
     color: Colors.danger,
+  },
+  payDebtFirstBtn: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    backgroundColor: Colors.danger,
+    height: 44,
+    borderRadius: 10,
+    gap: 8,
+    marginTop: 12,
+  },
+  payDebtFirstBtnText: {
+    fontSize: 14,
+    fontWeight: '700' as const,
+    color: Colors.white,
+  },
+  debtWarningBanner: {
+    flexDirection: 'row' as const,
+    backgroundColor: Colors.dangerLight,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+    gap: 10,
+    borderWidth: 2,
+    borderColor: Colors.danger + '40',
+  },
+  debtWarningContent: {
+    flex: 1,
+    gap: 4,
+  },
+  debtWarningTitle: {
+    fontSize: 15,
+    fontWeight: '800' as const,
+    color: Colors.danger,
+  },
+  debtWarningText: {
+    fontSize: 12,
+    color: Colors.danger,
+    opacity: 0.8,
+    lineHeight: 17,
   },
   paidBadge: {
     backgroundColor: Colors.successLight,

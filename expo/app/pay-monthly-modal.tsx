@@ -7,11 +7,12 @@ import { useParking } from '@/providers/ParkingProvider';
 import { useAuth } from '@/providers/AuthProvider';
 import { PaymentMethod } from '@/types';
 import { formatDate, isExpired, daysBetween, calculateProRataAmount, getMonthlyAmount } from '@/utils/date';
+import { roundMoney } from '@/utils/money';
 
 export default function PayMonthlyModal() {
   const router = useRouter();
   const { clientId, carId } = useLocalSearchParams<{ clientId: string; carId: string }>();
-  const { clients, cars, tariffs, subscriptions, debts, payMonthly, payDebt, needsShiftCheck } = useParking();
+  const { clients, cars, tariffs, subscriptions, debts, payMonthly, payDebt, needsShiftCheck, getClientTotalDebt, payWithDebtPriority } = useParking();
   const { isAdmin } = useAuth();
   const shiftRequired = needsShiftCheck();
   const [method, setMethod] = useState<PaymentMethod>('cash');
@@ -34,6 +35,13 @@ export default function PayMonthlyModal() {
   }, [debts, clientId, carId]);
 
   const totalDebtAmount = useMemo(() => clientDebts.reduce((s, d) => s + d.remainingAmount, 0), [clientDebts]);
+
+  const clientTotalDebt = useMemo(() => {
+    if (!clientId) return 0;
+    return getClientTotalDebt(clientId);
+  }, [clientId, getClientTotalDebt]);
+
+  const [skipDebt, setSkipDebt] = useState<boolean>(false);
 
   const [startDate, setStartDate] = useState<Date>(() => {
     const d = new Date();
@@ -91,6 +99,14 @@ export default function PayMonthlyModal() {
     return d.toISOString();
   }, [endDate]);
 
+  const debtDistribution = useMemo(() => {
+    if (!clientId || clientTotalDebt <= 0 || skipDebt) {
+      return { advancePortion: amount, totalToPay: amount };
+    }
+    const totalToPay = roundMoney(amount + clientTotalDebt);
+    return { advancePortion: amount, totalToPay };
+  }, [clientId, clientTotalDebt, amount, skipDebt]);
+
   const handlePay = useCallback(() => {
     if (!isAdmin && shiftRequired) {
       Alert.alert('Смена не открыта', 'Откройте смену, чтобы принять оплату.');
@@ -102,19 +118,26 @@ export default function PayMonthlyModal() {
       return;
     }
 
-    if (clientDebts.length > 0) {
-      for (const debt of clientDebts) {
-        payDebt(debt.id, debt.remainingAmount, method);
+    if (clientTotalDebt > 0 && !skipDebt) {
+      payWithDebtPriority(clientId, debtDistribution.totalToPay, method, carId, 'monthly', 1, paidUntilStr);
+      const debtMsg = `\nДолг ${Math.min(clientTotalDebt, debtDistribution.totalToPay)} ₽ → погашен`;
+      const advMsg = debtDistribution.advancePortion > 0 ? `\nОплата месяца: ${debtDistribution.advancePortion} ₽` : '';
+      Alert.alert('Готово', `Платёж ${debtDistribution.totalToPay} ₽ принят.${debtMsg}${advMsg}\nОплачено до ${formatDate(paidUntilStr)}`);
+    } else {
+      if (clientDebts.length > 0 && !skipDebt) {
+        for (const debt of clientDebts) {
+          payDebt(debt.id, debt.remainingAmount, method);
+        }
+        console.log(`[PayMonthly] Closed ${clientDebts.length} debts for client ${clientId}, total: ${totalDebtAmount} ₽`);
       }
-      console.log(`[PayMonthly] Closed ${clientDebts.length} debts for client ${clientId}, total: ${totalDebtAmount} ₽`);
+
+      payMonthly(clientId, carId, method, 1, amount, paidUntilStr);
+
+      const debtMsg = totalDebtAmount > 0 && !skipDebt ? `\nДолг ${totalDebtAmount} ₽ закрыт.` : '';
+      Alert.alert('Готово', `Оплата ${amount} ₽ за ${days} дн. принята.\nОплачено до ${formatDate(paidUntilStr)}${debtMsg}`);
     }
-
-    payMonthly(clientId, carId, method, 1, amount, paidUntilStr);
-
-    const debtMsg = totalDebtAmount > 0 ? `\nДолг ${totalDebtAmount} ₽ закрыт.` : '';
-    Alert.alert('Готово', `Оплата ${amount} ₽ за ${days} дн. принята.\nОплачено до ${formatDate(paidUntilStr)}${debtMsg}`);
     router.back();
-  }, [clientId, carId, method, days, amount, payMonthly, payDebt, router, shiftRequired, paidUntilStr, clientDebts, totalDebtAmount, isAdmin]);
+  }, [clientId, carId, method, days, amount, payMonthly, payDebt, router, shiftRequired, paidUntilStr, clientDebts, totalDebtAmount, isAdmin, clientTotalDebt, skipDebt, payWithDebtPriority, debtDistribution]);
 
   const calendarDays = useMemo(() => {
     const year = calendarMonth.getFullYear();
@@ -349,6 +372,35 @@ export default function PayMonthlyModal() {
         </View>
       </View>
 
+      {clientTotalDebt > 0 && (
+        <View style={styles.debtPriorityCard}>
+          <View style={styles.debtPriorityHeader}>
+            <AlertTriangle size={18} color={Colors.danger} />
+            <Text style={styles.debtPriorityTitle}>ДОЛГ КЛИЕНТА: {clientTotalDebt} ₽</Text>
+          </View>
+          <Text style={styles.debtPriorityDesc}>
+            Платёж сначала пойдёт на погашение долга, остаток — на оплату периода.
+          </Text>
+          <View style={styles.debtPriorityToggle}>
+            <TouchableOpacity
+              style={[styles.debtToggleBtn, !skipDebt && styles.debtToggleBtnActive]}
+              onPress={() => setSkipDebt(false)}
+              activeOpacity={0.7}
+            >
+              <Check size={14} color={!skipDebt ? Colors.white : Colors.success} />
+              <Text style={[styles.debtToggleText, !skipDebt && styles.debtToggleTextActive]}>Сначала погасить долг</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.debtToggleBtn, skipDebt && styles.debtToggleBtnSkip]}
+              onPress={() => setSkipDebt(true)}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.debtToggleText, skipDebt && styles.debtToggleTextSkip]}>Пропустить долг</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
       <View style={styles.summaryCard}>
         <View style={styles.summaryRow}>
           <Text style={styles.summaryLabel}>Тариф:</Text>
@@ -362,7 +414,20 @@ export default function PayMonthlyModal() {
           <Text style={styles.summaryLabel}>Расчёт:</Text>
           <Text style={styles.summaryValue}>{monthlyRate} ₽ × {days} дн.</Text>
         </View>
-        {totalDebtAmount > 0 && (
+        {clientTotalDebt > 0 && !skipDebt && (
+          <>
+            <View style={styles.divider} />
+            <View style={styles.summaryRow}>
+              <Text style={[styles.summaryLabel, { color: Colors.danger, fontWeight: '700' as const }]}>Погашение долга:</Text>
+              <Text style={[styles.summaryValue, { color: Colors.danger, fontWeight: '700' as const }]}>{Math.min(clientTotalDebt, debtDistribution.totalToPay)} ₽</Text>
+            </View>
+            <View style={styles.summaryRow}>
+              <Text style={[styles.summaryLabel, { color: Colors.success }]}>Аванс (период):</Text>
+              <Text style={[styles.summaryValue, { color: Colors.success }]}>{debtDistribution.advancePortion} ₽</Text>
+            </View>
+          </>
+        )}
+        {clientTotalDebt <= 0 && totalDebtAmount > 0 && (
           <>
             <View style={styles.divider} />
             <View style={styles.summaryRow}>
@@ -373,8 +438,8 @@ export default function PayMonthlyModal() {
         )}
         <View style={styles.divider} />
         <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>Итого за период:</Text>
-          <Text style={styles.summaryTotal}>{amount} ₽</Text>
+          <Text style={styles.summaryLabel}>{clientTotalDebt > 0 && !skipDebt ? 'ИТОГО к оплате:' : 'Итого за период:'}</Text>
+          <Text style={styles.summaryTotal}>{clientTotalDebt > 0 && !skipDebt ? debtDistribution.totalToPay : amount} ₽</Text>
         </View>
         <View style={styles.summaryRow}>
           <Calendar size={14} color={Colors.success} />
@@ -384,7 +449,7 @@ export default function PayMonthlyModal() {
 
       <TouchableOpacity style={[styles.payBtn, (!isAdmin && shiftRequired) && { opacity: 0.5 }]} onPress={handlePay} activeOpacity={0.7}>
         <Check size={20} color={Colors.white} />
-        <Text style={styles.payBtnText}>Оплатить {amount} ₽</Text>
+        <Text style={styles.payBtnText}>Оплатить {clientTotalDebt > 0 && !skipDebt ? debtDistribution.totalToPay : amount} ₽</Text>
       </TouchableOpacity>
     </ScrollView>
   );
@@ -702,5 +767,66 @@ const styles = StyleSheet.create({
     color: Colors.white,
     fontSize: 17,
     fontWeight: '600' as const,
+  },
+  debtPriorityCard: {
+    backgroundColor: Colors.dangerLight,
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 2,
+    borderColor: Colors.danger + '40',
+  },
+  debtPriorityHeader: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 8,
+    marginBottom: 8,
+  },
+  debtPriorityTitle: {
+    fontSize: 16,
+    fontWeight: '800' as const,
+    color: Colors.danger,
+  },
+  debtPriorityDesc: {
+    fontSize: 13,
+    color: Colors.danger,
+    opacity: 0.85,
+    lineHeight: 18,
+    marginBottom: 12,
+  },
+  debtPriorityToggle: {
+    flexDirection: 'row' as const,
+    gap: 8,
+  },
+  debtToggleBtn: {
+    flex: 1,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: Colors.white,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    gap: 6,
+  },
+  debtToggleBtnActive: {
+    backgroundColor: Colors.success,
+    borderColor: Colors.success,
+  },
+  debtToggleBtnSkip: {
+    backgroundColor: Colors.warning,
+    borderColor: Colors.warning,
+  },
+  debtToggleText: {
+    fontSize: 12,
+    fontWeight: '600' as const,
+    color: Colors.textSecondary,
+  },
+  debtToggleTextActive: {
+    color: Colors.white,
+  },
+  debtToggleTextSkip: {
+    color: Colors.white,
   },
 });
