@@ -824,7 +824,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     return op;
   }, [currentUser]);
 
-  const checkIn = useCallback((carId: string, clientId: string, serviceType: ServiceType, plannedDepartureTime?: string, paymentAtEntry?: { method: PaymentMethod; amount: number; days?: number; paidUntilDate?: string }, debtAtEntry?: { amount: number; description?: string }, isSecondary?: boolean, lombardEntry?: boolean) => {
+  const checkIn = useCallback((carId: string, clientId: string, serviceType: ServiceType, plannedDepartureTime?: string, paymentAtEntry?: { method: PaymentMethod; amount: number; days?: number; paidUntilDate?: string; baseAmount?: number; adjustmentReason?: string }, debtAtEntry?: { amount: number; description?: string }, isSecondary?: boolean, lombardEntry?: boolean) => {
     const activeShift = shifts.find(s => s.status === 'open');
     const sessionNow = new Date().toISOString();
     const isLombard = lombardEntry === true || serviceType === 'lombard';
@@ -865,6 +865,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         ? `Оплата при постановке: ${paymentAtEntry.amount} ₽ (${paymentAtEntry.days ?? 1} сут., ${paymentAtEntry.method === 'cash' ? 'наличные' : 'безнал'})`
         : `Оплата месяца при постановке: ${paymentAtEntry.amount} ₽ (${paymentAtEntry.method === 'cash' ? 'наличные' : 'безнал'})`;
 
+      const hasAdjustment = paymentAtEntry.baseAmount !== undefined && paymentAtEntry.baseAmount !== paymentAtEntry.amount;
+      const adjustDesc = hasAdjustment
+        ? ` [Корректировка: базовая ${paymentAtEntry.baseAmount} ₽ → ${paymentAtEntry.amount} ₽, ${paymentAtEntry.adjustmentReason ?? 'Договорная сумма'}]`
+        : '';
+
       const newPayment: Payment = {
         id: generateId(),
         clientId,
@@ -875,9 +880,12 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         serviceType,
         operatorId: currentUser?.id ?? 'unknown',
         operatorName: currentUser?.name ?? 'Неизвестно',
-        description: payDesc,
+        description: payDesc + adjustDesc,
         shiftId: activeShift?.id ?? null,
         updatedAt: sessionNow,
+        baseAmount: hasAdjustment ? paymentAtEntry.baseAmount : undefined,
+        adjustedAmount: hasAdjustment ? paymentAtEntry.amount : undefined,
+        adjustmentReason: hasAdjustment ? (paymentAtEntry.adjustmentReason ?? 'Договорная сумма') : undefined,
       };
       setPayments(prev => [...prev, newPayment]);
 
@@ -888,8 +896,15 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         amount: paymentAtEntry.amount,
         method: paymentAtEntry.method,
         date: sessionNow,
-        description: payDesc,
+        description: payDesc + adjustDesc,
       });
+
+      if (hasAdjustment) {
+        const diff = roundMoney((paymentAtEntry.baseAmount ?? 0) - paymentAtEntry.amount);
+        const adjCar = cars.find(c => c.id === carId);
+        logAction('payment', 'Корректировка суммы при постановке', `${adjCar?.plateNumber ?? carId}: базовая ${paymentAtEntry.baseAmount} ₽ → итого ${paymentAtEntry.amount} ₽ (${diff > 0 ? 'скидка' : 'наценка'} ${Math.abs(diff)} ₽), причина: ${paymentAtEntry.adjustmentReason ?? 'Договорная сумма'}`, newPayment.id, 'payment');
+        console.log(`[CheckIn] Price adjustment: base=${paymentAtEntry.baseAmount}, final=${paymentAtEntry.amount}, reason=${paymentAtEntry.adjustmentReason}`);
+      }
 
       if (paymentAtEntry.method === 'cash' && activeShift) {
         updateShiftExpected(activeShift.id, paymentAtEntry.amount);

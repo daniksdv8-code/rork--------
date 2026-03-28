@@ -105,6 +105,9 @@ export interface Payment {
   refundDate?: string;
   refundMethod?: PaymentMethod;
   refundReason?: string;
+  baseAmount?: number;
+  adjustedAmount?: number;
+  adjustmentReason?: string;
 }
 
 export interface Debt {

@@ -32,6 +32,10 @@ export default function CheckinScreen() {
   const [monthlyMonths, setMonthlyMonths] = useState<string>('1');
   const [monthlyStartDate, setMonthlyStartDate] = useState<string>(toDateString(new Date()));
 
+  const [customAmountEnabled, setCustomAmountEnabled] = useState<boolean>(false);
+  const [customAmount, setCustomAmount] = useState<string>('');
+  const [adjustmentReason, setAdjustmentReason] = useState<string>('');
+
   const shiftRequired = needsShiftCheck();
 
   const plateSuggestions = useMemo(() => {
@@ -80,7 +84,7 @@ export default function CheckinScreen() {
     return { months, dailyRate, startDate, endDate, totalDays, price30, totalPrice, paidUntil };
   }, [monthlyMonths, monthlyStartDate, paymentMethod, tariffs]);
 
-  const paymentAmount = useMemo(() => {
+  const basePaymentAmount = useMemo(() => {
     if (tariffType === 'lombard') {
       const d = Math.max(1, parseInt(payDays, 10) || 1);
       return tariffs.lombardRate * d;
@@ -91,6 +95,19 @@ export default function CheckinScreen() {
     }
     return monthlyCalc.totalPrice;
   }, [serviceType, tariffType, payDays, paymentMethod, tariffs, monthlyCalc]);
+
+  const paymentAmount = useMemo(() => {
+    if (customAmountEnabled && customAmount.trim()) {
+      const parsed = Number(customAmount);
+      if (!isNaN(parsed) && parsed >= 0) return roundMoney(parsed);
+    }
+    return basePaymentAmount;
+  }, [customAmountEnabled, customAmount, basePaymentAmount]);
+
+  const adjustmentDiff = useMemo(() => {
+    if (!customAmountEnabled || paymentAmount === basePaymentAmount) return 0;
+    return roundMoney(basePaymentAmount - paymentAmount);
+  }, [customAmountEnabled, paymentAmount, basePaymentAmount]);
 
   const resetForm = useCallback(() => {
     setPlateInput('');
@@ -109,6 +126,9 @@ export default function CheckinScreen() {
     setPayDays('1');
     setMonthlyMonths('1');
     setMonthlyStartDate(toDateString(new Date()));
+    setCustomAmountEnabled(false);
+    setCustomAmount('');
+    setAdjustmentReason('');
   }, []);
 
   const handlePlateChange = useCallback((text: string) => {
@@ -176,14 +196,20 @@ export default function CheckinScreen() {
     return !!sub && !isExpired(sub.paidUntil);
   }, [foundClient, getSubscription]);
 
-  const buildPaymentAtEntry = useCallback((): { method: PaymentMethod; amount: number; days?: number; paidUntilDate?: string } | undefined => {
+  const buildPaymentAtEntry = useCallback((): { method: PaymentMethod; amount: number; days?: number; paidUntilDate?: string; baseAmount?: number; adjustmentReason?: string } | undefined => {
     if (paymentStatus !== 'pay_now' || paymentAmount <= 0) return undefined;
+    const hasAdjustment = customAmountEnabled && adjustmentDiff !== 0;
+    const base: any = { method: paymentMethod, amount: paymentAmount };
+    if (hasAdjustment) {
+      base.baseAmount = basePaymentAmount;
+      base.adjustmentReason = adjustmentReason.trim() || 'Договорная сумма';
+    }
     if (serviceType === 'onetime') {
       const d = Math.max(1, parseInt(payDays, 10) || 1);
-      return { method: paymentMethod, amount: paymentAmount, days: d };
+      return { ...base, days: d };
     }
-    return { method: paymentMethod, amount: paymentAmount, paidUntilDate: monthlyCalc.paidUntil };
-  }, [paymentStatus, paymentAmount, paymentMethod, serviceType, payDays, monthlyCalc]);
+    return { ...base, paidUntilDate: monthlyCalc.paidUntil };
+  }, [paymentStatus, paymentAmount, paymentMethod, serviceType, payDays, monthlyCalc, customAmountEnabled, adjustmentDiff, basePaymentAmount, adjustmentReason]);
 
   const buildDebtAtEntry = useCallback((): { amount: number; description?: string } | undefined => {
     if (tariffType === 'lombard') {
@@ -456,8 +482,58 @@ export default function CheckinScreen() {
               : `${monthlyCalc.totalDays} дн. × ${monthlyCalc.dailyRate} ₽/день`
             }
           </Text>
-          <Text style={styles.payAmountValue}>{paymentAmount} ₽</Text>
+          <Text style={styles.payAmountValue}>{basePaymentAmount} ₽</Text>
         </View>
+
+        <TouchableOpacity
+          style={styles.adjustToggleRow}
+          onPress={() => {
+            setCustomAmountEnabled(!customAmountEnabled);
+            if (!customAmountEnabled) {
+              setCustomAmount(String(basePaymentAmount));
+            } else {
+              setCustomAmount('');
+              setAdjustmentReason('');
+            }
+          }}
+          activeOpacity={0.7}
+        >
+          <View style={[styles.adjustCheckbox, customAmountEnabled && styles.adjustCheckboxActive]}>
+            {customAmountEnabled && <Check size={12} color={Colors.white} />}
+          </View>
+          <Text style={styles.adjustToggleText}>Скорректировать сумму</Text>
+        </TouchableOpacity>
+
+        {customAmountEnabled && (
+          <View style={styles.adjustBlock}>
+            <Text style={styles.payLabel}>Итоговая сумма (₽)</Text>
+            <TextInput
+              style={styles.adjustInput}
+              value={customAmount}
+              onChangeText={(t) => setCustomAmount(t.replace(/[^0-9.,]/g, ''))}
+              keyboardType="numeric"
+              placeholder={String(basePaymentAmount)}
+              placeholderTextColor={Colors.textMuted}
+              testID="custom-amount-input"
+            />
+            {adjustmentDiff !== 0 && (
+              <View style={[styles.adjustDiffBadge, adjustmentDiff > 0 ? styles.adjustDiffDiscount : styles.adjustDiffSurcharge]}>
+                <Text style={[styles.adjustDiffText, adjustmentDiff > 0 ? styles.adjustDiffTextDiscount : styles.adjustDiffTextSurcharge]}>
+                  {adjustmentDiff > 0 ? `Скидка: −${adjustmentDiff} ₽` : `Наценка: +${Math.abs(adjustmentDiff)} ₽`}
+                </Text>
+              </View>
+            )}
+            <Text style={styles.payLabel}>Причина корректировки</Text>
+            <TextInput
+              style={styles.adjustInput}
+              value={adjustmentReason}
+              onChangeText={setAdjustmentReason}
+              placeholder="Напр.: договорная цена, скидка постоянному клиенту..."
+              placeholderTextColor={Colors.textMuted}
+              testID="adjustment-reason-input"
+            />
+          </View>
+        )}
 
         <Text style={[styles.payLabel, { marginTop: 16 }]}>Статус оплаты</Text>
         <View style={styles.statusRow}>
@@ -1298,5 +1374,72 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     marginTop: 8,
     lineHeight: 16,
+  },
+  adjustToggleRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 10,
+    marginTop: 14,
+    paddingVertical: 8,
+  },
+  adjustCheckbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: Colors.border,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    backgroundColor: Colors.inputBg,
+  },
+  adjustCheckboxActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  adjustToggleText: {
+    fontSize: 14,
+    fontWeight: '500' as const,
+    color: Colors.text,
+  },
+  adjustBlock: {
+    backgroundColor: Colors.infoLight,
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: Colors.info + '30',
+  },
+  adjustInput: {
+    backgroundColor: Colors.card,
+    borderRadius: 10,
+    height: 44,
+    paddingHorizontal: 14,
+    fontSize: 15,
+    color: Colors.text,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  adjustDiffBadge: {
+    alignSelf: 'flex-start' as const,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  adjustDiffDiscount: {
+    backgroundColor: Colors.successLight,
+  },
+  adjustDiffSurcharge: {
+    backgroundColor: Colors.warningLight,
+  },
+  adjustDiffText: {
+    fontSize: 13,
+    fontWeight: '600' as const,
+  },
+  adjustDiffTextDiscount: {
+    color: Colors.success,
+  },
+  adjustDiffTextSurcharge: {
+    color: Colors.warning,
   },
 });
