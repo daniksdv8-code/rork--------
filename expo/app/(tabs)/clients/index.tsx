@@ -1,11 +1,12 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Search, ChevronRight, CircleDot, ParkingSquare } from 'lucide-react-native';
+import { Search, ChevronRight, CircleDot, ParkingSquare, Calendar } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useParking } from '@/providers/ParkingProvider';
 import ShiftGuard from '@/components/ShiftGuard';
 import { Client } from '@/types';
+import { isExpired, formatDate } from '@/utils/date';
 
 type FilterStatus = 'all' | 'paid' | 'debtors';
 
@@ -51,7 +52,9 @@ export default function ClientsScreen() {
     const clientCars = activeCars.filter(c => c.clientId === item.id);
     const hasDebt = debts.some(d => d.clientId === item.id);
     const totalDebt = debts.filter(d => d.clientId === item.id).reduce((s, d) => s + d.remainingAmount, 0);
-    const sub = subscriptions.find(s => s.clientId === item.id);
+    const clientSubs = subscriptions.filter(s => s.clientId === item.id);
+    const activeSub = clientSubs.find(s => !isExpired(s.paidUntil));
+    const expiredSub = !activeSub ? clientSubs.sort((a, b) => new Date(b.paidUntil).getTime() - new Date(a.paidUntil).getTime())[0] : undefined;
     const isParked = parkedClientIds.has(item.id);
 
     return (
@@ -79,10 +82,21 @@ export default function ClientsScreen() {
             {hasDebt && (
               <Text style={styles.debtText}>Долг: {totalDebt} ₽</Text>
             )}
-            {sub && !hasDebt && (
-              <Text style={styles.subText}>
-                Оплачено до: {new Date(sub.paidUntil).toLocaleDateString('ru-RU')}
-              </Text>
+            {activeSub && (
+              <View style={styles.subBadgeRow}>
+                <Calendar size={11} color={Colors.success} />
+                <Text style={styles.subActiveText}>
+                  Оплачен до {formatDate(activeSub.paidUntil)}
+                </Text>
+              </View>
+            )}
+            {!activeSub && expiredSub && (
+              <View style={styles.subBadgeRow}>
+                <Calendar size={11} color={Colors.danger} />
+                <Text style={styles.subExpiredText}>
+                  Абонемент истёк {formatDate(expiredSub.paidUntil)}
+                </Text>
+              </View>
             )}
           </View>
           <ChevronRight size={18} color={Colors.textMuted} />
@@ -251,6 +265,22 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Colors.success,
     marginTop: 2,
+  },
+  subBadgeRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 4,
+    marginTop: 3,
+  },
+  subActiveText: {
+    fontSize: 12,
+    fontWeight: '600' as const,
+    color: Colors.success,
+  },
+  subExpiredText: {
+    fontSize: 12,
+    fontWeight: '500' as const,
+    color: Colors.danger,
   },
   emptyState: {
     padding: 40,

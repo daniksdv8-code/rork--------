@@ -5,7 +5,7 @@ import { Phone, Car, Calendar, CreditCard, AlertTriangle, Trash2, Plus, Check, X
 import Colors from '@/constants/colors';
 import { useAuth } from '@/providers/AuthProvider';
 import { useParking } from '@/providers/ParkingProvider';
-import { formatDate, formatDateTime, isExpired, getMonthlyAmount, toDateString } from '@/utils/date';
+import { formatDate, formatDateTime, isExpired, getMonthlyAmount, toDateString, daysUntil } from '@/utils/date';
 import { roundMoney } from '@/utils/money';
 import { formatPlateNumber } from '@/utils/plate';
 import { ServiceType, PaymentMethod } from '@/types';
@@ -84,6 +84,11 @@ export default function ClientCardScreen() {
     const sub = getSubscription(carId, clientId);
     return !!sub && !isExpired(sub.paidUntil);
   }, [clientId, getSubscription]);
+
+  const clientSubscriptions = useMemo(() =>
+    subscriptions.filter(s => s.clientId === clientId)
+      .sort((a, b) => new Date(b.paidUntil).getTime() - new Date(a.paidUntil).getTime()),
+  [subscriptions, clientId]);
 
   const clientTx = useMemo(() =>
     transactions.filter(t => t.clientId === clientId)
@@ -584,6 +589,30 @@ export default function ClientCardScreen() {
             </View>
           )}
         </View>
+
+        {clientSubscriptions.length > 0 && (
+          <View style={styles.subscriptionBlock}>
+            {clientSubscriptions.map(sub => {
+              const car = cars.find(c => c.id === sub.carId);
+              const expired = isExpired(sub.paidUntil);
+              const remaining = daysUntil(sub.paidUntil);
+              return (
+                <View key={sub.id} style={[styles.subscriptionRow, expired ? styles.subscriptionRowExpired : styles.subscriptionRowActive]}>
+                  <Calendar size={15} color={expired ? Colors.danger : Colors.success} />
+                  <View style={styles.subscriptionInfo}>
+                    <Text style={[styles.subscriptionStatus, { color: expired ? Colors.danger : Colors.success }]}>
+                      {expired ? 'Абонемент истёк' : 'Абонемент активен'}
+                    </Text>
+                    <Text style={styles.subscriptionDate}>
+                      {expired ? `до ${formatDate(sub.paidUntil)}` : `до ${formatDate(sub.paidUntil)} (${remaining} дн.)`}
+                    </Text>
+                    {car && <Text style={styles.subscriptionCar}>{car.plateNumber}{car.carModel ? ` (${car.carModel})` : ''}</Text>}
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        )}
 
         {totalDebt > 0 && !isDeleted && (
           <TouchableOpacity
@@ -2534,5 +2563,44 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: Colors.border,
+  },
+  subscriptionBlock: {
+    marginTop: 12,
+    gap: 8,
+  },
+  subscriptionRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  subscriptionRowActive: {
+    backgroundColor: Colors.successLight,
+    borderWidth: 1,
+    borderColor: Colors.success + '30',
+  },
+  subscriptionRowExpired: {
+    backgroundColor: Colors.dangerLight,
+    borderWidth: 1,
+    borderColor: Colors.danger + '25',
+  },
+  subscriptionInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  subscriptionStatus: {
+    fontSize: 13,
+    fontWeight: '700' as const,
+  },
+  subscriptionDate: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+  },
+  subscriptionCar: {
+    fontSize: 11,
+    color: Colors.textMuted,
+    marginTop: 1,
   },
 });

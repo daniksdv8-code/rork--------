@@ -1,18 +1,18 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { View, Text, TouchableOpacity, FlatList, StyleSheet, Alert, TextInput } from 'react-native';
 import { useRouter } from 'expo-router';
-import { LogOut as LogOutIcon, Clock, Wallet, XCircle, User, Search, X } from 'lucide-react-native';
+import { LogOut as LogOutIcon, Clock, Wallet, XCircle, User, Search, X, Calendar } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useParking } from '@/providers/ParkingProvider';
 import { useAuth } from '@/providers/AuthProvider';
 import ShiftGuard from '@/components/ShiftGuard';
-import { formatDateTime, calculateDays } from '@/utils/date';
+import { formatDateTime, calculateDays, formatDate } from '@/utils/date';
 import { ParkingSession } from '@/types';
 
 export default function ParkingScreen() {
   const router = useRouter();
   const { isAdmin } = useAuth();
-  const { activeSessions, cars, clients, tariffs, cancelCheckIn, needsShiftCheck } = useParking();
+  const { activeSessions, cars, clients, tariffs, cancelCheckIn, needsShiftCheck, subscriptions } = useParking();
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   const shiftRequired = needsShiftCheck();
@@ -25,9 +25,11 @@ export default function ParkingScreen() {
       const days = calculateDays(session.entryTime, now);
       const runningCostCash = tariffs.onetimeCash * days;
       const runningCostCard = tariffs.onetimeCard * days;
-      return { session, car, client, days, runningCostCash, runningCostCard };
+      const sub = subscriptions.find(s => s.carId === session.carId && s.clientId === session.clientId);
+      const subscriptionExpired = sub ? new Date(sub.paidUntil) < new Date() : false;
+      return { session, car, client, days, runningCostCash, runningCostCard, subscription: sub ?? null, subscriptionExpired };
     }).sort((a, b) => new Date(b.session.entryTime).getTime() - new Date(a.session.entryTime).getTime());
-  }, [activeSessions, cars, clients, tariffs]);
+  }, [activeSessions, cars, clients, tariffs, subscriptions]);
 
   const filteredData = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
@@ -160,6 +162,24 @@ export default function ParkingScreen() {
             </Text>
             <Text style={[styles.costValue, { color: Colors.danger }]}>
               {tariffs.monthlyCash * item.days}–{tariffs.monthlyCard * item.days} ₽
+            </Text>
+          </View>
+        )}
+
+        {item.subscription !== null && (
+          <View style={[
+            styles.subRow,
+            item.subscriptionExpired ? styles.subRowExpired : styles.subRowActive,
+          ]}>
+            <Calendar size={13} color={item.subscriptionExpired ? Colors.danger : Colors.success} />
+            <Text style={[
+              styles.subText,
+              { color: item.subscriptionExpired ? Colors.danger : Colors.success },
+            ]}>
+              {item.subscriptionExpired
+                ? `Абонемент истёк ${formatDate(item.subscription.paidUntil)}`
+                : `Абонемент до ${formatDate(item.subscription.paidUntil)}`
+              }
             </Text>
           </View>
         )}
@@ -493,5 +513,24 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: Colors.danger + '30',
+  },
+  subRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 8,
+    marginBottom: 6,
+  },
+  subRowActive: {
+    backgroundColor: Colors.successLight,
+  },
+  subRowExpired: {
+    backgroundColor: Colors.dangerLight,
+  },
+  subText: {
+    fontSize: 12,
+    fontWeight: '600' as const,
   },
 });
