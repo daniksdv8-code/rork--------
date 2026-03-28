@@ -103,10 +103,26 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     throwOnError: false,
   });
 
-  const applyServerData = useCallback((d: Record<string, any>) => {
+  const applyServerData = useCallback((d: Record<string, any>, source?: string) => {
+    const serverClients = d.clients || [];
+    const localData = latestDataRef.current;
+    const localClientCount = localData.clients?.length ?? 0;
+    const serverClientCount = serverClients.length;
+
+    const isRestoreGrace = restoreFinishedAtRef.current > 0 && (Date.now() - restoreFinishedAtRef.current) < RESTORE_GRACE_MS;
+    if (isRestoreGrace && serverClientCount === 0 && localClientCount > 0) {
+      console.log(`[Sync] BLOCKED applyServerData(${source ?? '?'}): server has 0 clients but local has ${localClientCount} during restore grace. Refusing to wipe.`);
+      return;
+    }
+
+    if (serverClientCount === 0 && localClientCount > 3) {
+      console.log(`[Sync] WARNING applyServerData(${source ?? '?'}): server has 0 clients but local has ${localClientCount}. Refusing to apply empty data.`);
+      return;
+    }
+
     const deleted = new Set<string>(d.deletedClientIds || []);
     setDeletedClientIds(d.deletedClientIds || []);
-    setClients(deleted.size > 0 ? (d.clients || []).filter((c: any) => !deleted.has(c.id)) : (d.clients || []));
+    setClients(deleted.size > 0 ? serverClients.filter((c: any) => !deleted.has(c.id)) : serverClients);
     setCars(deleted.size > 0 ? (d.cars || []).filter((c: any) => !deleted.has(c.clientId)) : (d.cars || []));
     setSessions(deleted.size > 0 ? (d.sessions || []).filter((s: any) => !deleted.has(s.clientId)) : (d.sessions || []));
     setSubscriptions(deleted.size > 0 ? (d.subscriptions || []).filter((s: any) => !deleted.has(s.clientId)) : (d.subscriptions || []));
@@ -130,9 +146,9 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     setClientDebts(deleted.size > 0 ? (d.clientDebts ?? []).filter((cd: any) => !deleted.has(cd.clientId)) : (d.clientDebts ?? []));
     setCashOperations(d.cashOperations ?? []);
     setTeamViolations(d.teamViolations ?? []);
-    setSalaryAdvances(d.salaryAdvances ?? []);
-    setSalaryPayments(d.salaryPayments ?? []);
-    console.log(`[Sync] Applied server data: clients=${(d.clients||[]).length}, sessions=${(d.sessions||[]).length}, shifts=${(d.shifts||[]).length}, users=${(serverUsers||[]).length}`);
+    setSalaryAdvances(d.salaryAdvances ?? localData.salaryAdvances ?? []);
+    setSalaryPayments(d.salaryPayments ?? localData.salaryPayments ?? []);
+    console.log(`[Sync] Applied server data (${source ?? '?'}): clients=${serverClientCount}, sessions=${(d.sessions||[]).length}, shifts=${(d.shifts||[]).length}, users=${(serverUsers||[]).length}`);
   }, []);
 
   useEffect(() => {
@@ -226,7 +242,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       if (pushTimerRef.current) { clearTimeout(pushTimerRef.current); pushTimerRef.current = null; }
       if (pushRetryTimerRef.current) { clearTimeout(pushRetryTimerRef.current); pushRetryTimerRef.current = null; }
       if (data) {
-        applyServerData(data as Record<string, any>);
+        applyServerData(data as Record<string, any>, 'epoch_change');
         lastSyncedVersionRef.current = version;
         void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(data)).catch(() => {});
         console.log(`[Sync] Full resync applied after epoch change, v${version}`);
@@ -271,7 +287,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
           schedulePushImmediate();
         } else {
           console.log(`[Sync] Applying server data v${version} (was v${lastSyncedVersionRef.current}), localDirty=${localDirtyRef.current}`);
-          applyServerData(data as Record<string, any>);
+          applyServerData(data as Record<string, any>, 'poll');
           lastSyncedVersionRef.current = version;
           skipLogVersionRef.current = -1;
           void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(data)).catch(() => {});
@@ -317,13 +333,24 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         clientRestoreEpoch: restoreEpochRef.current >= 0 ? restoreEpochRef.current : undefined,
       } as any) as any;
 
+      const isGracePeriod = restoreFinishedAtRef.current > 0 && (Date.now() - restoreFinishedAtRef.current) < RESTORE_GRACE_MS;
+
       if (result.epochConflict) {
+        if (isGracePeriod) {
+          console.log(`[Sync] Epoch conflict on push during grace period — ignoring server data, keeping local. Server epoch=${result.restoreEpoch}`);
+          restoreEpochRef.current = result.restoreEpoch;
+          lastSyncedVersionRef.current = result.version;
+          localDirtyRef.current = true;
+          if (pushTimerRef.current) clearTimeout(pushTimerRef.current);
+          pushTimerRef.current = setTimeout(() => { pushTimerRef.current = null; void pushToServer(); }, 500);
+          return;
+        }
         console.log(`[Sync] Epoch conflict on push! Server epoch=${result.restoreEpoch}. Discarding local, applying server.`);
         restoreEpochRef.current = result.restoreEpoch;
         lastSyncedVersionRef.current = result.version;
         localDirtyRef.current = false;
         if (result.data) {
-          applyServerData(result.data as Record<string, any>);
+          applyServerData(result.data as Record<string, any>, 'epoch_conflict');
           void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(result.data)).catch(() => {});
         }
         void utils.parking.getData.invalidate();
@@ -336,11 +363,20 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       const hasNewLocalChanges = localChangeCounterRef.current !== changeCountBefore;
 
       if (result.data) {
-        applyServerData(result.data as Record<string, any>);
-        void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(result.data)).catch(() => {});
-        console.log(`[Sync] Pushed & applied merged data, version: ${result.version}, epoch: ${result.restoreEpoch}`);
+        if (isGracePeriod) {
+          console.log(`[Sync] Push OK during grace period v${result.version} — NOT applying server response to preserve local restored data`);
+          void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(localData)).catch(() => {});
+        } else if (hasNewLocalChanges) {
+          console.log(`[Sync] Push OK v${result.version}, but local changes during push — skipping applyServerData, will re-push`);
+          void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(localData)).catch(() => {});
+        } else {
+          applyServerData(result.data as Record<string, any>, 'push_response');
+          void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(result.data)).catch(() => {});
+          console.log(`[Sync] Pushed & applied merged data, version: ${result.version}, epoch: ${result.restoreEpoch}`);
+        }
       } else {
         console.log(`[Sync] Pushed to server, version: ${result.version}`);
+        void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(localData)).catch(() => {});
       }
 
       if (hasNewLocalChanges) {

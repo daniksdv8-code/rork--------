@@ -480,6 +480,8 @@ const dataSchema = z.object({
   clientDebts: z.array(z.any()).optional(),
   cashOperations: z.array(z.any()).optional(),
   teamViolations: z.array(z.any()).optional(),
+  salaryAdvances: z.array(z.any()).optional(),
+  salaryPayments: z.array(z.any()).optional(),
 });
 
 export const parkingRouter = createTRPCRouter({
@@ -795,6 +797,8 @@ export const parkingRouter = createTRPCRouter({
       clientDebts: (input as any).clientDebts ?? [],
       cashOperations: (input as any).cashOperations ?? [],
       teamViolations: (input as any).teamViolations ?? [],
+      salaryAdvances: (input as any).salaryAdvances ?? [],
+      salaryPayments: (input as any).salaryPayments ?? [],
     };
     version++;
     restoreEpoch++;
@@ -957,6 +961,12 @@ export const parkingRouter = createTRPCRouter({
       const teamViolationsMerged = existingData
         ? mergeArraysById((existingData as any).teamViolations ?? [], (input as any).teamViolations ?? [])
         : ((input as any).teamViolations ?? []);
+      const salaryAdvancesMerged = existingData
+        ? mergeArraysById((existingData as any).salaryAdvances ?? [], (input as any).salaryAdvances ?? [])
+        : ((input as any).salaryAdvances ?? []);
+      const salaryPaymentsMerged = existingData
+        ? unionById((existingData as any).salaryPayments ?? [], (input as any).salaryPayments ?? [])
+        : ((input as any).salaryPayments ?? []);
 
       store = {
         clients,
@@ -981,6 +991,8 @@ export const parkingRouter = createTRPCRouter({
         clientDebts: clientDebtsMerged,
         cashOperations: cashOpsMerged,
         teamViolations: teamViolationsMerged,
+        salaryAdvances: salaryAdvancesMerged,
+        salaryPayments: salaryPaymentsMerged,
       };
       version++;
       saveToDisk();
