@@ -88,16 +88,17 @@ export default function HistoryScreen() {
         return d;
       });
     } else if (mode === 'month') {
-      if (selectedMonth === 0) {
-        setSelectedMonth(11);
-        setSelectedYear(y => y - 1);
-      } else {
-        setSelectedMonth(m => m - 1);
-      }
+      setSelectedMonth(prev => {
+        if (prev === 0) {
+          setSelectedYear(y => y - 1);
+          return 11;
+        }
+        return prev - 1;
+      });
     } else {
       setSelectedYear(y => y - 1);
     }
-  }, [mode, selectedMonth]);
+  }, [mode]);
 
   const navigateNext = useCallback(() => {
     if (mode === 'day') {
@@ -107,16 +108,17 @@ export default function HistoryScreen() {
         return d;
       });
     } else if (mode === 'month') {
-      if (selectedMonth === 11) {
-        setSelectedMonth(0);
-        setSelectedYear(y => y + 1);
-      } else {
-        setSelectedMonth(m => m + 1);
-      }
+      setSelectedMonth(prev => {
+        if (prev === 11) {
+          setSelectedYear(y => y + 1);
+          return 0;
+        }
+        return prev + 1;
+      });
     } else {
       setSelectedYear(y => y + 1);
     }
-  }, [mode, selectedMonth]);
+  }, [mode]);
 
   const navLabel = useMemo(() => {
     if (mode === 'day') return formatDayLabel(selectedDay);

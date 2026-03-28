@@ -79,6 +79,7 @@ function isInsideIframe(): boolean {
 
 function saveWebViaBlob(content: string, fileName: string, mimeType: string): boolean {
   try {
+    if (typeof document === 'undefined') return false;
     const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
     const blobUrl = URL.createObjectURL(blob);
 
@@ -86,15 +87,17 @@ function saveWebViaBlob(content: string, fileName: string, mimeType: string): bo
     link.href = blobUrl;
     link.download = fileName;
     link.style.display = 'none';
+    link.setAttribute('target', '_blank');
     document.body.appendChild(link);
-    link.click();
+
+    link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
 
     setTimeout(() => {
       try { document.body.removeChild(link); } catch {}
       try { URL.revokeObjectURL(blobUrl); } catch {}
-    }, 10000);
+    }, 15000);
 
-    console.log('[FileSave] Web blob download triggered');
+    console.log('[FileSave] Web blob download triggered via dispatchEvent');
     return true;
   } catch (err) {
     console.log('[FileSave] Blob download failed:', err);
@@ -123,13 +126,19 @@ function saveWebViaNewWindow(content: string, fileName: string, mimeType: string
 
 function saveWebViaDataUri(content: string, fileName: string, mimeType: string): boolean {
   try {
+    if (typeof document === 'undefined') return false;
+    if (content.length > 1024 * 1024 * 2) {
+      console.log('[FileSave] Data URI skipped: content too large');
+      return false;
+    }
     const dataUri = `data:${mimeType};charset=utf-8,` + encodeURIComponent(content);
     const link = document.createElement('a');
     link.href = dataUri;
     link.download = fileName;
     link.style.display = 'none';
+    link.setAttribute('target', '_blank');
     document.body.appendChild(link);
-    link.click();
+    link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
     setTimeout(() => { try { document.body.removeChild(link); } catch {} }, 10000);
     console.log('[FileSave] Web data URI download triggered');
     return true;
@@ -153,7 +162,7 @@ function saveWebViaPostMessage(content: string, fileName: string, mimeType: stri
     }, '*');
     console.log('[FileSave] postMessage to parent sent for download');
     setTimeout(() => { try { URL.revokeObjectURL(blobUrl); } catch {} }, 60000);
-    return false;
+    return true;
   } catch {
     return false;
   }
@@ -161,23 +170,37 @@ function saveWebViaPostMessage(content: string, fileName: string, mimeType: stri
 
 function saveWeb(options: FileSaveOptions): boolean {
   const { content, fileName, mimeType } = options;
-  console.log(`[FileSave] Web save: ${fileName}, ${content.length} chars, iframe=${isInsideIframe()}`);
+  const inIframe = isInsideIframe();
+  console.log(`[FileSave] Web save: ${fileName}, ${content.length} chars, iframe=${inIframe}`);
 
-  if (!isInsideIframe()) {
+  if (!inIframe) {
     if (saveWebViaBlob(content, fileName, mimeType)) return true;
     if (saveWebViaDataUri(content, fileName, mimeType)) return true;
     return false;
   }
 
+  let anyAttempted = false;
+
   if (saveWebViaBlob(content, fileName, mimeType)) {
-    console.log('[FileSave] Blob download attempted in iframe (may not work)');
+    anyAttempted = true;
+    console.log('[FileSave] Blob download attempted in iframe');
   }
 
-  saveWebViaPostMessage(content, fileName, mimeType);
+  if (saveWebViaPostMessage(content, fileName, mimeType)) {
+    anyAttempted = true;
+    console.log('[FileSave] postMessage sent to parent');
+  }
 
-  if (saveWebViaNewWindow(content, fileName, mimeType)) return true;
+  if (saveWebViaDataUri(content, fileName, mimeType)) {
+    anyAttempted = true;
+    console.log('[FileSave] Data URI attempted in iframe');
+  }
 
-  return false;
+  if (saveWebViaNewWindow(content, fileName, mimeType)) {
+    return true;
+  }
+
+  return anyAttempted;
 }
 
 export function openBackupUrl(url: string): void {
@@ -203,8 +226,5 @@ export async function saveFile(options: FileSaveOptions): Promise<boolean> {
     return saveNative(options);
   }
 
-  const webOk = saveWeb(options);
-  if (webOk && !isInsideIframe()) return true;
-
-  return false;
+  return saveWeb(options);
 }

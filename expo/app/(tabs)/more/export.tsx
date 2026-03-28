@@ -113,12 +113,12 @@ export default function ExportScreen() {
       const fileName = `clients_${dateStr}.csv`;
       try {
         await shareCsv(csv, fileName);
-        if (Platform.OS !== 'web') {
-          setDoneClients(true);
-          setTimeout(() => setDoneClients(false), 3000);
-        } else {
+        setDoneClients(true);
+        setTimeout(() => setDoneClients(false), 3000);
+        if (Platform.OS === 'web') {
+          console.log('[Export] Web CSV export triggered, showing copy fallback as backup');
           openFallback(
-            `Экспорт сформирован (${(csv.length / 1024).toFixed(1)} КБ).\nЕсли скачивание не началось, скопируйте данные вручную.`,
+            `Скачивание запущено (${(csv.length / 1024).toFixed(1)} КБ).\nЕсли файл не появился, скопируйте данные вручную.`,
             csv,
             fileName
           );
@@ -162,12 +162,12 @@ export default function ExportScreen() {
       const fileName = `operations_${fromStr}_${toStr}.csv`;
       try {
         await shareCsv(csv, fileName);
-        if (Platform.OS !== 'web') {
-          setDonePayments(true);
-          setTimeout(() => setDonePayments(false), 3000);
-        } else {
+        setDonePayments(true);
+        setTimeout(() => setDonePayments(false), 3000);
+        if (Platform.OS === 'web') {
+          console.log('[Export] Web payments export triggered, showing copy fallback as backup');
           openFallback(
-            `Экспорт сформирован (${(csv.length / 1024).toFixed(1)} КБ).\nЕсли скачивание не началось, скопируйте данные вручную.`,
+            `Скачивание запущено (${(csv.length / 1024).toFixed(1)} КБ).\nЕсли файл не появился, скопируйте данные вручную.`,
             csv,
             fileName
           );
