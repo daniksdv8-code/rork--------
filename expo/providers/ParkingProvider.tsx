@@ -2207,6 +2207,9 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       discrepancy,
     };
 
+    const cashVariance = roundMoney(discrepancy);
+    const cashVarianceType: 'none' | 'short' | 'over' = cashVariance < 0 ? 'short' : cashVariance > 0 ? 'over' : 'none';
+
     const closeNow = new Date().toISOString();
     setShifts(prev => prev.map(s =>
       s.id === shiftId ? {
@@ -2216,10 +2219,18 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         actualCash,
         notes,
         closingSummary,
+        cashVariance,
+        cashVarianceType,
         updatedAt: closeNow,
       } : s
     ));
-    logAction('shift_close', 'Закрытие смены', `Факт: ${actualCash} ₽, расчёт: ${calculatedBalance} ₽, расхождение: ${discrepancy} ₽`, shiftId, 'shift');
+
+    const varianceLabel = cashVarianceType === 'short'
+      ? `Недостача ${Math.abs(cashVariance)} ₽`
+      : cashVarianceType === 'over'
+        ? `Излишек +${cashVariance} ₽`
+        : 'Нет отклонения';
+    logAction('shift_close', 'Закрытие смены', `${shift.operatorName} (${shift.operatorRole === 'admin' ? 'админ' : 'менеджер'})\nОжидалось: ${calculatedBalance} ₽\nФакт: ${actualCash} ₽\nОтклонение: ${discrepancy} ₽ (${varianceLabel})`, shiftId, 'shift');
     schedulePush();
     console.log(`[Shift] Closed shift ${shiftId}, actual: ${actualCash}, calculated: ${calculatedBalance}, discrepancy: ${discrepancy}`);
   }, [shifts, transactions, expenses, withdrawals, schedulePush, logAction]);

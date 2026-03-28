@@ -7,6 +7,7 @@ import {
 import {
   PlayCircle, StopCircle, MinusCircle, DollarSign,
   Clock, User, ChevronDown, ChevronUp, X, ArrowDownCircle,
+  AlertTriangle, TrendingDown, TrendingUp,
 } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useParking } from '@/providers/ParkingProvider';
@@ -772,10 +773,21 @@ export default function CashRegisterScreen() {
                 const shiftExps = shiftExpenses(shift.id);
                 const shiftWds = shiftWithdrawals(shift.id);
 
+                const calcBalance = shift.carryOver + cashIn - expTotal - wTotal;
+                const variance = shift.cashVariance ?? ((shift.actualCash ?? 0) - calcBalance);
+                const varType = shift.cashVarianceType ?? (variance < 0 ? 'short' : variance > 0 ? 'over' : 'none');
+                const hasVariance = shift.status === 'closed' && varType !== 'none';
+                const isShortage = varType === 'short';
+                const isOverage = varType === 'over';
+
                 return (
                   <TouchableOpacity
                     key={shift.id}
-                    style={styles.shiftHistoryCard}
+                    style={[
+                      styles.shiftHistoryCard,
+                      hasVariance && isShortage && styles.shiftCardShortage,
+                      hasVariance && isOverage && styles.shiftCardOverage,
+                    ]}
                     onPress={() => setExpandedShiftId(isExpanded ? null : shift.id)}
                     activeOpacity={0.7}
                   >
@@ -785,12 +797,30 @@ export default function CashRegisterScreen() {
                           styles.shiftHistoryDot,
                           { backgroundColor: shift.status === 'open' ? Colors.success : Colors.textMuted }
                         ]} />
-                        <View>
+                        <View style={{ flex: 1 }}>
                           <Text style={styles.shiftHistoryName}>{shift.operatorName}</Text>
                           <Text style={styles.shiftHistoryDate}>
                             {formatDateTime(shift.openedAt)}
                             {shift.closedAt ? ` — ${formatDateTime(shift.closedAt)}` : ' (открыта)'}
                           </Text>
+                          {hasVariance && (
+                            <View style={[
+                              styles.varianceBadge,
+                              isShortage ? styles.varianceBadgeShort : styles.varianceBadgeOver,
+                            ]}>
+                              {isShortage ? (
+                                <TrendingDown size={12} color={Colors.white} />
+                              ) : (
+                                <TrendingUp size={12} color="#78350F" />
+                              )}
+                              <Text style={[
+                                styles.varianceBadgeText,
+                                isShortage ? styles.varianceBadgeTextShort : styles.varianceBadgeTextOver,
+                              ]}>
+                                {isShortage ? `Недостача ${Math.abs(variance)} ₽` : `Излишек +${variance} ₽`}
+                              </Text>
+                            </View>
+                          )}
                         </View>
                       </View>
                       <View style={styles.shiftHistoryRight}>
@@ -828,32 +858,49 @@ export default function CashRegisterScreen() {
                         {shift.status === 'closed' && (
                           <>
                             <View style={styles.shiftDetailDivider} />
-                            <View style={styles.shiftDetailRow}>
-                              <Text style={styles.shiftDetailLabel}>Расчёт в кассе:</Text>
-                              <Text style={styles.shiftDetailValue}>
-                                {shift.carryOver + cashIn - expTotal - wTotal} ₽
-                              </Text>
-                            </View>
-                            <View style={styles.shiftDetailRow}>
-                              <Text style={styles.shiftDetailLabel}>Фактически сдано:</Text>
-                              <Text style={[
-                                styles.shiftDetailValue,
-                                { fontWeight: '700' as const },
-                                (shift.actualCash ?? 0) !== (shift.carryOver + cashIn - expTotal - wTotal)
-                                  ? { color: Colors.danger }
-                                  : { color: Colors.success }
-                              ]}>
-                                {shift.actualCash ?? 0} ₽
-                              </Text>
-                            </View>
-                            {(shift.actualCash ?? 0) !== (shift.carryOver + cashIn - expTotal - wTotal) && (
-                              <View style={styles.shiftDetailRow}>
-                                <Text style={styles.shiftDetailLabel}>Расхождение:</Text>
-                                <Text style={[styles.shiftDetailValue, { color: Colors.danger, fontWeight: '700' as const }]}>
-                                  {(shift.actualCash ?? 0) - (shift.carryOver + cashIn - expTotal - wTotal)} ₽
+
+                            <View style={[
+                              styles.varianceBlock,
+                              isShortage && styles.varianceBlockShort,
+                              isOverage && styles.varianceBlockOver,
+                              !hasVariance && styles.varianceBlockNone,
+                            ]}>
+                              <View style={styles.varianceBlockHeader}>
+                                {hasVariance ? (
+                                  <AlertTriangle size={16} color={isShortage ? Colors.danger : Colors.warning} />
+                                ) : null}
+                                <Text style={[
+                                  styles.varianceBlockTitle,
+                                  isShortage && { color: Colors.danger },
+                                  isOverage && { color: Colors.warning },
+                                  !hasVariance && { color: Colors.success },
+                                ]}>
+                                  {isShortage ? 'Недостача' : isOverage ? 'Излишек' : 'Нет отклонения'}
                                 </Text>
                               </View>
-                            )}
+                              <View style={styles.varianceBlockRow}>
+                                <Text style={styles.varianceBlockLabel}>Ожидалось:</Text>
+                                <Text style={styles.varianceBlockValue}>{calcBalance} ₽</Text>
+                              </View>
+                              <View style={styles.varianceBlockRow}>
+                                <Text style={styles.varianceBlockLabel}>Факт:</Text>
+                                <Text style={[styles.varianceBlockValue, { fontWeight: '700' as const }]}>
+                                  {shift.actualCash ?? 0} ₽
+                                </Text>
+                              </View>
+                              <View style={styles.varianceBlockRow}>
+                                <Text style={styles.varianceBlockLabel}>Разница:</Text>
+                                <Text style={[
+                                  styles.varianceBlockValue,
+                                  { fontWeight: '700' as const },
+                                  isShortage && { color: Colors.danger },
+                                  isOverage && { color: Colors.warning },
+                                  !hasVariance && { color: Colors.success },
+                                ]}>
+                                  {variance > 0 ? '+' : ''}{variance} ₽
+                                </Text>
+                              </View>
+                            </View>
                           </>
                         )}
                         {shift.notes ? (
@@ -1409,6 +1456,81 @@ const styles = StyleSheet.create({
     borderColor: Colors.cardBorder,
     marginBottom: 8,
     overflow: 'hidden',
+  },
+  shiftCardShortage: {
+    borderColor: Colors.danger + '60',
+    borderLeftWidth: 4,
+    borderLeftColor: Colors.danger,
+  },
+  shiftCardOverage: {
+    borderColor: Colors.warning + '60',
+    borderLeftWidth: 4,
+    borderLeftColor: Colors.warning,
+  },
+  varianceBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    gap: 4,
+    marginTop: 6,
+  },
+  varianceBadgeShort: {
+    backgroundColor: Colors.danger,
+  },
+  varianceBadgeOver: {
+    backgroundColor: Colors.warningLight,
+  },
+  varianceBadgeText: {
+    fontSize: 11,
+    fontWeight: '700' as const,
+  },
+  varianceBadgeTextShort: {
+    color: Colors.white,
+  },
+  varianceBadgeTextOver: {
+    color: '#78350F',
+  },
+  varianceBlock: {
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 4,
+    gap: 6,
+  },
+  varianceBlockShort: {
+    backgroundColor: Colors.dangerLight,
+  },
+  varianceBlockOver: {
+    backgroundColor: Colors.warningLight,
+  },
+  varianceBlockNone: {
+    backgroundColor: Colors.successLight,
+  },
+  varianceBlockHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  varianceBlockTitle: {
+    fontSize: 14,
+    fontWeight: '700' as const,
+  },
+  varianceBlockRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  varianceBlockLabel: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+  },
+  varianceBlockValue: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+    color: Colors.text,
   },
   shiftHistoryHeader: {
     flexDirection: 'row',

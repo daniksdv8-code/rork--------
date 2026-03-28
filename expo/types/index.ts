@@ -164,6 +164,7 @@ export interface Tariffs {
 }
 
 export type ShiftStatus = 'open' | 'closed';
+export type CashVarianceType = 'none' | 'short' | 'over';
 
 export interface CashShift {
   id: string;
@@ -178,6 +179,8 @@ export interface CashShift {
   carryOver: number;
   notes: string;
   updatedAt?: string;
+  cashVariance?: number;
+  cashVarianceType?: CashVarianceType;
   closingSummary?: {
     cashIncome: number;
     cardIncome: number;
