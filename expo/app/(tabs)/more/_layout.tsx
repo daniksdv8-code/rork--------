@@ -21,6 +21,7 @@ export default function MoreLayout() {
       <Stack.Screen name="actionlog" options={{ title: "Журнал действий" }} />
       <Stack.Screen name="export" options={{ title: "Экспорт данных" }} />
       <Stack.Screen name="finance" options={{ title: "Финансы" }} />
+      <Stack.Screen name="salaryadvances" options={{ title: "Зарплаты и авансы" }} />
     </Stack>
   );
 }

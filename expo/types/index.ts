@@ -4,7 +4,7 @@ export type TariffType = 'standard' | 'lombard';
 export type SessionStatus = 'draft' | 'active' | 'completed' | 'active_debt' | 'released' | 'released_debt';
 export type TransactionType = 'payment' | 'debt' | 'exit' | 'debt_payment' | 'entry' | 'cancel_entry' | 'cancel_exit' | 'cancel_payment' | 'withdrawal' | 'client_deleted' | 'refund' | 'admin_withdrawal' | 'admin_expense' | 'debt_accrual' | 'debt_freeze' | 'manager_expense';
 
-export type CashOperationType = 'income' | 'expense' | 'withdrawal' | 'deposit' | 'refund' | 'debt_payment_income';
+export type CashOperationType = 'income' | 'expense' | 'withdrawal' | 'deposit' | 'refund' | 'debt_payment_income' | 'salary_advance' | 'salary_payment';
 
 export interface CashOperation {
   id: string;
@@ -304,7 +304,10 @@ export type ActionType =
   | 'violation_delete'
   | 'manual_debt_add'
   | 'manual_debt_delete'
-  | 'deep_cleaning_toggle';
+  | 'deep_cleaning_toggle'
+  | 'salary_advance_issue'
+  | 'salary_advance_repay'
+  | 'salary_payment';
 
 export interface ActionLog {
   id: string;
@@ -339,6 +342,33 @@ export interface TeamViolationMonth {
   violations: ViolationEntry[];
 }
 
+export interface SalaryAdvance {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  amount: number;
+  remainingAmount: number;
+  comment: string;
+  issuedBy: string;
+  issuedByName: string;
+  issuedAt: string;
+  updatedAt: string;
+}
+
+export interface SalaryPayment {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  grossAmount: number;
+  debtDeducted: number;
+  netPaid: number;
+  method: PaymentMethod;
+  comment: string;
+  paidBy: string;
+  paidByName: string;
+  paidAt: string;
+}
+
 export interface AppData {
   clients: Client[];
   cars: Car[];
@@ -361,6 +391,8 @@ export interface AppData {
   clientDebts: ClientDebt[];
   cashOperations: CashOperation[];
   teamViolations: TeamViolationMonth[];
+  salaryAdvances: SalaryAdvance[];
+  salaryPayments: SalaryPayment[];
   deletedClientIds?: string[];
   restoreEpoch?: number;
 }

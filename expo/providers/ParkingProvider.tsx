@@ -6,7 +6,8 @@ import {
   Payment, Debt, Transaction, Tariffs,
   PaymentMethod, ServiceType, CashShift, Expense, User, CashWithdrawal, ScheduledShift,
   ActionLog, ActionType, AdminExpense, AdminCashOperation, ExpenseCategory,
-  DailyDebtAccrual, ClientDebt, CashOperation, TeamViolationMonth
+  DailyDebtAccrual, ClientDebt, CashOperation, TeamViolationMonth,
+  SalaryAdvance, SalaryPayment
 } from '@/types';
 import { EMPTY_DATA } from '@/mocks/initialData';
 import { generateId } from '@/utils/id';
@@ -45,6 +46,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   const [clientDebts, setClientDebts] = useState<ClientDebt[]>([]);
   const [cashOperations, setCashOperations] = useState<CashOperation[]>([]);
   const [teamViolations, setTeamViolations] = useState<TeamViolationMonth[]>([]);
+  const [salaryAdvances, setSalaryAdvances] = useState<SalaryAdvance[]>([]);
+  const [salaryPayments, setSalaryPayments] = useState<SalaryPayment[]>([]);
   const [deletedClientIds, setDeletedClientIds] = useState<string[]>([]);
   const [isLoaded, setIsLoaded] = useState<boolean>(false);
   const [isServerSynced, setIsServerSynced] = useState<boolean>(false);
@@ -65,11 +68,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   const RESTORE_GRACE_MS = 300000;
 
   const latestDataRef = useRef({
-    clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories, dailyDebtAccruals, clientDebts, cashOperations, teamViolations,
+    clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories, dailyDebtAccruals, clientDebts, cashOperations, teamViolations, salaryAdvances, salaryPayments,
   });
   useEffect(() => {
-    latestDataRef.current = { clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories, dailyDebtAccruals, clientDebts, cashOperations, teamViolations };
-  }, [clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories, dailyDebtAccruals, clientDebts, cashOperations, teamViolations]);
+    latestDataRef.current = { clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories, dailyDebtAccruals, clientDebts, cashOperations, teamViolations, salaryAdvances, salaryPayments };
+  }, [clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories, dailyDebtAccruals, clientDebts, cashOperations, teamViolations, salaryAdvances, salaryPayments]);
 
   const logAction = useCallback((action: ActionType, label: string, details: string, entityId?: string, entityType?: string) => {
     const entry: ActionLog = {
@@ -127,6 +130,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     setClientDebts(deleted.size > 0 ? (d.clientDebts ?? []).filter((cd: any) => !deleted.has(cd.clientId)) : (d.clientDebts ?? []));
     setCashOperations(d.cashOperations ?? []);
     setTeamViolations(d.teamViolations ?? []);
+    setSalaryAdvances(d.salaryAdvances ?? []);
+    setSalaryPayments(d.salaryPayments ?? []);
     console.log(`[Sync] Applied server data: clients=${(d.clients||[]).length}, sessions=${(d.sessions||[]).length}, shifts=${(d.shifts||[]).length}, users=${(serverUsers||[]).length}`);
   }, []);
 
@@ -161,6 +166,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
           if (data.clientDebts) setClientDebts(data.clientDebts);
           if (data.cashOperations) setCashOperations(data.cashOperations);
           if (data.teamViolations) setTeamViolations(data.teamViolations);
+          if (data.salaryAdvances) setSalaryAdvances(data.salaryAdvances);
+          if (data.salaryPayments) setSalaryPayments(data.salaryPayments);
           if (data.users) {
             setUsers(data.users);
           }
@@ -2990,6 +2997,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       clientDebts: safeArr(snapshot?.clientDebts ?? clientDebts),
       cashOperations: safeArr(snapshot?.cashOperations ?? cashOperations),
       teamViolations: safeArr(snapshot?.teamViolations ?? teamViolations),
+      salaryAdvances: safeArr(snapshot?.salaryAdvances ?? salaryAdvances),
+      salaryPayments: safeArr(snapshot?.salaryPayments ?? salaryPayments),
     };
 
     const backupData = {
@@ -3013,7 +3022,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     const jsonResult = JSON.stringify(backupData, safeReplacer);
     console.log(`[Backup] Created backup JSON: ${jsonResult.length} bytes`);
     return jsonResult;
-  }, [currentUser, clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories, dailyDebtAccruals, clientDebts, cashOperations, teamViolations]);
+  }, [currentUser, clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories, dailyDebtAccruals, clientDebts, cashOperations, teamViolations, salaryAdvances, salaryPayments]);
 
   const getPreRestoreBackup = useCallback((): string => {
     const snapshot = latestDataRef.current;
@@ -3046,6 +3055,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         clientDebts: snapshot.clientDebts,
         cashOperations: snapshot.cashOperations,
         teamViolations: snapshot.teamViolations,
+        salaryAdvances: snapshot.salaryAdvances,
+        salaryPayments: snapshot.salaryPayments,
       },
     };
     return JSON.stringify(backupData);
@@ -3189,6 +3200,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       clientDebts: Array.isArray(d.clientDebts) ? d.clientDebts : [],
       cashOperations: Array.isArray(d.cashOperations) ? d.cashOperations : [],
       teamViolations: Array.isArray(d.teamViolations) ? d.teamViolations : [],
+      salaryAdvances: Array.isArray(d.salaryAdvances) ? d.salaryAdvances : [],
+      salaryPayments: Array.isArray(d.salaryPayments) ? d.salaryPayments : [],
     };
 
     let serverResetSuccess = false;
@@ -3240,6 +3253,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     setClientDebts(restorePayload.clientDebts);
     setCashOperations(restorePayload.cashOperations);
     setTeamViolations(restorePayload.teamViolations);
+    setSalaryAdvances(restorePayload.salaryAdvances);
+    setSalaryPayments(restorePayload.salaryPayments);
 
     try {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(restorePayload));
@@ -3345,6 +3360,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     setClientDebts([]);
     setCashOperations([]);
     setTeamViolations([]);
+    setSalaryAdvances([]);
+    setSalaryPayments([]);
 
     const resetPayload = {
       clients: [] as any[],
@@ -3369,6 +3386,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       clientDebts: [] as any[],
       cashOperations: [] as any[],
       teamViolations: [] as any[],
+      salaryAdvances: [] as any[],
+      salaryPayments: [] as any[],
     };
 
     try {
@@ -3398,6 +3417,162 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
     console.log('[Reset] All data has been reset. Admin accounts preserved.');
   }, [users, currentUser, schedulePush, utils]);
+
+  const issueSalaryAdvance = useCallback((employeeId: string, employeeName: string, amount: number, comment: string) => {
+    if (amount <= 0) return;
+    const now = new Date().toISOString();
+    const activeShift = shifts.find(s => s.status === 'open');
+    const balanceBefore = activeShift ? getShiftCashBalance(activeShift) : 0;
+    const balanceAfter = roundMoney(balanceBefore - amount);
+
+    const advance: SalaryAdvance = {
+      id: generateId(),
+      employeeId,
+      employeeName,
+      amount: roundMoney(amount),
+      remainingAmount: roundMoney(amount),
+      comment,
+      issuedBy: currentUser?.id ?? 'unknown',
+      issuedByName: currentUser?.name ?? 'Неизвестно',
+      issuedAt: now,
+      updatedAt: now,
+    };
+    setSalaryAdvances(prev => [advance, ...prev]);
+
+    if (activeShift) {
+      updateShiftExpected(activeShift.id, -amount);
+    }
+
+    addTransaction({
+      clientId: '',
+      carId: '',
+      type: 'admin_expense',
+      amount,
+      method: 'cash',
+      date: now,
+      description: `Долг под ЗП: ${employeeName} — ${amount} ₽${comment ? ` (${comment})` : ''}`,
+    });
+
+    addCashOperation({
+      type: 'salary_advance',
+      amount,
+      category: 'Долг под ЗП',
+      description: `Выдано в долг под ЗП: ${employeeName} — ${amount} ₽${comment ? ` (${comment})` : ''}`,
+      method: 'cash',
+      shiftId: activeShift?.id ?? null,
+      balanceBefore,
+      balanceAfter,
+      relatedEntityId: advance.id,
+      relatedEntityType: 'salary_advance',
+    });
+
+    logAction('salary_advance_issue', 'Выдано в долг под ЗП', `${employeeName}: ${amount} ₽${comment ? `, комментарий: ${comment}` : ''}`, advance.id, 'salary_advance');
+    schedulePush();
+    console.log(`[SalaryAdvance] Issued ${amount} to ${employeeName}, id=${advance.id}`);
+  }, [currentUser, shifts, getShiftCashBalance, updateShiftExpected, addTransaction, addCashOperation, logAction, schedulePush]);
+
+  const paySalary = useCallback((employeeId: string, employeeName: string, grossAmount: number, method: PaymentMethod, comment: string) => {
+    if (grossAmount <= 0) return;
+    const now = new Date().toISOString();
+    const activeShift = shifts.find(s => s.status === 'open');
+
+    const employeeAdvances = salaryAdvances.filter(a => a.employeeId === employeeId && a.remainingAmount > 0)
+      .sort((a, b) => new Date(a.issuedAt).getTime() - new Date(b.issuedAt).getTime());
+    const totalDebt = roundMoney(employeeAdvances.reduce((s, a) => s + a.remainingAmount, 0));
+
+    const debtDeducted = roundMoney(Math.min(grossAmount, totalDebt));
+    const netPaid = roundMoney(grossAmount - debtDeducted);
+
+    if (debtDeducted > 0) {
+      let remaining = debtDeducted;
+      setSalaryAdvances(prev => prev.map(a => {
+        if (a.employeeId !== employeeId || a.remainingAmount <= 0 || remaining <= 0) return a;
+        const payForThis = roundMoney(Math.min(remaining, a.remainingAmount));
+        remaining = roundMoney(remaining - payForThis);
+        return { ...a, remainingAmount: roundMoney(a.remainingAmount - payForThis), updatedAt: now };
+      }));
+    }
+
+    const salPayment: SalaryPayment = {
+      id: generateId(),
+      employeeId,
+      employeeName,
+      grossAmount: roundMoney(grossAmount),
+      debtDeducted,
+      netPaid,
+      method,
+      comment,
+      paidBy: currentUser?.id ?? 'unknown',
+      paidByName: currentUser?.name ?? 'Неизвестно',
+      paidAt: now,
+    };
+    setSalaryPayments(prev => [salPayment, ...prev]);
+
+    if (netPaid > 0) {
+      const balanceBefore = activeShift ? getShiftCashBalance(activeShift) : 0;
+      const balanceAfter = method === 'cash' ? roundMoney(balanceBefore - netPaid) : balanceBefore;
+
+      if (method === 'cash' && activeShift) {
+        updateShiftExpected(activeShift.id, -netPaid);
+      }
+
+      addTransaction({
+        clientId: '',
+        carId: '',
+        type: 'admin_expense',
+        amount: netPaid,
+        method,
+        date: now,
+        description: `Выплата ЗП: ${employeeName} — ${netPaid} ₽ (начислено ${grossAmount} ₽${debtDeducted > 0 ? `, зачтено долга ${debtDeducted} ₽` : ''})`,
+      });
+
+      addCashOperation({
+        type: 'salary_payment',
+        amount: netPaid,
+        category: 'Выплата зарплаты',
+        description: `Выплата ЗП: ${employeeName} — ${netPaid} ₽ к выдаче (начислено ${grossAmount} ₽${debtDeducted > 0 ? `, зачтено долга ${debtDeducted} ₽` : ''})`,
+        method,
+        shiftId: activeShift?.id ?? null,
+        balanceBefore,
+        balanceAfter,
+        relatedEntityId: salPayment.id,
+        relatedEntityType: 'salary_payment',
+      });
+    }
+
+    if (debtDeducted > 0) {
+      logAction('salary_advance_repay', 'Погашение долга под ЗП', `${employeeName}: зачтено ${debtDeducted} ₽ при выплате зарплаты${totalDebt - debtDeducted > 0 ? `, остаток долга: ${roundMoney(totalDebt - debtDeducted)} ₽` : ', долг погашен полностью'}`, salPayment.id, 'salary_payment');
+    }
+
+    const payLabel = netPaid > 0
+      ? `${employeeName}: начислено ${grossAmount} ₽${debtDeducted > 0 ? `, зачтено долга ${debtDeducted} ₽` : ''}, к выдаче ${netPaid} ₽ (${method === 'cash' ? 'нал' : 'безнал'})`
+      : `${employeeName}: начислено ${grossAmount} ₽, полностью зачтено в погашение долга ${debtDeducted} ₽`;
+    logAction('salary_payment', 'Выплата зарплаты', payLabel, salPayment.id, 'salary_payment');
+    schedulePush();
+    console.log(`[SalaryPayment] ${employeeName}: gross=${grossAmount}, debtDeducted=${debtDeducted}, netPaid=${netPaid}`);
+  }, [currentUser, shifts, salaryAdvances, getShiftCashBalance, updateShiftExpected, addTransaction, addCashOperation, logAction, schedulePush]);
+
+  const getEmployeeSalaryDebt = useCallback((employeeId: string): number => {
+    return roundMoney(salaryAdvances.filter(a => a.employeeId === employeeId && a.remainingAmount > 0).reduce((s, a) => s + a.remainingAmount, 0));
+  }, [salaryAdvances]);
+
+  const employeeSalaryDebts = useMemo(() => {
+    const byEmployee: Record<string, { employeeId: string; employeeName: string; totalIssued: number; totalRepaid: number; remaining: number }> = {};
+    for (const a of salaryAdvances) {
+      if (!byEmployee[a.employeeId]) {
+        byEmployee[a.employeeId] = { employeeId: a.employeeId, employeeName: a.employeeName, totalIssued: 0, totalRepaid: 0, remaining: 0 };
+      }
+      byEmployee[a.employeeId].totalIssued += a.amount;
+      byEmployee[a.employeeId].totalRepaid += roundMoney(a.amount - a.remainingAmount);
+      byEmployee[a.employeeId].remaining += a.remainingAmount;
+    }
+    return Object.values(byEmployee).map(e => ({
+      ...e,
+      totalIssued: roundMoney(e.totalIssued),
+      totalRepaid: roundMoney(e.totalRepaid),
+      remaining: roundMoney(e.remaining),
+    }));
+  }, [salaryAdvances]);
 
   return useMemo(() => ({
     clients,
@@ -3498,6 +3673,12 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     addManualDebt,
     deleteManualDebt,
     calculateDebtByMethod,
+    salaryAdvances,
+    salaryPayments,
+    issueSalaryAdvance,
+    paySalary,
+    getEmployeeSalaryDebt,
+    employeeSalaryDebts,
   }), [
     clients, cars, activeClients, activeCars, isClientDeleted,
     sessions, subscriptions, payments, debts, transactions, tariffs,
@@ -3521,5 +3702,6 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     teamViolations, getCurrentMonthViolations, addViolation, deleteViolation,
     addManualDebt, deleteManualDebt,
     calculateDebtByMethod,
+    salaryAdvances, salaryPayments, issueSalaryAdvance, paySalary, getEmployeeSalaryDebt, employeeSalaryDebts,
   ]);
 });

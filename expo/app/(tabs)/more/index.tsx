@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
-import { AlertTriangle, Clock, BarChart3, Settings, ChevronRight, Banknote, CalendarDays, FileText, Download, Wallet } from 'lucide-react-native';
+import { AlertTriangle, Clock, BarChart3, Settings, ChevronRight, Banknote, CalendarDays, FileText, Download, Wallet, Briefcase } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/providers/AuthProvider';
 import { useParking } from '@/providers/ParkingProvider';
@@ -52,6 +52,12 @@ export default function MoreScreen() {
   ];
 
   if (isAdmin) {
+    menuItems.push({
+      label: 'Зарплаты и авансы',
+      icon: Briefcase,
+      route: '/(tabs)/more/salaryadvances',
+      color: '#7C3AED',
+    });
     menuItems.push({
       label: 'Финансы',
       icon: Wallet,
