@@ -2721,6 +2721,28 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     console.log(`[ScheduledShift] Soft-deleted ${id}`);
   }, [schedulePush, logAction]);
 
+  const toggleDeepCleaning = useCallback((shiftId: string, value: boolean) => {
+    const now = new Date().toISOString();
+    const shift = scheduledShifts.find(s => s.id === shiftId);
+    if (!shift) return;
+
+    const isOwn = shift.operatorId === currentUser?.id;
+    const isAdmin = currentUser?.role === 'admin';
+    if (!isOwn && !isAdmin) {
+      console.log('[ScheduledShift] Permission denied: only admin can toggle deep cleaning on other shifts');
+      return;
+    }
+
+    setScheduledShifts(prev => prev.map(s =>
+      s.id === shiftId ? { ...s, isDeepCleaning: value, updatedAt: now } : s
+    ));
+
+    const actionLabel = value ? 'пометил смену как \'генеральная уборка\'' : 'снял отметку \'генеральная уборка\' со смены';
+    logAction('deep_cleaning_toggle', 'Генеральная уборка', `${currentUser?.name ?? 'Неизвестно'} ${actionLabel} ${shift.startTime}–${shift.endTime} (${shift.operatorName}, ${shift.date})`, shiftId, 'schedule');
+    schedulePush();
+    console.log(`[ScheduledShift] Deep cleaning toggled: ${shiftId} = ${value}`);
+  }, [scheduledShifts, currentUser, logAction, schedulePush]);
+
   const activeScheduledShifts = useMemo(() =>
     scheduledShifts.filter(s => !(s as any).deleted),
   [scheduledShifts]);
@@ -3371,6 +3393,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     actionLogs,
     logAction,
     deleteScheduledShift,
+    toggleDeepCleaning,
     earlyExitWithRefund,
     adminExpenses,
     adminCashOperations,
@@ -3413,7 +3436,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     openShift, closeShift, getActiveShift, getActiveManagerShift, getActiveAdminShift, isShiftOpen, isAdminShiftOpen, needsShiftCheck, addExpense,
     addManagedUser, removeManagedUser, updateManagedUserPassword, toggleManagedUserActive,
     updateAdminProfile, validateLogin, resetAllData, createBackup, restoreBackup,
-    addScheduledShift, updateScheduledShift, deleteScheduledShift, logAction,
+    addScheduledShift, updateScheduledShift, deleteScheduledShift, toggleDeepCleaning, logAction,
     earlyExitWithRefund,
     adminExpenses, adminCashOperations, expenseCategories,
     addAdminExpense, addExpenseCategory, updateExpenseCategory, deleteExpenseCategory,

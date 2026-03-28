@@ -256,6 +256,7 @@ export interface ScheduledShift {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  isDeepCleaning?: boolean;
 }
 
 export type ActionType =
@@ -299,7 +300,8 @@ export type ActionType =
   | 'violation_add'
   | 'violation_delete'
   | 'manual_debt_add'
-  | 'manual_debt_delete';
+  | 'manual_debt_delete'
+  | 'deep_cleaning_toggle';
 
 export interface ActionLog {
   id: string;

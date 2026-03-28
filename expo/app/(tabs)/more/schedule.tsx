@@ -1,13 +1,13 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, ScrollView, StyleSheet, Modal,
-  TextInput, Alert, Platform,
+  TextInput, Alert, Platform, Switch,
 } from 'react-native';
 import { Stack } from 'expo-router';
-import { Plus, ChevronLeft, ChevronRight, Clock, User, Trash2, Edit3, X, Calendar } from 'lucide-react-native';
+import { Plus, ChevronLeft, ChevronRight, Clock, User, Trash2, Edit3, X, Calendar, Sparkles } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useParking } from '@/providers/ParkingProvider';
-
+import { useAuth } from '@/providers/AuthProvider';
 import { ScheduledShift } from '@/types';
 
 const WEEKDAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
@@ -36,8 +36,12 @@ function dateKey(year: number, month: number, day: number) {
   return `${year}-${pad2(month + 1)}-${pad2(day)}`;
 }
 
+const DEEP_CLEANING_COLOR = '#10B981';
+const DEEP_CLEANING_BG = '#ECFDF5';
+
 export default function ScheduleScreen() {
-  const { scheduledShifts, users, addScheduledShift, updateScheduledShift, deleteScheduledShift } = useParking();
+  const { scheduledShifts, users, addScheduledShift, updateScheduledShift, deleteScheduledShift, toggleDeepCleaning } = useParking();
+  const { currentUser, isAdmin } = useAuth();
 
   const today = new Date();
   const [viewYear, setViewYear] = useState<number>(today.getFullYear());
@@ -50,6 +54,7 @@ export default function ScheduleScreen() {
   const [formStartTime, setFormStartTime] = useState<string>('08:00');
   const [formEndTime, setFormEndTime] = useState<string>('20:00');
   const [formComment, setFormComment] = useState<string>('');
+  const [formDeepCleaning, setFormDeepCleaning] = useState<boolean>(false);
 
   const cells = useMemo(() => getMonthDays(viewYear, viewMonth), [viewYear, viewMonth]);
 
@@ -61,6 +66,16 @@ export default function ScheduleScreen() {
       map.set(s.date, arr);
     }
     return map;
+  }, [scheduledShifts]);
+
+  const deepCleaningDates = useMemo(() => {
+    const dates = new Set<string>();
+    for (const s of scheduledShifts) {
+      if (s.isDeepCleaning) {
+        dates.add(s.date);
+      }
+    }
+    return dates;
   }, [scheduledShifts]);
 
   const selectedShifts = useMemo(() => {
@@ -95,6 +110,7 @@ export default function ScheduleScreen() {
     setFormStartTime('08:00');
     setFormEndTime('20:00');
     setFormComment('');
+    setFormDeepCleaning(false);
     setModalVisible(true);
   }, [selectedDate, activeUsers]);
 
@@ -104,6 +120,7 @@ export default function ScheduleScreen() {
     setFormStartTime(shift.startTime);
     setFormEndTime(shift.endTime);
     setFormComment(shift.comment);
+    setFormDeepCleaning(shift.isDeepCleaning ?? false);
     setModalVisible(true);
   }, []);
 
@@ -128,11 +145,17 @@ export default function ScheduleScreen() {
         endTime: formEndTime,
         comment: formComment,
       });
+      if ((editingShift.isDeepCleaning ?? false) !== formDeepCleaning) {
+        toggleDeepCleaning(editingShift.id, formDeepCleaning);
+      }
     } else if (selectedDate) {
-      addScheduledShift(selectedDate, formStartTime, formEndTime, formOperatorId, operatorName, formComment);
+      const newShift = addScheduledShift(selectedDate, formStartTime, formEndTime, formOperatorId, operatorName, formComment);
+      if (formDeepCleaning && newShift) {
+        toggleDeepCleaning(newShift.id, true);
+      }
     }
     setModalVisible(false);
-  }, [formOperatorId, formStartTime, formEndTime, formComment, editingShift, selectedDate, activeUsers, addScheduledShift, updateScheduledShift]);
+  }, [formOperatorId, formStartTime, formEndTime, formComment, formDeepCleaning, editingShift, selectedDate, activeUsers, addScheduledShift, updateScheduledShift, toggleDeepCleaning]);
 
   const handleDelete = useCallback((id: string) => {
     Alert.alert('Удалить смену?', 'Эта запись из календаря будет удалена.', [
@@ -140,6 +163,21 @@ export default function ScheduleScreen() {
       { text: 'Удалить', style: 'destructive', onPress: () => deleteScheduledShift(id) },
     ]);
   }, [deleteScheduledShift]);
+
+  const handleToggleDeepCleaning = useCallback((shift: ScheduledShift) => {
+    const isOwn = shift.operatorId === currentUser?.id;
+    if (!isOwn && !isAdmin) {
+      Alert.alert('Нет доступа', 'Только администратор может менять отметку генуборки у чужих смен.');
+      return;
+    }
+    const newValue = !(shift.isDeepCleaning ?? false);
+    toggleDeepCleaning(shift.id, newValue);
+  }, [currentUser, isAdmin, toggleDeepCleaning]);
+
+  const canToggleDeepCleaning = useCallback((shift: ScheduledShift): boolean => {
+    if (isAdmin) return true;
+    return shift.operatorId === currentUser?.id;
+  }, [currentUser, isAdmin]);
 
   const todayKey = dateKey(today.getFullYear(), today.getMonth(), today.getDate());
 
@@ -173,6 +211,7 @@ export default function ScheduleScreen() {
                 const isToday = key === todayKey;
                 const isSelected = key === selectedDate;
                 const hasShifts = day ? (shiftsByDate.get(key)?.length ?? 0) > 0 : false;
+                const hasDeepCleaning = day ? deepCleaningDates.has(key) : false;
 
                 return (
                   <TouchableOpacity
@@ -181,6 +220,7 @@ export default function ScheduleScreen() {
                       styles.dayCell,
                       isToday && styles.dayCellToday,
                       isSelected && styles.dayCellSelected,
+                      hasDeepCleaning && !isSelected && styles.dayCellDeepCleaning,
                     ]}
                     disabled={!day}
                     activeOpacity={0.6}
@@ -192,12 +232,18 @@ export default function ScheduleScreen() {
                           styles.dayText,
                           isToday && styles.dayTextToday,
                           isSelected && styles.dayTextSelected,
+                          hasDeepCleaning && !isSelected && !isToday && styles.dayTextDeepCleaning,
                         ]}>
                           {day}
                         </Text>
-                        {hasShifts && (
-                          <View style={[styles.dot, isSelected && styles.dotSelected]} />
-                        )}
+                        <View style={styles.dotRow}>
+                          {hasShifts && (
+                            <View style={[styles.dot, isSelected && styles.dotSelected]} />
+                          )}
+                          {hasDeepCleaning && (
+                            <View style={[styles.dotDeepCleaning, isSelected && styles.dotSelected]} />
+                          )}
+                        </View>
                       </>
                     ) : null}
                   </TouchableOpacity>
@@ -205,6 +251,17 @@ export default function ScheduleScreen() {
               })}
             </View>
           ))}
+
+          <View style={styles.legendRow}>
+            <View style={styles.legendItem}>
+              <View style={[styles.legendDot, { backgroundColor: Colors.info }]} />
+              <Text style={styles.legendText}>Смена</Text>
+            </View>
+            <View style={styles.legendItem}>
+              <View style={[styles.legendDot, { backgroundColor: DEEP_CLEANING_COLOR }]} />
+              <Text style={styles.legendText}>Генуборка</Text>
+            </View>
+          </View>
         </View>
 
         {selectedDate && (
@@ -227,34 +284,74 @@ export default function ScheduleScreen() {
                 <Text style={styles.emptyText}>Нет запланированных смен</Text>
               </View>
             ) : (
-              selectedShifts.map(shift => (
-                <View key={shift.id} style={styles.shiftCard}>
-                  <View style={styles.shiftTop}>
-                    <View style={styles.shiftInfo}>
-                      <View style={styles.shiftRow}>
-                        <User size={15} color={Colors.primary} />
-                        <Text style={styles.shiftName}>{shift.operatorName}</Text>
+              selectedShifts.map(shift => {
+                const isDC = shift.isDeepCleaning ?? false;
+                const canToggle = canToggleDeepCleaning(shift);
+
+                return (
+                  <View key={shift.id} style={[styles.shiftCard, isDC && styles.shiftCardDeepCleaning]}>
+                    {isDC && (
+                      <View style={styles.dcBadge}>
+                        <Sparkles size={12} color={Colors.white} />
+                        <Text style={styles.dcBadgeText}>Генуборка</Text>
                       </View>
-                      <View style={styles.shiftRow}>
-                        <Clock size={14} color={Colors.textSecondary} />
-                        <Text style={styles.shiftTime}>{shift.startTime} — {shift.endTime}</Text>
+                    )}
+                    <View style={styles.shiftTop}>
+                      <View style={styles.shiftInfo}>
+                        <View style={styles.shiftRow}>
+                          <User size={15} color={isDC ? DEEP_CLEANING_COLOR : Colors.primary} />
+                          <Text style={styles.shiftName}>{shift.operatorName}</Text>
+                        </View>
+                        <View style={styles.shiftRow}>
+                          <Clock size={14} color={Colors.textSecondary} />
+                          <Text style={styles.shiftTime}>{shift.startTime} — {shift.endTime}</Text>
+                        </View>
+                        {shift.comment ? (
+                          <Text style={styles.shiftComment}>{shift.comment}</Text>
+                        ) : null}
                       </View>
-                      {shift.comment ? (
-                        <Text style={styles.shiftComment}>{shift.comment}</Text>
-                      ) : null}
+                      <View style={styles.shiftActions}>
+                        <TouchableOpacity onPress={() => openEditModal(shift)} style={styles.actionBtn} activeOpacity={0.7}>
+                          <Edit3 size={16} color={Colors.info} />
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={() => handleDelete(shift.id)} style={styles.actionBtn} activeOpacity={0.7}>
+                          <Trash2 size={16} color={Colors.danger} />
+                        </TouchableOpacity>
+                      </View>
                     </View>
-                    <View style={styles.shiftActions}>
-                      <TouchableOpacity onPress={() => openEditModal(shift)} style={styles.actionBtn} activeOpacity={0.7}>
-                        <Edit3 size={16} color={Colors.info} />
-                      </TouchableOpacity>
-                      <TouchableOpacity onPress={() => handleDelete(shift.id)} style={styles.actionBtn} activeOpacity={0.7}>
-                        <Trash2 size={16} color={Colors.danger} />
-                      </TouchableOpacity>
+
+                    <View style={styles.dcToggleRow}>
+                      <View style={styles.dcToggleLabel}>
+                        <Sparkles size={14} color={isDC ? DEEP_CLEANING_COLOR : Colors.textMuted} />
+                        <Text style={[styles.dcToggleText, isDC && styles.dcToggleTextActive]}>
+                          Генеральная уборка
+                        </Text>
+                      </View>
+                      {canToggle ? (
+                        <Switch
+                          value={isDC}
+                          onValueChange={() => handleToggleDeepCleaning(shift)}
+                          trackColor={{ false: Colors.border, true: DEEP_CLEANING_COLOR + '60' }}
+                          thumbColor={isDC ? DEEP_CLEANING_COLOR : '#f4f3f4'}
+                        />
+                      ) : (
+                        <View style={[styles.dcStatusBadge, isDC && styles.dcStatusBadgeActive]}>
+                          <Text style={[styles.dcStatusText, isDC && styles.dcStatusTextActive]}>
+                            {isDC ? 'Да' : 'Нет'}
+                          </Text>
+                        </View>
+                      )}
                     </View>
                   </View>
-                </View>
-              ))
+                );
+              })
             )}
+
+            <View style={styles.hintNote}>
+              <Text style={styles.hintNoteText}>
+                💡 Рекомендуется минимум 1 смена с генеральной уборкой в неделю
+              </Text>
+            </View>
           </View>
         )}
 
@@ -334,6 +431,21 @@ export default function ScheduleScreen() {
               multiline
             />
 
+            <View style={styles.dcFormRow}>
+              <View style={styles.dcFormLabel}>
+                <Sparkles size={16} color={formDeepCleaning ? DEEP_CLEANING_COLOR : Colors.textMuted} />
+                <Text style={[styles.dcFormText, formDeepCleaning && styles.dcFormTextActive]}>
+                  Генеральная уборка
+                </Text>
+              </View>
+              <Switch
+                value={formDeepCleaning}
+                onValueChange={setFormDeepCleaning}
+                trackColor={{ false: Colors.border, true: DEEP_CLEANING_COLOR + '60' }}
+                thumbColor={formDeepCleaning ? DEEP_CLEANING_COLOR : '#f4f3f4'}
+              />
+            </View>
+
             <TouchableOpacity onPress={handleSave} style={styles.saveBtn} activeOpacity={0.7}>
               <Text style={styles.saveBtnText}>
                 {editingShift ? 'Сохранить' : 'Добавить смену'}
@@ -410,6 +522,9 @@ const styles = StyleSheet.create({
   dayCellSelected: {
     backgroundColor: Colors.primary,
   },
+  dayCellDeepCleaning: {
+    backgroundColor: DEEP_CLEANING_BG,
+  },
   dayText: {
     fontSize: 14,
     fontWeight: '500' as const,
@@ -423,15 +538,55 @@ const styles = StyleSheet.create({
     color: Colors.white,
     fontWeight: '700' as const,
   },
+  dayTextDeepCleaning: {
+    color: DEEP_CLEANING_COLOR,
+    fontWeight: '600' as const,
+  },
+  dotRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    marginTop: 2,
+    height: 5,
+  },
   dot: {
     width: 5,
     height: 5,
     borderRadius: 3,
     backgroundColor: Colors.info,
-    marginTop: 2,
   },
   dotSelected: {
     backgroundColor: Colors.white,
+  },
+  dotDeepCleaning: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: DEEP_CLEANING_COLOR,
+  },
+  legendRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 20,
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: Colors.cardBorder,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  legendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  legendText: {
+    fontSize: 12,
+    color: Colors.textSecondary,
   },
   detailSection: {
     marginTop: 16,
@@ -486,6 +641,28 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 8,
   },
+  shiftCardDeepCleaning: {
+    borderColor: DEEP_CLEANING_COLOR + '50',
+    borderLeftWidth: 3,
+    borderLeftColor: DEEP_CLEANING_COLOR,
+  },
+  dcBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: DEEP_CLEANING_COLOR,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    gap: 4,
+    marginBottom: 8,
+  },
+  dcBadgeText: {
+    fontSize: 11,
+    fontWeight: '700' as const,
+    color: Colors.white,
+    textTransform: 'uppercase' as const,
+  },
   shiftTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -526,6 +703,54 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  dcToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: Colors.cardBorder,
+  },
+  dcToggleLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  dcToggleText: {
+    fontSize: 14,
+    color: Colors.textMuted,
+  },
+  dcToggleTextActive: {
+    color: DEEP_CLEANING_COLOR,
+    fontWeight: '600' as const,
+  },
+  dcStatusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: Colors.background,
+  },
+  dcStatusBadgeActive: {
+    backgroundColor: DEEP_CLEANING_BG,
+  },
+  dcStatusText: {
+    fontSize: 12,
+    fontWeight: '600' as const,
+    color: Colors.textMuted,
+  },
+  dcStatusTextActive: {
+    color: DEEP_CLEANING_COLOR,
+  },
+  hintNote: {
+    marginTop: 8,
+    paddingHorizontal: 4,
+  },
+  hintNoteText: {
+    fontSize: 12,
+    color: Colors.textMuted,
+    textAlign: 'center' as const,
   },
   hintCard: {
     marginTop: 20,
@@ -634,6 +859,31 @@ const styles = StyleSheet.create({
   inputMultiline: {
     minHeight: 60,
     textAlignVertical: 'top' as const,
+  },
+  dcFormRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    backgroundColor: Colors.background,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Colors.cardBorder,
+  },
+  dcFormLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  dcFormText: {
+    fontSize: 15,
+    color: Colors.textSecondary,
+  },
+  dcFormTextActive: {
+    color: DEEP_CLEANING_COLOR,
+    fontWeight: '600' as const,
   },
   saveBtn: {
     backgroundColor: Colors.primary,
