@@ -367,6 +367,8 @@ export function migrateBackupData(parsed: Record<string, any>): MigrationResult 
     clientDebts: hasClientDebts ? d.clientDebts : safeArray(d.client_debts),
     cashOperations: hasCashOperations ? d.cashOperations : safeArray(d.cash_operations),
     teamViolations: hasTeamViolations ? d.teamViolations : safeArray(d.team_violations),
+    salaryAdvances: safeArray(d.salaryAdvances ?? d.salary_advances),
+    salaryPayments: safeArray(d.salaryPayments ?? d.salary_payments),
   };
 
   console.log(`[BackupMigration] Migration complete: v${detectedVersion} → v${CURRENT_BACKUP_VERSION}, ` +
