@@ -70,7 +70,7 @@ export default function SalaryAdvancesScreen() {
     employeeSalaryDebts.filter(e => e.remaining > 0),
   [employeeSalaryDebts]);
 
-  const handleIssue = useCallback(() => {
+  const handleIssue = useCallback((forceNegative?: boolean) => {
     const amount = Number(issueAmount);
     if (!issueEmployeeId) {
       Alert.alert('Ошибка', 'Выберите сотрудника');
@@ -85,7 +85,23 @@ export default function SalaryAdvancesScreen() {
       Alert.alert('Ошибка', 'Сотрудник не найден');
       return;
     }
-    issueSalaryAdvance(employee.id, employee.name, amount, issueComment.trim());
+    const result = issueSalaryAdvance(employee.id, employee.name, amount, issueComment.trim(), forceNegative);
+    if (result && !result.success) {
+      if (result.wouldGoNegative) {
+        const balAfter = (result.currentBalance ?? 0) - amount;
+        Alert.alert(
+          '⚠️ КАССА УЙДЁТ В МИНУС!',
+          `Текущий остаток: ${result.currentBalance} ₽\nВыдаёте: ${amount} ₽\nБудет: ${balAfter} ₽`,
+          [
+            { text: 'Отмена', style: 'cancel' },
+            { text: '⚠️ Разрешить минус', style: 'destructive', onPress: () => handleIssue(true) },
+          ]
+        );
+        return;
+      }
+      Alert.alert('Ошибка', result.error ?? 'Не удалось выдать');
+      return;
+    }
     setIssueEmployeeId('');
     setIssueAmount('');
     setIssueComment('');
@@ -93,7 +109,7 @@ export default function SalaryAdvancesScreen() {
     setTab('debts');
   }, [issueEmployeeId, issueAmount, issueComment, activeUsers, issueSalaryAdvance]);
 
-  const handlePay = useCallback(() => {
+  const handlePay = useCallback((forceNegative?: boolean) => {
     const gross = Number(payGrossAmount);
     if (!payEmployeeId) {
       Alert.alert('Ошибка', 'Выберите сотрудника');
@@ -118,7 +134,23 @@ export default function SalaryAdvancesScreen() {
       {
         text: 'Выплатить',
         onPress: () => {
-          paySalary(employee.id, employee.name, gross, payMethod, payComment.trim());
+          const result = paySalary(employee.id, employee.name, gross, payMethod, payComment.trim(), forceNegative);
+          if (result && !result.success) {
+            if (result.wouldGoNegative) {
+              const balAfter = (result.currentBalance ?? 0) - (result.netPaid ?? payNet);
+              Alert.alert(
+                '⚠️ КАССА УЙДЁТ В МИНУС!',
+                `Текущий остаток: ${result.currentBalance} ₽\nК выдаче: ${result.netPaid ?? payNet} ₽\nБудет: ${balAfter} ₽`,
+                [
+                  { text: 'Отмена', style: 'cancel' },
+                  { text: '⚠️ Разрешить минус', style: 'destructive', onPress: () => handlePay(true) },
+                ]
+              );
+              return;
+            }
+            Alert.alert('Ошибка', result.error ?? 'Не удалось выплатить');
+            return;
+          }
           setPayEmployeeId('');
           setPayGrossAmount('');
           setPayComment('');
@@ -359,7 +391,7 @@ export default function SalaryAdvancesScreen() {
 
               <TouchableOpacity
                 style={styles.submitBtn}
-                onPress={handleIssue}
+                onPress={() => handleIssue()}
                 activeOpacity={0.7}
               >
                 <ArrowDownCircle size={18} color={Colors.white} />
@@ -467,7 +499,7 @@ export default function SalaryAdvancesScreen() {
 
               <TouchableOpacity
                 style={[styles.submitBtn, { backgroundColor: Colors.success }]}
-                onPress={handlePay}
+                onPress={() => handlePay()}
                 activeOpacity={0.7}
               >
                 <ArrowUpCircle size={18} color={Colors.white} />

@@ -1859,11 +1859,35 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     console.log(`[PayClientDebt] FIFO paid ${actualAmount} for client ${clientId}, old debts touched: ${updatedDebtIds.length}, remaining: ${newRemainingTotal}`);
   }, [debts, clientDebts, currentUser, shifts, addTransaction, updateShiftExpected, logAction, schedulePush, addCashOperation, getShiftCashBalance]);
 
-  const withdrawCash = useCallback((amount: number, notes: string): CashWithdrawal => {
+  const getCashBalance = useCallback((): number => {
+    const isUserAdmin = currentUser?.role === 'admin';
+    let targetShift: CashShift | undefined;
+    if (isUserAdmin) {
+      targetShift = shifts.find(s => s.status === 'open' && s.operatorRole === 'admin')
+        ?? shifts.find(s => s.status === 'open');
+    } else {
+      targetShift = shifts.find(s => s.status === 'open' && s.operatorRole !== 'admin')
+        ?? shifts.find(s => s.status === 'open');
+    }
+    return targetShift ? getShiftCashBalance(targetShift) : 0;
+  }, [currentUser, shifts, getShiftCashBalance]);
+
+  const withdrawCash = useCallback((amount: number, notes: string, forceNegative?: boolean): { success: boolean; error?: string; withdrawal?: CashWithdrawal; wouldGoNegative?: boolean; currentBalance?: number } => {
     const activeShift = shifts.find(s => s.status === 'open');
     const now = new Date().toISOString();
     const balanceBefore = activeShift ? getShiftCashBalance(activeShift) : 0;
     const balanceAfter = roundMoney(balanceBefore - amount);
+    const isUserAdmin = currentUser?.role === 'admin';
+
+    if (balanceAfter < 0 && !isUserAdmin) {
+      console.log(`[Withdrawal] BLOCKED for manager: balance=${balanceBefore}, withdraw=${amount}`);
+      return { success: false, error: `Недостаточно средств в кассе. Остаток: ${balanceBefore} ₽, можно снять максимум: ${balanceBefore} ₽`, currentBalance: balanceBefore };
+    }
+
+    if (balanceAfter < 0 && isUserAdmin && !forceNegative) {
+      console.log(`[Withdrawal] Admin warning: balance=${balanceBefore}, withdraw=${amount}, would go to ${balanceAfter}`);
+      return { success: false, wouldGoNegative: true, currentBalance: balanceBefore, error: `Касса уйдёт в минус! Остаток: ${balanceBefore} ₽, после снятия: ${balanceAfter} ₽` };
+    }
 
     const withdrawal: CashWithdrawal = {
       id: generateId(),
@@ -1886,14 +1910,14 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       amount,
       method: 'cash',
       date: now,
-      description: `Снятие из кассы: ${amount} ₽${notes ? ` — ${notes}` : ''}`,
+      description: `Снятие из кассы: ${amount} ₽${notes ? ` — ${notes}` : ''}${balanceAfter < 0 ? ' [МИНУС РАЗРЕШЁН АДМИНОМ]' : ''}`,
     });
 
     addCashOperation({
       type: 'withdrawal',
       amount,
       category: 'Снятие',
-      description: `Снятие из кассы${notes ? `: ${notes}` : ''}`,
+      description: `Снятие из кассы${notes ? `: ${notes}` : ''}${balanceAfter < 0 ? ' [минус разрешён админом]' : ''}`,
       method: 'cash',
       shiftId: activeShift?.id ?? null,
       balanceBefore,
@@ -1907,7 +1931,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       type: 'cash_withdrawal_from_manager',
       amount,
       method: 'cash',
-      description: `Снятие наличных с кассы менеджера${notes ? `: ${notes}` : ''}`,
+      description: `Снятие наличных с кассы менеджера${notes ? `: ${notes}` : ''}${balanceAfter < 0 ? ' [минус разрешён]' : ''}`,
       sourceManagerId: activeShift?.operatorId,
       sourceManagerName: activeShift?.operatorName,
       operatorId: currentUser?.id ?? 'unknown',
@@ -1917,10 +1941,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     };
     setAdminCashOperations(prev => [adminOp, ...prev]);
 
-    logAction('admin_withdrawal', 'Снятие наличных с кассы менеджера', `${amount} ₽${notes ? ` — ${notes}` : ''}, менеджер: ${activeShift?.operatorName ?? '—'} (баланс: ${balanceBefore} → ${balanceAfter} ₽)`, withdrawal.id, 'withdrawal');
+    const negativeNote = balanceAfter < 0 ? ` ⚠️ РАЗРЕШЁН МИНУС (админ)` : '';
+    logAction('admin_withdrawal', 'Снятие наличных с кассы менеджера', `${amount} ₽${notes ? ` — ${notes}` : ''}, менеджер: ${activeShift?.operatorName ?? '—'} (баланс: ${balanceBefore} → ${balanceAfter} ₽)${negativeNote}`, withdrawal.id, 'withdrawal');
     schedulePush();
-    console.log(`[Withdrawal] ${amount} ₽ withdrawn by ${currentUser?.name}, balance: ${balanceBefore} → ${balanceAfter}`);
-    return withdrawal;
+    console.log(`[Withdrawal] ${amount} ₽ withdrawn by ${currentUser?.name}, balance: ${balanceBefore} → ${balanceAfter}${balanceAfter < 0 ? ' [NEGATIVE ALLOWED]' : ''}`);
+    return { success: true, withdrawal };
   }, [shifts, currentUser, schedulePush, updateShiftExpected, addTransaction, addCashOperation, getShiftCashBalance, logAction]);
 
   const addManualDebt = useCallback((clientId: string, amount: number, date: string, comment: string) => {
@@ -2293,7 +2318,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     console.log(`[Shift] Closed shift ${shiftId}, actual: ${actualCash}, calculated: ${calculatedBalance}, discrepancy: ${discrepancy}`);
   }, [shifts, transactions, expenses, withdrawals, schedulePush, logAction]);
 
-  const addExpense = useCallback((amount: number, category: string, description: string): { success: boolean; error?: string; expense?: Expense } => {
+  const addExpense = useCallback((amount: number, category: string, description: string, forceNegative?: boolean): { success: boolean; error?: string; expense?: Expense; wouldGoNegative?: boolean; currentBalance?: number } => {
     try {
       const isUserAdmin = currentUser?.role === 'admin';
       let targetShift: CashShift | undefined;
@@ -2316,10 +2341,15 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
       if (!isUserAdmin && targetShift && balanceBefore < amount) {
         console.log(`[Expense] Insufficient funds: balance=${balanceBefore}, expense=${amount}`);
-        return { success: false, error: `Недостаточно средств в кассе. Баланс: ${balanceBefore} ₽, расход: ${amount} ₽` };
+        return { success: false, error: `Недостаточно средств в кассе. Остаток: ${balanceBefore} ₽, расход: ${amount} ₽. Можно провести максимум: ${balanceBefore} ₽`, currentBalance: balanceBefore };
       }
 
       const balanceAfter = roundMoney(balanceBefore - amount);
+
+      if (isUserAdmin && balanceAfter < 0 && !forceNegative) {
+        console.log(`[Expense] Admin warning: balance=${balanceBefore}, expense=${amount}, would go to ${balanceAfter}`);
+        return { success: false, wouldGoNegative: true, currentBalance: balanceBefore, error: `Касса уйдёт в минус! Остаток: ${balanceBefore} ₽, после расхода: ${balanceAfter} ₽` };
+      }
 
       const expense: Expense = {
         id: generateId(),
@@ -2367,7 +2397,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       });
 
       const roleLabel = isUserAdmin ? '[ADMIN] ' : '';
-      logAction('expense_add', `${roleLabel}Добавлен расход`, `${amount} ₽ — ${category}: ${description} (баланс: ${balanceBefore} → ${balanceAfter} ₽)`, expense.id, 'expense');
+      const negativeNote = balanceAfter < 0 ? ' ⚠️ РАЗРЕШЁН МИНУС (админ)' : '';
+      logAction('expense_add', `${roleLabel}Добавлен расход`, `${amount} ₽ — ${category}: ${description} (баланс: ${balanceBefore} → ${balanceAfter} ₽)${negativeNote}`, expense.id, 'expense');
       schedulePush();
       console.log(`[Expense] SUCCESS: expense ${expense.id}: ${amount} ₽ - ${description}, balance: ${balanceBefore} → ${balanceAfter}`);
       return { success: true, expense };
@@ -3469,12 +3500,17 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     console.log('[Reset] All data has been reset. Admin accounts preserved.');
   }, [users, currentUser, schedulePush, utils]);
 
-  const issueSalaryAdvance = useCallback((employeeId: string, employeeName: string, amount: number, comment: string) => {
-    if (amount <= 0) return;
+  const issueSalaryAdvance = useCallback((employeeId: string, employeeName: string, amount: number, comment: string, forceNegative?: boolean): { success: boolean; error?: string; wouldGoNegative?: boolean; currentBalance?: number } => {
+    if (amount <= 0) return { success: false, error: 'Сумма должна быть больше 0' };
     const now = new Date().toISOString();
     const activeShift = shifts.find(s => s.status === 'open');
     const balanceBefore = activeShift ? getShiftCashBalance(activeShift) : 0;
     const balanceAfter = roundMoney(balanceBefore - amount);
+
+    if (balanceAfter < 0 && !forceNegative) {
+      console.log(`[SalaryAdvance] Would go negative: balance=${balanceBefore}, amount=${amount}`);
+      return { success: false, wouldGoNegative: true, currentBalance: balanceBefore, error: `Касса уйдёт в минус! Остаток: ${balanceBefore} ₽, после выдачи: ${balanceAfter} ₽` };
+    }
 
     const advance: SalaryAdvance = {
       id: generateId(),
@@ -3517,13 +3553,15 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       relatedEntityType: 'salary_advance',
     });
 
-    logAction('salary_advance_issue', 'Выдано в долг под ЗП', `${employeeName}: ${amount} ₽${comment ? `, комментарий: ${comment}` : ''}`, advance.id, 'salary_advance');
+    const negativeNote = balanceAfter < 0 ? ' ⚠️ РАЗРЕШЁН МИНУС (админ)' : '';
+    logAction('salary_advance_issue', 'Выдано в долг под ЗП', `${employeeName}: ${amount} ₽${comment ? `, комментарий: ${comment}` : ''} (баланс: ${balanceBefore} → ${balanceAfter} ₽)${negativeNote}`, advance.id, 'salary_advance');
     schedulePush();
-    console.log(`[SalaryAdvance] Issued ${amount} to ${employeeName}, id=${advance.id}`);
+    console.log(`[SalaryAdvance] Issued ${amount} to ${employeeName}, id=${advance.id}, balance: ${balanceBefore} → ${balanceAfter}`);
+    return { success: true };
   }, [currentUser, shifts, getShiftCashBalance, updateShiftExpected, addTransaction, addCashOperation, logAction, schedulePush]);
 
-  const paySalary = useCallback((employeeId: string, employeeName: string, grossAmount: number, method: PaymentMethod, comment: string) => {
-    if (grossAmount <= 0) return;
+  const paySalary = useCallback((employeeId: string, employeeName: string, grossAmount: number, method: PaymentMethod, comment: string, forceNegative?: boolean): { success: boolean; error?: string; wouldGoNegative?: boolean; currentBalance?: number; netPaid?: number } => {
+    if (grossAmount <= 0) return { success: false, error: 'Сумма должна быть больше 0' };
     const now = new Date().toISOString();
     const activeShift = shifts.find(s => s.status === 'open');
 
@@ -3533,6 +3571,15 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
     const debtDeducted = roundMoney(Math.min(grossAmount, totalDebt));
     const netPaid = roundMoney(grossAmount - debtDeducted);
+
+    if (netPaid > 0 && method === 'cash') {
+      const balanceBefore = activeShift ? getShiftCashBalance(activeShift) : 0;
+      const balanceAfter = roundMoney(balanceBefore - netPaid);
+      if (balanceAfter < 0 && !forceNegative) {
+        console.log(`[SalaryPayment] Would go negative: balance=${balanceBefore}, netPaid=${netPaid}`);
+        return { success: false, wouldGoNegative: true, currentBalance: balanceBefore, netPaid, error: `Касса уйдёт в минус! Остаток: ${balanceBefore} ₽, к выдаче: ${netPaid} ₽, будет: ${balanceAfter} ₽` };
+      }
+    }
 
     if (debtDeducted > 0) {
       let remaining = debtDeducted;
@@ -3601,6 +3648,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     logAction('salary_payment', 'Выплата зарплаты', payLabel, salPayment.id, 'salary_payment');
     schedulePush();
     console.log(`[SalaryPayment] ${employeeName}: gross=${grossAmount}, debtDeducted=${debtDeducted}, netPaid=${netPaid}`);
+    return { success: true, netPaid };
   }, [currentUser, shifts, salaryAdvances, getShiftCashBalance, updateShiftExpected, addTransaction, addCashOperation, logAction, schedulePush]);
 
   const getEmployeeSalaryDebt = useCallback((employeeId: string): number => {
@@ -3717,6 +3765,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     cashOperations,
     getShiftCashBalance,
     addCashOperation,
+    getCashBalance,
     teamViolations,
     getCurrentMonthViolations,
     addViolation,
@@ -3749,7 +3798,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     addAdminExpense, addExpenseCategory, updateExpenseCategory, deleteExpenseCategory,
     getManagerCategories, getAdminCategories, getManagerCashRegister, getAdminCashRegister,
     dailyDebtAccruals, clientDebts, payClientDebt, payWithDebtPriority, releaseWithDebtWarning, getClientDebtInfo, runDebtAccrual,
-    cashOperations, getShiftCashBalance, addCashOperation,
+    cashOperations, getShiftCashBalance, addCashOperation, getCashBalance,
     teamViolations, getCurrentMonthViolations, addViolation, deleteViolation,
     addManualDebt, deleteManualDebt,
     calculateDebtByMethod,

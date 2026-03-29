@@ -156,7 +156,7 @@ export default function CashRegisterScreen() {
       .slice(0, 50);
   }, [cashOperations, reportPeriod]);
 
-  const handleAddExpense = useCallback(() => {
+  const handleAddExpense = useCallback((forceNegative?: boolean) => {
     try {
       const amount = Number(expenseAmount);
       if (!amount || amount <= 0) {
@@ -167,10 +167,22 @@ export default function CashRegisterScreen() {
         Alert.alert('Ошибка', 'Укажите описание расхода');
         return;
       }
-      console.log(`[CashRegister] Adding expense: ${amount} ₽, category=${expenseCategory}, desc=${expenseDesc}`);
-      const result = addExpense(amount, expenseCategory.trim() || 'Прочее', expenseDesc.trim());
+      console.log(`[CashRegister] Adding expense: ${amount} ₽, category=${expenseCategory}, desc=${expenseDesc}, force=${forceNegative}`);
+      const result = addExpense(amount, expenseCategory.trim() || 'Прочее', expenseDesc.trim(), forceNegative);
       console.log(`[CashRegister] addExpense result:`, JSON.stringify(result));
       if (!result.success) {
+        if (result.wouldGoNegative && isAdmin) {
+          const balAfter = (result.currentBalance ?? 0) - amount;
+          Alert.alert(
+            '⚠️ КАССА УЙДЁТ В МИНУС!',
+            `Текущий остаток: ${result.currentBalance} ₽\nРасход: ${amount} ₽\nБудет: ${balAfter} ₽`,
+            [
+              { text: 'Отмена', style: 'cancel' },
+              { text: '⚠️ Разрешить минус', style: 'destructive', onPress: () => handleAddExpense(true) },
+            ]
+          );
+          return;
+        }
         Alert.alert('Ошибка', result.error ?? 'Не удалось провести расход');
         return;
       }
@@ -183,20 +195,36 @@ export default function CashRegisterScreen() {
       console.log('[CashRegister] handleAddExpense error:', err);
       Alert.alert('Ошибка', `Не удалось добавить расход: ${err instanceof Error ? err.message : String(err)}`);
     }
-  }, [expenseAmount, expenseCategory, expenseDesc, addExpense]);
+  }, [expenseAmount, expenseCategory, expenseDesc, addExpense, isAdmin]);
 
-  const handleWithdraw = useCallback(() => {
+  const handleWithdraw = useCallback((forceNegative?: boolean) => {
     const amount = Number(withdrawAmount);
     if (!amount || amount <= 0) {
       Alert.alert('Ошибка', 'Укажите сумму');
       return;
     }
-    withdrawCash(amount, withdrawNotes.trim());
+    const result = withdrawCash(amount, withdrawNotes.trim(), forceNegative);
+    if (!result.success) {
+      if (result.wouldGoNegative && isAdmin) {
+        const balAfter = (result.currentBalance ?? 0) - amount;
+        Alert.alert(
+          '⚠️ КАССА УЙДЁТ В МИНУС!',
+          `Текущий остаток: ${result.currentBalance} ₽\nСнимаете: ${amount} ₽\nБудет: ${balAfter} ₽`,
+          [
+            { text: 'Отмена', style: 'cancel' },
+            { text: '⚠️ Разрешить минус', style: 'destructive', onPress: () => handleWithdraw(true) },
+          ]
+        );
+        return;
+      }
+      Alert.alert('Недостаточно средств', result.error ?? 'Не удалось провести операцию');
+      return;
+    }
     setShowWithdrawModal(false);
     setWithdrawAmount('');
     setWithdrawNotes('');
     Alert.alert('Готово', `Снято из кассы: ${amount} ₽`);
-  }, [withdrawAmount, withdrawNotes, withdrawCash]);
+  }, [withdrawAmount, withdrawNotes, withdrawCash, isAdmin]);
 
   const shiftCashIncome = useCallback((shift: CashShift) => {
     if (shift.closingSummary) return shift.closingSummary.cashIncome;
@@ -1035,11 +1063,19 @@ export default function CashRegisterScreen() {
                 <X size={22} color={Colors.textSecondary} />
               </TouchableOpacity>
             </View>
-            {activeShift && (
-              <View style={styles.modalExpectedRow}>
-                <Text style={styles.modalExpectedLabel}>Баланс кассы:</Text>
-                <Text style={[styles.modalExpectedValue, currentCashBalance < 0 ? { color: Colors.danger } : undefined]}>
-                  {currentCashBalance} ₽
+            <View style={styles.modalExpectedRow}>
+              <Text style={styles.modalExpectedLabel}>Остаток кассы:</Text>
+              <Text style={[styles.modalExpectedValue, currentCashBalance < 0 ? { color: Colors.danger } : undefined]}>
+                {currentCashBalance} ₽
+              </Text>
+            </View>
+            {Number(expenseAmount) > 0 && Number(expenseAmount) > currentCashBalance && (
+              <View style={styles.negativeWarningBanner}>
+                <AlertTriangle size={16} color={Colors.danger} />
+                <Text style={styles.negativeWarningText}>
+                  {isAdmin
+                    ? `Внимание: касса уйдёт в минус (${currentCashBalance - Number(expenseAmount)} ₽)`
+                    : `Недостаточно средств! Максимум: ${currentCashBalance} ₽`}
                 </Text>
               </View>
             )}
@@ -1069,7 +1105,7 @@ export default function CashRegisterScreen() {
               placeholderTextColor={Colors.textMuted}
               multiline
             />
-                  <TouchableOpacity style={styles.modalSubmitBtn} onPress={handleAddExpense} activeOpacity={0.7}>
+                  <TouchableOpacity style={styles.modalSubmitBtn} onPress={() => handleAddExpense()} activeOpacity={0.7}>
                     <Text style={styles.modalSubmitText}>Добавить расход</Text>
                   </TouchableOpacity>
                 </View>
@@ -1094,6 +1130,22 @@ export default function CashRegisterScreen() {
                 <X size={22} color={Colors.textSecondary} />
               </TouchableOpacity>
             </View>
+            <View style={styles.modalExpectedRow}>
+              <Text style={styles.modalExpectedLabel}>Остаток кассы:</Text>
+              <Text style={[styles.modalExpectedValue, currentCashBalance < 0 ? { color: Colors.danger } : undefined]}>
+                {currentCashBalance} ₽
+              </Text>
+            </View>
+            {Number(withdrawAmount) > 0 && Number(withdrawAmount) > currentCashBalance && (
+              <View style={styles.negativeWarningBanner}>
+                <AlertTriangle size={16} color={Colors.danger} />
+                <Text style={styles.negativeWarningText}>
+                  {isAdmin
+                    ? `Внимание: касса уйдёт в минус (${currentCashBalance - Number(withdrawAmount)} ₽)`
+                    : `Недостаточно средств! Максимум: ${currentCashBalance} ₽`}
+                </Text>
+              </View>
+            )}
             <Text style={styles.modalFieldLabel}>Сумма (₽)</Text>
             <TextInput
               style={styles.modalInput}
@@ -1112,7 +1164,7 @@ export default function CashRegisterScreen() {
               placeholderTextColor={Colors.textMuted}
               multiline
             />
-                  <TouchableOpacity style={styles.modalSubmitBtn} onPress={handleWithdraw} activeOpacity={0.7}>
+                  <TouchableOpacity style={styles.modalSubmitBtn} onPress={() => handleWithdraw()} activeOpacity={0.7}>
                     <Text style={styles.modalSubmitText}>Снять из кассы</Text>
                   </TouchableOpacity>
                 </View>
@@ -1689,5 +1741,22 @@ const styles = StyleSheet.create({
     color: Colors.white,
     fontSize: 16,
     fontWeight: '600' as const,
+  },
+  negativeWarningBanner: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    backgroundColor: Colors.dangerLight,
+    borderRadius: 10,
+    padding: 10,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: Colors.danger + '40',
+  },
+  negativeWarningText: {
+    flex: 1,
+    fontSize: 13,
+    color: Colors.danger,
+    fontWeight: '600' as const,
+    lineHeight: 18,
   },
 });
