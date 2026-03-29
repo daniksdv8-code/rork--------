@@ -198,6 +198,10 @@ export default function CashRegisterScreen() {
   }, [expenseAmount, expenseCategory, expenseDesc, addExpense, isAdmin]);
 
   const handleWithdraw = useCallback((forceNegative?: boolean) => {
+    if (!isAdmin) {
+      Alert.alert('Доступ запрещён', 'Операцию может выполнить только администратор');
+      return;
+    }
     const amount = Number(withdrawAmount);
     if (!amount || amount <= 0) {
       Alert.alert('Ошибка', 'Укажите сумму');

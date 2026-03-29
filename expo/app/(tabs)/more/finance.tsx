@@ -49,6 +49,18 @@ function getPeriodDates(period: PeriodKey): { from?: Date; to?: Date } {
 
 export default function FinanceScreen() {
   const { isAdmin } = useAuth();
+
+  if (!isAdmin) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.noAccessState}>
+          <Wallet size={40} color={Colors.warning} />
+          <Text style={styles.noAccessText}>Доступно только администратору</Text>
+        </View>
+      </View>
+    );
+  }
+
   const {
     withdrawals, expenses, transactions, adminExpenses,
     withdrawCash, addAdminExpense,
@@ -1628,5 +1640,16 @@ const styles = StyleSheet.create({
   },
   filterChipTextActive: {
     color: Colors.white,
+  },
+  noAccessState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 80,
+    gap: 12,
+  },
+  noAccessText: {
+    fontSize: 15,
+    color: Colors.textMuted,
+    textAlign: 'center',
   },
 });

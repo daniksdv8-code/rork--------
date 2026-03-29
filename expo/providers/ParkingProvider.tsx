@@ -1933,6 +1933,10 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   }, [currentUser, shifts, getShiftCashBalance]);
 
   const withdrawCash = useCallback((amount: number, notes: string, forceNegative?: boolean): { success: boolean; error?: string; withdrawal?: CashWithdrawal; wouldGoNegative?: boolean; currentBalance?: number } => {
+    if (currentUser?.role !== 'admin') {
+      console.log(`[Withdrawal] BLOCKED: user ${currentUser?.name} (role=${currentUser?.role}) attempted cash withdrawal`);
+      return { success: false, error: 'Операцию может выполнить только администратор' };
+    }
     const activeShift = shifts.find(s => s.status === 'open');
     const now = new Date().toISOString();
     const balanceBefore = activeShift ? getShiftCashBalance(activeShift) : 0;
@@ -3685,6 +3689,10 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   }, [transactions, withdrawals, adminExpenses, salaryAdvances, salaryPayments]);
 
   const issueSalaryAdvance = useCallback((employeeId: string, employeeName: string, amount: number, comment: string, forceNegative?: boolean, method?: PaymentMethod, source?: 'admin' | 'manager_shift'): { success: boolean; error?: string; wouldGoNegative?: boolean; currentBalance?: number } => {
+    if (currentUser?.role !== 'admin') {
+      console.log(`[SalaryAdvance] BLOCKED: user ${currentUser?.name} (role=${currentUser?.role}) attempted salary advance`);
+      return { success: false, error: 'Операцию может выполнить только администратор' };
+    }
     if (amount <= 0) return { success: false, error: 'Сумма должна быть больше 0' };
     const effectiveMethod: PaymentMethod = method ?? 'cash';
     const effectiveSource = source ?? 'admin';
@@ -3810,6 +3818,10 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   }, [currentUser, getAdminFinanceBalance, getShiftCashBalance, shifts, updateShiftExpected, addTransaction, addCashOperation, logAction, schedulePush]);
 
   const paySalary = useCallback((employeeId: string, employeeName: string, grossAmount: number, method: PaymentMethod, comment: string, forceNegative?: boolean, source?: 'admin' | 'manager_shift'): { success: boolean; error?: string; wouldGoNegative?: boolean; currentBalance?: number; netPaid?: number } => {
+    if (currentUser?.role !== 'admin') {
+      console.log(`[SalaryPayment] BLOCKED: user ${currentUser?.name} (role=${currentUser?.role}) attempted salary payment`);
+      return { success: false, error: 'Операцию может выполнить только администратор' };
+    }
     if (grossAmount <= 0) return { success: false, error: 'Сумма должна быть больше 0' };
     const effectiveSource = source ?? 'admin';
     const now = new Date().toISOString();
