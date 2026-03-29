@@ -251,6 +251,12 @@ export interface CashWithdrawal {
   notes: string;
 }
 
+export interface CleanupChecklistItem {
+  id: string;
+  label: string;
+  completed: boolean;
+}
+
 export interface ScheduledShift {
   id: string;
   date: string;
@@ -263,6 +269,11 @@ export interface ScheduledShift {
   createdAt: string;
   updatedAt: string;
   isDeepCleaning?: boolean;
+  cleanupCompleted?: boolean;
+  cleanupCompletedAt?: string;
+  cleanupCompletedBy?: string;
+  cleanupCompletedByName?: string;
+  cleanupChecklist?: CleanupChecklistItem[];
 }
 
 export type ActionType =
@@ -310,7 +321,8 @@ export type ActionType =
   | 'deep_cleaning_toggle'
   | 'salary_advance_issue'
   | 'salary_advance_repay'
-  | 'salary_payment';
+  | 'salary_payment'
+  | 'cleanup_complete';
 
 export interface ActionLog {
   id: string;

@@ -7,7 +7,7 @@ import {
   PaymentMethod, ServiceType, CashShift, Expense, User, CashWithdrawal, ScheduledShift,
   ActionLog, ActionType, AdminExpense, AdminCashOperation, ExpenseCategory,
   DailyDebtAccrual, ClientDebt, CashOperation, TeamViolationMonth,
-  SalaryAdvance, SalaryPayment
+  SalaryAdvance, SalaryPayment, CleanupChecklistItem
 } from '@/types';
 import { EMPTY_DATA } from '@/mocks/initialData';
 import { generateId } from '@/utils/id';
@@ -2990,6 +2990,67 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     console.log(`[ScheduledShift] Deep cleaning toggled: ${shiftId} = ${value}`);
   }, [scheduledShifts, currentUser, logAction, schedulePush]);
 
+  const DEFAULT_CLEANUP_CHECKLIST: CleanupChecklistItem[] = [
+    { id: '1', label: 'Приёмная (столы, стулья, пол)', completed: false },
+    { id: '2', label: 'Парковка (навес, разметка, мусор)', completed: false },
+    { id: '3', label: 'Санузел (ванная, туалет, зеркала)', completed: false },
+    { id: '4', label: 'Кухня (холодильник, плита, раковина)', completed: false },
+    { id: '5', label: 'Окна и витрины', completed: false },
+    { id: '6', label: 'Мусор на улице', completed: false },
+    { id: '7', label: 'Финальная проверка', completed: false },
+  ];
+
+  const getCleanupChecklist = useCallback((shiftId: string): CleanupChecklistItem[] => {
+    const shift = scheduledShifts.find(s => s.id === shiftId);
+    if (!shift) return DEFAULT_CLEANUP_CHECKLIST;
+    return shift.cleanupChecklist ?? DEFAULT_CLEANUP_CHECKLIST;
+  }, [scheduledShifts]);
+
+  const saveCleanupChecklist = useCallback((shiftId: string, checklist: CleanupChecklistItem[]) => {
+    const now = new Date().toISOString();
+    setScheduledShifts(prev => prev.map(s =>
+      s.id === shiftId ? { ...s, cleanupChecklist: checklist, updatedAt: now } : s
+    ));
+    schedulePush();
+    console.log(`[Cleanup] Checklist saved for shift ${shiftId}`);
+  }, [schedulePush]);
+
+  const completeCleanup = useCallback((shiftId: string) => {
+    const now = new Date().toISOString();
+    const shift = scheduledShifts.find(s => s.id === shiftId);
+    if (!shift) return;
+
+    setScheduledShifts(prev => prev.map(s =>
+      s.id === shiftId ? {
+        ...s,
+        cleanupCompleted: true,
+        cleanupCompletedAt: now,
+        cleanupCompletedBy: currentUser?.id ?? 'unknown',
+        cleanupCompletedByName: currentUser?.name ?? 'Неизвестно',
+        updatedAt: now,
+      } : s
+    ));
+
+    logAction('cleanup_complete', 'Уборка выполнена', `${currentUser?.name ?? 'Неизвестно'} отметил генеральную уборку выполненной (смена ${shift.date}, ${shift.startTime}–${shift.endTime}, ${shift.operatorName})`, shiftId, 'schedule');
+    schedulePush();
+    console.log(`[Cleanup] Completed for shift ${shiftId} by ${currentUser?.name}`);
+  }, [scheduledShifts, currentUser, logAction, schedulePush]);
+
+  const getTodayCleaningShift = useCallback((): ScheduledShift | null => {
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const hasOpenShift = shifts.some(s => s.status === 'open');
+    if (!hasOpenShift) return null;
+
+    const cleaningShift = scheduledShifts.find(s =>
+      s.date === todayStr &&
+      s.isDeepCleaning === true &&
+      !(s as any).deleted &&
+      !s.cleanupCompleted
+    );
+    return cleaningShift ?? null;
+  }, [scheduledShifts, shifts]);
+
   const activeScheduledShifts = useMemo(() =>
     scheduledShifts.filter(s => !(s as any).deleted),
   [scheduledShifts]);
@@ -3957,6 +4018,10 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     getAdminFinanceBalance,
     runDiagnostic,
     getAnomalyStats,
+    getCleanupChecklist,
+    saveCleanupChecklist,
+    completeCleanup,
+    getTodayCleaningShift,
   }), [
     clients, cars, activeClients, activeCars, isClientDeleted,
     sessions, subscriptions, payments, debts, transactions, tariffs,
@@ -3983,5 +4048,6 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     salaryAdvances, salaryPayments, issueSalaryAdvance, paySalary, getEmployeeSalaryDebt, employeeSalaryDebts,
     getAdminFinanceBalance,
     runDiagnostic, getAnomalyStats,
+    getCleanupChecklist, saveCleanupChecklist, completeCleanup, getTodayCleaningShift,
   ]);
 });

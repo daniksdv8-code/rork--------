@@ -6,6 +6,7 @@ import Colors from '@/constants/colors';
 import { useAuth } from '@/providers/AuthProvider';
 import { useParking } from '@/providers/ParkingProvider';
 import ShiftGuard from '@/components/ShiftGuard';
+import CleaningReminder from '@/components/CleaningReminder';
 import { Client } from '@/types';
 import { isToday } from '@/utils/date';
 
@@ -115,6 +116,8 @@ export default function DashboardScreen() {
           })}
         </View>
       )}
+
+      <CleaningReminder />
 
       {(!currentUser || (currentUser.role !== 'admin' && shiftRequired)) && (
         <TouchableOpacity
