@@ -8,7 +8,7 @@ import { useParking } from '@/providers/ParkingProvider';
 import { formatDate, formatDateTime, isExpired, getMonthlyAmount, toDateString, daysUntil } from '@/utils/date';
 import { roundMoney } from '@/utils/money';
 import { formatPlateNumber } from '@/utils/plate';
-import { ServiceType, PaymentMethod } from '@/types';
+import { ServiceType, PaymentMethod, TariffType } from '@/types';
 
 export default function ClientCardScreen() {
   const router = useRouter();
@@ -28,7 +28,12 @@ export default function ClientCardScreen() {
   const [showCheckInForm, setShowCheckInForm] = useState<boolean>(false);
   const [checkInCarId, setCheckInCarId] = useState<string>('');
   const [checkInServiceType, setCheckInServiceType] = useState<ServiceType>('onetime');
+  const [checkInTariffType, setCheckInTariffType] = useState<TariffType>('standard');
   const [checkInPlannedDeparture, setCheckInPlannedDeparture] = useState<string>('');
+
+  const [customAmountEnabled, setCustomAmountEnabled] = useState<boolean>(false);
+  const [customAmount, setCustomAmount] = useState<string>('');
+  const [adjustmentReason, setAdjustmentReason] = useState<string>('');
 
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
   const [paymentStatus, setPaymentStatus] = useState<'pay_now' | 'in_debt'>('pay_now');
@@ -241,42 +246,73 @@ export default function ClientCardScreen() {
     return { months, dailyRate, startDate, endDate, totalDays, price30, totalPrice, paidUntil };
   }, [monthlyMonths, monthlyStartDate, paymentMethod, tariffs]);
 
-  const checkInPaymentAmount = useMemo(() => {
+  const baseCheckInPaymentAmount = useMemo(() => {
     if (checkInCarId && hasActiveSubscription(checkInCarId)) return 0;
+    if (checkInTariffType === 'lombard') {
+      const d = Math.max(1, parseInt(payDays, 10) || 1);
+      return tariffs.lombardRate * d;
+    }
     if (checkInServiceType === 'onetime') {
       const d = Math.max(1, parseInt(payDays, 10) || 1);
       return paymentMethod === 'cash' ? tariffs.onetimeCash * d : tariffs.onetimeCard * d;
     }
     return monthlyCalc.totalPrice;
-  }, [checkInCarId, checkInServiceType, payDays, paymentMethod, tariffs, monthlyCalc, hasActiveSubscription]);
+  }, [checkInCarId, checkInServiceType, checkInTariffType, payDays, paymentMethod, tariffs, monthlyCalc, hasActiveSubscription]);
 
-  const buildCheckInPayment = useCallback((): { method: PaymentMethod; amount: number; days?: number; paidUntilDate?: string } | undefined => {
+  const checkInPaymentAmount = useMemo(() => {
+    if (customAmountEnabled && customAmount.trim()) {
+      const parsed = Number(customAmount);
+      if (!isNaN(parsed) && parsed >= 0) return roundMoney(parsed);
+    }
+    return baseCheckInPaymentAmount;
+  }, [customAmountEnabled, customAmount, baseCheckInPaymentAmount]);
+
+  const checkInAdjustmentDiff = useMemo(() => {
+    if (!customAmountEnabled || checkInPaymentAmount === baseCheckInPaymentAmount) return 0;
+    return roundMoney(baseCheckInPaymentAmount - checkInPaymentAmount);
+  }, [customAmountEnabled, checkInPaymentAmount, baseCheckInPaymentAmount]);
+
+  const buildCheckInPayment = useCallback((): { method: PaymentMethod; amount: number; days?: number; paidUntilDate?: string; baseAmount?: number; adjustmentReason?: string } | undefined => {
+    if (checkInTariffType === 'lombard') return undefined;
     if (paymentStatus !== 'pay_now' || checkInPaymentAmount <= 0) return undefined;
+    const hasAdjustment = customAmountEnabled && checkInAdjustmentDiff !== 0;
+    const base: any = { method: paymentMethod, amount: checkInPaymentAmount };
+    if (hasAdjustment) {
+      base.baseAmount = baseCheckInPaymentAmount;
+      base.adjustmentReason = adjustmentReason.trim() || 'Договорная сумма';
+    }
     if (checkInServiceType === 'onetime') {
       const d = Math.max(1, parseInt(payDays, 10) || 1);
-      return { method: paymentMethod, amount: checkInPaymentAmount, days: d };
+      return { ...base, days: d };
     }
-    return { method: paymentMethod, amount: checkInPaymentAmount, paidUntilDate: monthlyCalc.paidUntil };
-  }, [paymentStatus, checkInPaymentAmount, paymentMethod, checkInServiceType, payDays, monthlyCalc]);
+    return { ...base, paidUntilDate: monthlyCalc.paidUntil };
+  }, [paymentStatus, checkInPaymentAmount, paymentMethod, checkInServiceType, checkInTariffType, payDays, monthlyCalc, customAmountEnabled, checkInAdjustmentDiff, baseCheckInPaymentAmount, adjustmentReason]);
 
   const buildCheckInDebt = useCallback((): { amount: number; description?: string } | undefined => {
+    if (checkInTariffType === 'lombard') {
+      return { amount: tariffs.lombardRate, description: `Ломбард: ${tariffs.lombardRate} ₽/сут.` };
+    }
     if (paymentStatus !== 'in_debt' || checkInPaymentAmount <= 0) return undefined;
     const desc = checkInServiceType === 'onetime'
       ? `Вторичная постановка без оплаты: ${Math.max(1, parseInt(payDays, 10) || 1)} сут. × ${paymentMethod === 'cash' ? tariffs.onetimeCash : tariffs.onetimeCard} ₽`
       : `Вторичная постановка, месяц без оплаты: ${checkInPaymentAmount} ₽`;
     return { amount: checkInPaymentAmount, description: desc };
-  }, [paymentStatus, checkInPaymentAmount, checkInServiceType, payDays, paymentMethod, tariffs]);
+  }, [paymentStatus, checkInPaymentAmount, checkInServiceType, checkInTariffType, payDays, paymentMethod, tariffs]);
 
   const resetCheckInForm = useCallback(() => {
     setShowCheckInForm(false);
     setCheckInCarId('');
     setCheckInServiceType('onetime');
+    setCheckInTariffType('standard');
     setCheckInPlannedDeparture('');
     setPaymentMethod('cash');
     setPaymentStatus('pay_now');
     setPayDays('1');
     setMonthlyMonths('1');
     setMonthlyStartDate(toDateString(new Date()));
+    setCustomAmountEnabled(false);
+    setCustomAmount('');
+    setAdjustmentReason('');
   }, []);
 
   const handleCheckIn = useCallback(() => {
@@ -291,17 +327,18 @@ export default function ClientCardScreen() {
     if (!clientId) return;
     const car = clientCars.find(c => c.id === checkInCarId);
     const carHasActiveSub = hasActiveSubscription(checkInCarId);
-    const finalServiceType: ServiceType = carHasActiveSub ? 'monthly' : checkInServiceType;
-    const payment = carHasActiveSub ? undefined : buildCheckInPayment();
+    const isLombard = checkInTariffType === 'lombard';
+    const finalServiceType: ServiceType = isLombard ? 'lombard' : (carHasActiveSub ? 'monthly' : checkInServiceType);
+    const payment = (carHasActiveSub || isLombard) ? undefined : buildCheckInPayment();
     const debt = carHasActiveSub ? undefined : buildCheckInDebt();
-    checkIn(checkInCarId, clientId, finalServiceType, checkInPlannedDeparture.trim() || undefined, payment, debt, true);
-    const label = carHasActiveSub ? 'месяц, абонемент активен' : (finalServiceType === 'monthly' ? 'месяц' : 'разово');
+    checkIn(checkInCarId, clientId, finalServiceType, checkInPlannedDeparture.trim() || undefined, payment, debt, true, isLombard);
+    const label = isLombard ? 'ломбард' : (carHasActiveSub ? 'месяц, абонемент активен' : (finalServiceType === 'monthly' ? 'месяц' : 'разово'));
     const payLabel = payment ? `\nОплата: ${payment.amount} ₽` : '';
-    const debtLabel = debt ? `\nВ долг: ${debt.amount} ₽` : '';
+    const debtLabel = isLombard ? `\nЛомбард: ${tariffs.lombardRate} ₽/сут.` : (debt ? `\nВ долг: ${debt.amount} ₽` : '');
     Alert.alert('Готово', `Въезд зафиксирован: ${car?.plateNumber ?? ''} (${label})${payLabel}${debtLabel}`);
     resetCheckInForm();
-    console.log(`[ClientCard] Secondary check-in: ${car?.plateNumber}, payment=${payment?.amount ?? 0}, debt=${debt?.amount ?? 0}`);
-  }, [checkInCarId, clientId, clientCars, checkInServiceType, checkIn, hasActiveSubscription, shiftRequired, checkInPlannedDeparture, buildCheckInPayment, buildCheckInDebt, resetCheckInForm, isAdmin]);
+    console.log(`[ClientCard] Secondary check-in: ${car?.plateNumber}, lombard=${isLombard}, payment=${payment?.amount ?? 0}, debt=${debt?.amount ?? 0}`);
+  }, [checkInCarId, clientId, clientCars, checkInServiceType, checkInTariffType, checkIn, hasActiveSubscription, shiftRequired, checkInPlannedDeparture, buildCheckInPayment, buildCheckInDebt, resetCheckInForm, isAdmin, tariffs]);
 
   const handleCheckOut = useCallback((sessionId: string) => {
     if (!isAdmin && shiftRequired) {
@@ -739,40 +776,72 @@ export default function ClientCardScreen() {
                 <TouchableOpacity
                   style={[
                     styles.serviceTypeItem,
-                    checkInServiceType === 'onetime' && styles.serviceTypeItemActiveOnetime,
+                    checkInTariffType === 'standard' && checkInServiceType === 'onetime' && styles.serviceTypeItemActiveOnetime,
                   ]}
-                  onPress={() => setCheckInServiceType('onetime')}
+                  onPress={() => { setCheckInTariffType('standard'); setCheckInServiceType('onetime'); setPaymentStatus('pay_now'); }}
                   activeOpacity={0.7}
                 >
                   <Text style={[
                     styles.serviceTypeText,
-                    checkInServiceType === 'onetime' && styles.serviceTypeTextActive,
+                    checkInTariffType === 'standard' && checkInServiceType === 'onetime' && styles.serviceTypeTextActive,
                   ]}>Разово</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[
                     styles.serviceTypeItem,
-                    checkInServiceType === 'monthly' && styles.serviceTypeItemActiveMonthly,
+                    checkInTariffType === 'standard' && checkInServiceType === 'monthly' && styles.serviceTypeItemActiveMonthly,
                   ]}
-                  onPress={() => setCheckInServiceType('monthly')}
+                  onPress={() => { setCheckInTariffType('standard'); setCheckInServiceType('monthly'); setPaymentStatus('pay_now'); }}
                   activeOpacity={0.7}
                 >
                   <Text style={[
                     styles.serviceTypeText,
-                    checkInServiceType === 'monthly' && styles.serviceTypeTextActive,
+                    checkInTariffType === 'standard' && checkInServiceType === 'monthly' && styles.serviceTypeTextActive,
                   ]}>Месяц</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.serviceTypeItem,
+                    checkInTariffType === 'lombard' && styles.serviceTypeItemActiveLombard,
+                  ]}
+                  onPress={() => { setCheckInTariffType('lombard'); setCheckInServiceType('lombard'); setPaymentStatus('in_debt'); }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[
+                    styles.serviceTypeText,
+                    checkInTariffType === 'lombard' && styles.serviceTypeTextActiveLombard,
+                  ]}>Ломбард</Text>
                 </TouchableOpacity>
               </View>
 
-              <View style={styles.tariffHintBlock}>
-                <Text style={styles.tariffHintText}>
-                  {checkInServiceType === 'onetime'
+              <View style={checkInTariffType === 'lombard' ? styles.tariffHintBlockLombard : styles.tariffHintBlock}>
+                <Text style={checkInTariffType === 'lombard' ? styles.tariffHintTextLombard : styles.tariffHintText}>
+                  {checkInTariffType === 'lombard'
+                    ? `Ломбард: ${tariffs.lombardRate} ₽/сутки, начисление с первого дня`
+                    : checkInServiceType === 'onetime'
                     ? `Тариф: ${tariffs.onetimeCash} ₽/сут. (нал.) / ${tariffs.onetimeCard} ₽/сут. (безнал.)`
                     : `Тариф: ${tariffs.monthlyCash} ₽/день (нал.) / ${tariffs.monthlyCard} ₽/день (безнал.) — мес. ${getMonthlyAmount(tariffs.monthlyCash)} / ${getMonthlyAmount(tariffs.monthlyCard)} ₽`
                   }
                 </Text>
+                {checkInTariffType === 'lombard' && (
+                  <Text style={styles.tariffHintSubLombard}>
+                    Оплата только при выезде или отдельной оплатой долга. Долг формируется автоматически.
+                  </Text>
+                )}
               </View>
 
+              {checkInTariffType === 'lombard' ? (
+                <View style={styles.lombardNoticeBlock}>
+                  <AlertTriangle size={16} color="#b45309" />
+                  <View style={styles.lombardNoticeContent}>
+                    <Text style={styles.lombardNoticeTitle}>Тариф «Ломбард»</Text>
+                    <Text style={styles.lombardNoticeText}>
+                      Долг начисляется автоматически: {tariffs.lombardRate} ₽/сутки с первого дня.
+                      Оплата недоступна при постановке.
+                    </Text>
+                  </View>
+                </View>
+              ) : (
               <View style={styles.paymentBlock}>
                 <Text style={styles.payBlockLabel}>Способ оплаты</Text>
                 <View style={styles.methodRow}>
@@ -907,6 +976,56 @@ export default function ClientCardScreen() {
                   </View>
                 )}
 
+                <TouchableOpacity
+                  style={styles.adjustToggleRow}
+                  onPress={() => {
+                    setCustomAmountEnabled(!customAmountEnabled);
+                    if (!customAmountEnabled) {
+                      setCustomAmount(String(baseCheckInPaymentAmount));
+                    } else {
+                      setCustomAmount('');
+                      setAdjustmentReason('');
+                    }
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.adjustCheckbox, customAmountEnabled && styles.adjustCheckboxActive]}>
+                    {customAmountEnabled && <Check size={12} color={Colors.white} />}
+                  </View>
+                  <Text style={styles.adjustToggleText}>Скорректировать сумму</Text>
+                </TouchableOpacity>
+
+                {customAmountEnabled && (
+                  <View style={styles.adjustBlock}>
+                    <Text style={styles.payBlockLabel}>Итоговая сумма (₽)</Text>
+                    <TextInput
+                      style={styles.adjustInput}
+                      value={customAmount}
+                      onChangeText={(t) => setCustomAmount(t.replace(/[^0-9.,]/g, ''))}
+                      keyboardType="numeric"
+                      placeholder={String(baseCheckInPaymentAmount)}
+                      placeholderTextColor={Colors.textMuted}
+                      testID="client-custom-amount-input"
+                    />
+                    {checkInAdjustmentDiff !== 0 && (
+                      <View style={[styles.adjustDiffBadge, checkInAdjustmentDiff > 0 ? styles.adjustDiffDiscount : styles.adjustDiffSurcharge]}>
+                        <Text style={[styles.adjustDiffText, checkInAdjustmentDiff > 0 ? styles.adjustDiffTextDiscount : styles.adjustDiffTextSurcharge]}>
+                          {checkInAdjustmentDiff > 0 ? `Скидка: −${checkInAdjustmentDiff} ₽` : `Наценка: +${Math.abs(checkInAdjustmentDiff)} ₽`}
+                        </Text>
+                      </View>
+                    )}
+                    <Text style={styles.payBlockLabel}>Причина корректировки</Text>
+                    <TextInput
+                      style={styles.adjustInput}
+                      value={adjustmentReason}
+                      onChangeText={setAdjustmentReason}
+                      placeholder="Напр.: договорная цена, скидка постоянному клиенту..."
+                      placeholderTextColor={Colors.textMuted}
+                      testID="client-adjustment-reason-input"
+                    />
+                  </View>
+                )}
+
                 {checkInServiceType === 'onetime' && paymentStatus === 'pay_now' && (
                   <Text style={styles.payHint}>
                     Если клиент задержится дольше, разница будет начислена как долг при выезде.
@@ -918,6 +1037,7 @@ export default function ClientCardScreen() {
                   </Text>
                 )}
               </View>
+              )}
             </>
           )}
 
@@ -943,6 +1063,8 @@ export default function ClientCardScreen() {
               <Text style={styles.checkInConfirmText}>
                 {hasActiveSubscription(checkInCarId)
                   ? 'Зафиксировать въезд'
+                  : checkInTariffType === 'lombard'
+                  ? `Заезд (ломбард ${tariffs.lombardRate} ₽/сут.)`
                   : paymentStatus === 'pay_now' && checkInPaymentAmount > 0
                   ? `Заезд + оплата ${checkInPaymentAmount} ₽`
                   : paymentStatus === 'in_debt' && checkInPaymentAmount > 0
@@ -1945,10 +2067,117 @@ const styles = StyleSheet.create({
     padding: 10,
     marginBottom: 12,
   },
+  tariffHintBlockLombard: {
+    backgroundColor: '#fef3c7',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#b4530930',
+  },
   tariffHintText: {
     fontSize: 12,
     fontWeight: '600' as const,
     color: Colors.warning,
+  },
+  tariffHintTextLombard: {
+    fontSize: 12,
+    fontWeight: '600' as const,
+    color: '#b45309',
+  },
+  tariffHintSubLombard: {
+    fontSize: 11,
+    color: '#b45309',
+    marginTop: 4,
+    opacity: 0.8,
+  },
+  lombardNoticeBlock: {
+    flexDirection: 'row' as const,
+    alignItems: 'flex-start' as const,
+    gap: 10,
+    backgroundColor: '#fef3c7',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#b4530930',
+  },
+  lombardNoticeContent: {
+    flex: 1,
+  },
+  lombardNoticeTitle: {
+    fontSize: 14,
+    fontWeight: '700' as const,
+    color: '#b45309',
+    marginBottom: 4,
+  },
+  lombardNoticeText: {
+    fontSize: 13,
+    color: '#92400e',
+    lineHeight: 18,
+  },
+  adjustToggleRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 10,
+    marginTop: 14,
+    paddingVertical: 6,
+  },
+  adjustCheckbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: Colors.border,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    backgroundColor: Colors.inputBg,
+  },
+  adjustCheckboxActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  adjustToggleText: {
+    fontSize: 13,
+    fontWeight: '600' as const,
+    color: Colors.textSecondary,
+  },
+  adjustBlock: {
+    marginTop: 8,
+  },
+  adjustInput: {
+    backgroundColor: Colors.inputBg,
+    borderRadius: 10,
+    height: 42,
+    paddingHorizontal: 14,
+    fontSize: 14,
+    color: Colors.text,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  adjustDiffBadge: {
+    alignSelf: 'flex-start' as const,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+    marginTop: 6,
+    marginBottom: 6,
+  },
+  adjustDiffDiscount: {
+    backgroundColor: Colors.successLight,
+  },
+  adjustDiffSurcharge: {
+    backgroundColor: Colors.dangerLight,
+  },
+  adjustDiffText: {
+    fontSize: 12,
+    fontWeight: '600' as const,
+  },
+  adjustDiffTextDiscount: {
+    color: Colors.success,
+  },
+  adjustDiffTextSurcharge: {
+    color: Colors.danger,
   },
   paymentBlock: {
     borderRadius: 12,
@@ -2155,6 +2384,10 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.successLight,
     borderColor: Colors.success,
   },
+  serviceTypeItemActiveLombard: {
+    backgroundColor: '#fef3c7',
+    borderColor: '#b45309',
+  },
   serviceTypeText: {
     fontSize: 14,
     fontWeight: '600' as const,
@@ -2162,6 +2395,10 @@ const styles = StyleSheet.create({
   },
   serviceTypeTextActive: {
     color: Colors.text,
+  },
+  serviceTypeTextActiveLombard: {
+    color: '#b45309',
+    fontWeight: '700' as const,
   },
   checkInActions: {
     flexDirection: 'row',
