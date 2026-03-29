@@ -436,7 +436,7 @@ export default function CashRegisterScreen() {
                   <Text style={styles.noShiftDesc}>
                     {isAdmin
                       ? 'Вы можете работать без смены или открыть свою смену для учёта'
-                      : 'Откройте смену для начала работы с кассой'}
+                      : 'Откройте смену для начала работы с кассой. Менеджер работает только с наличными — безнал автоматически идёт в финансы администратора.'}
                   </Text>
                   <TouchableOpacity style={styles.openShiftBtn} onPress={handleOpenShift} activeOpacity={0.7}>
                     <PlayCircle size={20} color={Colors.white} />
@@ -460,7 +460,7 @@ export default function CashRegisterScreen() {
                       activeOpacity={0.7}
                     >
                       <DollarSign size={18} color={Colors.white} />
-                      <Text style={styles.withdrawBtnText}>Снять деньги из кассы</Text>
+                      <Text style={styles.withdrawBtnText}>Снять наличные → админ</Text>
                     </TouchableOpacity>
                   </View>
                 )}
@@ -490,7 +490,7 @@ export default function CashRegisterScreen() {
                     <View style={styles.shiftStatusBadge}>
                       <View style={styles.shiftStatusDot} />
                       <Text style={styles.shiftStatusText}>
-                        {isAdmin ? 'Смена администратора' : 'Смена открыта'}
+                        {isAdmin ? 'Смена администратора' : 'Касса менеджера (наличные)'}
                       </Text>
                     </View>
                   </View>
@@ -509,13 +509,13 @@ export default function CashRegisterScreen() {
 
                 <View style={styles.shiftStatsRow}>
                   <View style={[styles.shiftStatCard, { borderLeftColor: Colors.success }]}>
-                    <Text style={styles.shiftStatLabel}>Наличные</Text>
+                    <Text style={styles.shiftStatLabel}>Наличные (в кассе)</Text>
                     <Text style={[styles.shiftStatValue, { color: Colors.success }]}>
                       {shiftCashIncome(activeShift)} ₽
                     </Text>
                   </View>
                   <View style={[styles.shiftStatCard, { borderLeftColor: Colors.info }]}>
-                    <Text style={styles.shiftStatLabel}>Безнал</Text>
+                    <Text style={styles.shiftStatLabel}>Безнал → админ</Text>
                     <Text style={[styles.shiftStatValue, { color: Colors.info }]}>
                       {shiftCardIncome(activeShift)} ₽
                     </Text>
@@ -524,13 +524,13 @@ export default function CashRegisterScreen() {
 
                 <View style={styles.shiftStatsRow}>
                   <View style={[styles.shiftStatCard, { borderLeftColor: Colors.danger }]}>
-                    <Text style={styles.shiftStatLabel}>Расходы</Text>
+                    <Text style={styles.shiftStatLabel}>Расходы (нал)</Text>
                     <Text style={[styles.shiftStatValue, { color: Colors.danger }]}>
                       {shiftExpenseTotal(activeShift.id)} ₽
                     </Text>
                   </View>
                   <View style={[styles.shiftStatCard, { borderLeftColor: Colors.warning }]}>
-                    <Text style={styles.shiftStatLabel}>Снято</Text>
+                    <Text style={styles.shiftStatLabel}>Снято → админ</Text>
                     <Text style={[styles.shiftStatValue, { color: Colors.warning }]}>
                       {shiftWithdrawalTotal(activeShift.id)} ₽
                     </Text>
@@ -538,11 +538,19 @@ export default function CashRegisterScreen() {
                 </View>
 
                 <View style={[styles.shiftStatCard, { borderLeftColor: Colors.primary, marginBottom: 12 }]}>
-                  <Text style={styles.shiftStatLabel}>В кассе (расч.)</Text>
+                  <Text style={styles.shiftStatLabel}>Остаток наличных в кассе</Text>
                   <Text style={[styles.shiftStatValue, { color: Colors.primary }]}>
                     {activeShift.carryOver + shiftCashIncome(activeShift) - shiftExpenseTotal(activeShift.id) - shiftWithdrawalTotal(activeShift.id)} ₽
                   </Text>
                 </View>
+
+                {shiftCardIncome(activeShift) > 0 && (
+                  <View style={styles.transitInfoCard}>
+                    <Text style={styles.transitInfoText}>
+                      💳 Безнал {shiftCardIncome(activeShift)} ₽ принят за смену и автоматически зачислен в финансы администратора
+                    </Text>
+                  </View>
+                )}
 
                 {shiftExpenses(activeShift.id).length > 0 && (
                   <>
@@ -597,7 +605,7 @@ export default function CashRegisterScreen() {
                       activeOpacity={0.7}
                     >
                       <DollarSign size={18} color={Colors.white} />
-                      <Text style={styles.withdrawBtnText}>Снять деньги из кассы</Text>
+                      <Text style={styles.withdrawBtnText}>Снять наличные → админ</Text>
                     </TouchableOpacity>
                   )}
 
@@ -1005,6 +1013,13 @@ export default function CashRegisterScreen() {
                   {!isAdmin && (
                     <View style={styles.logoutNotice}>
                       <Text style={styles.logoutNoticeText}>После закрытия смены произойдёт выход из аккаунта</Text>
+                    </View>
+                  )}
+                  {!isAdmin && activeShift && (
+                    <View style={styles.handoverNotice}>
+                      <Text style={styles.handoverNoticeText}>
+                        📦 Наличные будут переданы следующему менеджеру как остаток с предыдущей смены
+                      </Text>
                     </View>
                   )}
                   {activeShift && (
@@ -1658,6 +1673,31 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     fontStyle: 'italic',
     marginTop: 4,
+  },
+  handoverNotice: {
+    backgroundColor: Colors.successLight,
+    padding: 10,
+    borderRadius: 8,
+    marginTop: 4,
+  },
+  handoverNoticeText: {
+    fontSize: 12,
+    color: Colors.success,
+    fontWeight: '500' as const,
+    lineHeight: 18,
+  },
+  transitInfoCard: {
+    backgroundColor: Colors.infoLight,
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: Colors.info + '30',
+  },
+  transitInfoText: {
+    fontSize: 12,
+    color: Colors.info,
+    lineHeight: 18,
   },
   logoutNotice: {
     backgroundColor: Colors.warningLight,

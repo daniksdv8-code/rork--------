@@ -44,6 +44,7 @@ export default function FinanceScreen() {
     addExpenseCategory, updateExpenseCategory, deleteExpenseCategory,
     getManagerCategories, getAdminCategories,
     getManagerCashRegister, getAdminCashRegister,
+    getAdminFinanceBalance, salaryAdvances, salaryPayments,
   } = useParking();
 
   const [tab, setTab] = useState<FinanceTab>('dashboard');
@@ -73,6 +74,14 @@ export default function FinanceScreen() {
     () => getAdminCashRegister(periodDates.from, periodDates.to),
     [getAdminCashRegister, periodDates]
   );
+  const adminFinBal = useMemo(() => getAdminFinanceBalance(), [getAdminFinanceBalance]);
+
+  const salaryStats = useMemo(() => {
+    const totalAdvances = salaryAdvances.reduce((s, a) => s + a.amount, 0);
+    const totalRemaining = salaryAdvances.filter(a => a.remainingAmount > 0).reduce((s, a) => s + a.remainingAmount, 0);
+    const totalSalaryPaid = salaryPayments.reduce((s, p) => s + p.netPaid, 0);
+    return { totalAdvances, totalRemaining, totalSalaryPaid };
+  }, [salaryAdvances, salaryPayments]);
 
   const handleWithdraw = useCallback(() => {
     const amount = Number(withdrawAmount);
@@ -366,25 +375,52 @@ export default function FinanceScreen() {
                 <View style={[styles.registerIcon, { backgroundColor: '#EBF2FC' }]}>
                   <Wallet size={20} color={Colors.info} />
                 </View>
-                <Text style={styles.registerCardTitle}>Касса Администратора</Text>
+                <Text style={styles.registerCardTitle}>Финансы администратора</Text>
               </View>
-              <Text style={styles.registerBalance}>{fmtAmount(adminReg.balance)} ₽</Text>
+              <Text style={styles.registerBalance}>{fmtAmount(adminFinBal.total)} ₽</Text>
+              <View style={styles.finSplitRow}>
+                <View style={styles.finSplitItem}>
+                  <Banknote size={14} color={Colors.success} />
+                  <Text style={styles.finSplitLabel}>Наличные</Text>
+                  <Text style={[styles.finSplitValue, { color: Colors.success }]}>{fmtAmount(adminFinBal.cash)} ₽</Text>
+                </View>
+                <View style={styles.finSplitItem}>
+                  <CreditCard size={14} color={Colors.info} />
+                  <Text style={styles.finSplitLabel}>Безнал</Text>
+                  <Text style={[styles.finSplitValue, { color: Colors.info }]}>{fmtAmount(adminFinBal.card)} ₽</Text>
+                </View>
+              </View>
+              <View style={styles.finDivider} />
               <View style={styles.registerBreakdown}>
                 <View style={styles.registerBreakdownItem}>
                   <ArrowDownCircle size={14} color={Colors.success} />
-                  <Text style={styles.registerBreakdownLabel}>Безнал</Text>
+                  <Text style={styles.registerBreakdownLabel}>Безнал от клиентов</Text>
                   <Text style={[styles.registerBreakdownValue, { color: Colors.success }]}>+{fmtAmount(adminReg.cardIncome)}</Text>
                 </View>
                 <View style={styles.registerBreakdownItem}>
                   <ArrowDownCircle size={14} color={Colors.info} />
-                  <Text style={styles.registerBreakdownLabel}>Нал со снятий</Text>
+                  <Text style={styles.registerBreakdownLabel}>Нал (снятия менеджеров)</Text>
                   <Text style={[styles.registerBreakdownValue, { color: Colors.info }]}>+{fmtAmount(adminReg.cashFromManager)}</Text>
                 </View>
                 <View style={styles.registerBreakdownItem}>
                   <ArrowUpCircle size={14} color={Colors.danger} />
-                  <Text style={styles.registerBreakdownLabel}>Расходы</Text>
+                  <Text style={styles.registerBreakdownLabel}>Расходы админа</Text>
                   <Text style={[styles.registerBreakdownValue, { color: Colors.danger }]}>-{fmtAmount(adminReg.totalAdminExpenses)}</Text>
                 </View>
+                {salaryStats.totalAdvances > 0 && (
+                  <View style={styles.registerBreakdownItem}>
+                    <ArrowUpCircle size={14} color="#7C3AED" />
+                    <Text style={styles.registerBreakdownLabel}>Долги под ЗП</Text>
+                    <Text style={[styles.registerBreakdownValue, { color: '#7C3AED' }]}>-{fmtAmount(salaryStats.totalAdvances)}</Text>
+                  </View>
+                )}
+                {salaryStats.totalSalaryPaid > 0 && (
+                  <View style={styles.registerBreakdownItem}>
+                    <ArrowUpCircle size={14} color="#7C3AED" />
+                    <Text style={styles.registerBreakdownLabel}>Выплаты ЗП</Text>
+                    <Text style={[styles.registerBreakdownValue, { color: '#7C3AED' }]}>-{fmtAmount(salaryStats.totalSalaryPaid)}</Text>
+                  </View>
+                )}
               </View>
             </View>
 
@@ -393,26 +429,32 @@ export default function FinanceScreen() {
                 <View style={[styles.registerIcon, { backgroundColor: Colors.successLight }]}>
                   <Banknote size={20} color={Colors.success} />
                 </View>
-                <Text style={styles.registerCardTitle}>Касса Менеджера</Text>
+                <Text style={styles.registerCardTitle}>Касса менеджера (наличные)</Text>
               </View>
               <Text style={styles.registerBalance}>{fmtAmount(managerReg.balance)} ₽</Text>
               <View style={styles.registerBreakdown}>
                 <View style={styles.registerBreakdownItem}>
                   <ArrowDownCircle size={14} color={Colors.success} />
-                  <Text style={styles.registerBreakdownLabel}>Наличные</Text>
+                  <Text style={styles.registerBreakdownLabel}>Наличные от клиентов</Text>
                   <Text style={[styles.registerBreakdownValue, { color: Colors.success }]}>+{fmtAmount(managerReg.cashIncome)}</Text>
                 </View>
                 <View style={styles.registerBreakdownItem}>
                   <ArrowUpCircle size={14} color={Colors.danger} />
-                  <Text style={styles.registerBreakdownLabel}>Расходы</Text>
+                  <Text style={styles.registerBreakdownLabel}>Расходы менеджера</Text>
                   <Text style={[styles.registerBreakdownValue, { color: Colors.danger }]}>-{fmtAmount(managerReg.totalExpenses)}</Text>
                 </View>
                 <View style={styles.registerBreakdownItem}>
                   <ArrowUpCircle size={14} color={Colors.warning} />
-                  <Text style={styles.registerBreakdownLabel}>Снято админом</Text>
+                  <Text style={styles.registerBreakdownLabel}>Снято админом → финансы</Text>
                   <Text style={[styles.registerBreakdownValue, { color: Colors.warning }]}>-{fmtAmount(managerReg.totalWithdrawals)}</Text>
                 </View>
               </View>
+              {managerReg.cardIncome > 0 && (
+                <View style={styles.transitNote}>
+                  <CreditCard size={12} color={Colors.info} />
+                  <Text style={styles.transitNoteText}>Безнал {fmtAmount(managerReg.cardIncome)} ₽ → финансы администратора</Text>
+                </View>
+              )}
             </View>
 
             <View style={styles.totalCard}>
@@ -1037,6 +1079,50 @@ const styles = StyleSheet.create({
   registerBreakdownValue: {
     fontSize: 14,
     fontWeight: '600' as const,
+  },
+  finSplitRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 8,
+  },
+  finSplitItem: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: Colors.inputBg,
+    borderRadius: 10,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  finSplitLabel: {
+    flex: 1,
+    fontSize: 12,
+    color: Colors.textSecondary,
+  },
+  finSplitValue: {
+    fontSize: 14,
+    fontWeight: '700' as const,
+  },
+  finDivider: {
+    height: 1,
+    backgroundColor: Colors.border,
+    marginVertical: 10,
+  },
+  transitNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
+  transitNoteText: {
+    fontSize: 12,
+    color: Colors.info,
+    fontStyle: 'italic' as const,
   },
   totalCard: {
     backgroundColor: Colors.primary,

@@ -3500,16 +3500,36 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     console.log('[Reset] All data has been reset. Admin accounts preserved.');
   }, [users, currentUser, schedulePush, utils]);
 
+  const getAdminFinanceBalance = useCallback((): { cash: number; card: number; total: number } => {
+    const allCardIncome = roundMoney(
+      transactions.filter(t => (t.type === 'payment' || t.type === 'debt_payment') && t.amount > 0 && t.method === 'card')
+        .reduce((s, t) => s + t.amount, 0)
+      - transactions.filter(t => t.type === 'cancel_payment' && t.method === 'card').reduce((s, t) => s + t.amount, 0)
+      - transactions.filter(t => t.type === 'refund' && t.method === 'card').reduce((s, t) => s + t.amount, 0)
+    );
+    const cashFromManagers = roundMoney(withdrawals.reduce((s, w) => s + w.amount, 0));
+    const _totalAdminExp = roundMoney(adminExpenses.reduce((s, e) => s + e.amount, 0));
+    const salaryAdvanceTotal = roundMoney(
+      salaryAdvances.reduce((s, a) => s + a.amount, 0)
+    );
+    const salaryPayTotal = roundMoney(
+      salaryPayments.filter(p => p.netPaid > 0).reduce((s, p) => s + p.netPaid, 0)
+    );
+    const cashBalance = roundMoney(cashFromManagers - adminExpenses.filter(e => e.method === 'cash').reduce((s, e) => s + e.amount, 0) - salaryAdvanceTotal - salaryPayTotal);
+    const cardBalance = roundMoney(allCardIncome - adminExpenses.filter(e => e.method === 'card').reduce((s, e) => s + e.amount, 0));
+    return { cash: cashBalance, card: cardBalance, total: roundMoney(cashBalance + cardBalance) };
+  }, [transactions, withdrawals, adminExpenses, salaryAdvances, salaryPayments]);
+
   const issueSalaryAdvance = useCallback((employeeId: string, employeeName: string, amount: number, comment: string, forceNegative?: boolean): { success: boolean; error?: string; wouldGoNegative?: boolean; currentBalance?: number } => {
     if (amount <= 0) return { success: false, error: 'Сумма должна быть больше 0' };
     const now = new Date().toISOString();
-    const activeShift = shifts.find(s => s.status === 'open');
-    const balanceBefore = activeShift ? getShiftCashBalance(activeShift) : 0;
+    const adminFinBal = getAdminFinanceBalance();
+    const balanceBefore = adminFinBal.total;
     const balanceAfter = roundMoney(balanceBefore - amount);
 
     if (balanceAfter < 0 && !forceNegative) {
-      console.log(`[SalaryAdvance] Would go negative: balance=${balanceBefore}, amount=${amount}`);
-      return { success: false, wouldGoNegative: true, currentBalance: balanceBefore, error: `Касса уйдёт в минус! Остаток: ${balanceBefore} ₽, после выдачи: ${balanceAfter} ₽` };
+      console.log(`[SalaryAdvance] Would go negative: adminBalance=${balanceBefore}, amount=${amount}`);
+      return { success: false, wouldGoNegative: true, currentBalance: balanceBefore, error: `Финансы админа уйдут в минус! Остаток: ${balanceBefore} ₽, после выдачи: ${balanceAfter} ₽` };
     }
 
     const advance: SalaryAdvance = {
@@ -3526,9 +3546,18 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     };
     setSalaryAdvances(prev => [advance, ...prev]);
 
-    if (activeShift) {
-      updateShiftExpected(activeShift.id, -amount);
-    }
+    const adminOp: AdminCashOperation = {
+      id: generateId(),
+      type: 'admin_expense',
+      amount,
+      method: 'cash',
+      description: `Долг под ЗП: ${employeeName} — ${amount} ₽${comment ? ` (${comment})` : ''}`,
+      operatorId: currentUser?.id ?? 'unknown',
+      operatorName: currentUser?.name ?? 'Неизвестно',
+      date: now,
+      updatedAt: now,
+    };
+    setAdminCashOperations(prev => [adminOp, ...prev]);
 
     addTransaction({
       clientId: '',
@@ -3537,16 +3566,16 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       amount,
       method: 'cash',
       date: now,
-      description: `Долг под ЗП: ${employeeName} — ${amount} ₽${comment ? ` (${comment})` : ''}`,
+      description: `Долг под ЗП (финансы админа): ${employeeName} — ${amount} ₽${comment ? ` (${comment})` : ''}`,
     });
 
     addCashOperation({
       type: 'salary_advance',
       amount,
       category: 'Долг под ЗП',
-      description: `Выдано в долг под ЗП: ${employeeName} — ${amount} ₽${comment ? ` (${comment})` : ''}`,
+      description: `Выдано в долг под ЗП (из финансов админа): ${employeeName} — ${amount} ₽${comment ? ` (${comment})` : ''}`,
       method: 'cash',
-      shiftId: activeShift?.id ?? null,
+      shiftId: null,
       balanceBefore,
       balanceAfter,
       relatedEntityId: advance.id,
@@ -3554,16 +3583,15 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     });
 
     const negativeNote = balanceAfter < 0 ? ' ⚠️ РАЗРЕШЁН МИНУС (админ)' : '';
-    logAction('salary_advance_issue', 'Выдано в долг под ЗП', `${employeeName}: ${amount} ₽${comment ? `, комментарий: ${comment}` : ''} (баланс: ${balanceBefore} → ${balanceAfter} ₽)${negativeNote}`, advance.id, 'salary_advance');
+    logAction('salary_advance_issue', 'Выдано в долг под ЗП', `${employeeName}: ${amount} ₽${comment ? `, комментарий: ${comment}` : ''} (финансы админа: ${balanceBefore} → ${balanceAfter} ₽)${negativeNote}`, advance.id, 'salary_advance');
     schedulePush();
-    console.log(`[SalaryAdvance] Issued ${amount} to ${employeeName}, id=${advance.id}, balance: ${balanceBefore} → ${balanceAfter}`);
+    console.log(`[SalaryAdvance] Issued ${amount} to ${employeeName} from admin finances, id=${advance.id}, balance: ${balanceBefore} → ${balanceAfter}`);
     return { success: true };
-  }, [currentUser, shifts, getShiftCashBalance, updateShiftExpected, addTransaction, addCashOperation, logAction, schedulePush]);
+  }, [currentUser, getAdminFinanceBalance, addTransaction, addCashOperation, logAction, schedulePush]);
 
   const paySalary = useCallback((employeeId: string, employeeName: string, grossAmount: number, method: PaymentMethod, comment: string, forceNegative?: boolean): { success: boolean; error?: string; wouldGoNegative?: boolean; currentBalance?: number; netPaid?: number } => {
     if (grossAmount <= 0) return { success: false, error: 'Сумма должна быть больше 0' };
     const now = new Date().toISOString();
-    const activeShift = shifts.find(s => s.status === 'open');
 
     const employeeAdvances = salaryAdvances.filter(a => a.employeeId === employeeId && a.remainingAmount > 0)
       .sort((a, b) => new Date(a.issuedAt).getTime() - new Date(b.issuedAt).getTime());
@@ -3572,12 +3600,13 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     const debtDeducted = roundMoney(Math.min(grossAmount, totalDebt));
     const netPaid = roundMoney(grossAmount - debtDeducted);
 
-    if (netPaid > 0 && method === 'cash') {
-      const balanceBefore = activeShift ? getShiftCashBalance(activeShift) : 0;
+    if (netPaid > 0) {
+      const adminFinBal = getAdminFinanceBalance();
+      const balanceBefore = adminFinBal.total;
       const balanceAfter = roundMoney(balanceBefore - netPaid);
       if (balanceAfter < 0 && !forceNegative) {
-        console.log(`[SalaryPayment] Would go negative: balance=${balanceBefore}, netPaid=${netPaid}`);
-        return { success: false, wouldGoNegative: true, currentBalance: balanceBefore, netPaid, error: `Касса уйдёт в минус! Остаток: ${balanceBefore} ₽, к выдаче: ${netPaid} ₽, будет: ${balanceAfter} ₽` };
+        console.log(`[SalaryPayment] Would go negative: adminBalance=${balanceBefore}, netPaid=${netPaid}`);
+        return { success: false, wouldGoNegative: true, currentBalance: balanceBefore, netPaid, error: `Финансы админа уйдут в минус! Остаток: ${balanceBefore} ₽, к выдаче: ${netPaid} ₽, будет: ${balanceAfter} ₽` };
       }
     }
 
@@ -3607,12 +3636,22 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     setSalaryPayments(prev => [salPayment, ...prev]);
 
     if (netPaid > 0) {
-      const balanceBefore = activeShift ? getShiftCashBalance(activeShift) : 0;
-      const balanceAfter = method === 'cash' ? roundMoney(balanceBefore - netPaid) : balanceBefore;
+      const adminFinBal = getAdminFinanceBalance();
+      const balanceBefore = adminFinBal.total;
+      const balanceAfter = roundMoney(balanceBefore - netPaid);
 
-      if (method === 'cash' && activeShift) {
-        updateShiftExpected(activeShift.id, -netPaid);
-      }
+      const adminOp: AdminCashOperation = {
+        id: generateId(),
+        type: 'admin_expense',
+        amount: netPaid,
+        method,
+        description: `Выплата ЗП (финансы админа): ${employeeName} — ${netPaid} ₽ (начислено ${grossAmount} ₽${debtDeducted > 0 ? `, зачтено долга ${debtDeducted} ₽` : ''})`,
+        operatorId: currentUser?.id ?? 'unknown',
+        operatorName: currentUser?.name ?? 'Неизвестно',
+        date: now,
+        updatedAt: now,
+      };
+      setAdminCashOperations(prev => [adminOp, ...prev]);
 
       addTransaction({
         clientId: '',
@@ -3621,16 +3660,16 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         amount: netPaid,
         method,
         date: now,
-        description: `Выплата ЗП: ${employeeName} — ${netPaid} ₽ (начислено ${grossAmount} ₽${debtDeducted > 0 ? `, зачтено долга ${debtDeducted} ₽` : ''})`,
+        description: `Выплата ЗП (финансы админа): ${employeeName} — ${netPaid} ₽ (начислено ${grossAmount} ₽${debtDeducted > 0 ? `, зачтено долга ${debtDeducted} ₽` : ''})`,
       });
 
       addCashOperation({
         type: 'salary_payment',
         amount: netPaid,
         category: 'Выплата зарплаты',
-        description: `Выплата ЗП: ${employeeName} — ${netPaid} ₽ к выдаче (начислено ${grossAmount} ₽${debtDeducted > 0 ? `, зачтено долга ${debtDeducted} ₽` : ''})`,
+        description: `Выплата ЗП (из финансов админа): ${employeeName} — ${netPaid} ₽ к выдаче (начислено ${grossAmount} ₽${debtDeducted > 0 ? `, зачтено долга ${debtDeducted} ₽` : ''})`,
         method,
-        shiftId: activeShift?.id ?? null,
+        shiftId: null,
         balanceBefore,
         balanceAfter,
         relatedEntityId: salPayment.id,
@@ -3643,13 +3682,13 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     }
 
     const payLabel = netPaid > 0
-      ? `${employeeName}: начислено ${grossAmount} ₽${debtDeducted > 0 ? `, зачтено долга ${debtDeducted} ₽` : ''}, к выдаче ${netPaid} ₽ (${method === 'cash' ? 'нал' : 'безнал'})`
+      ? `${employeeName}: начислено ${grossAmount} ₽${debtDeducted > 0 ? `, зачтено долга ${debtDeducted} ₽` : ''}, к выдаче ${netPaid} ₽ (${method === 'cash' ? 'нал' : 'безнал'}) — из финансов админа`
       : `${employeeName}: начислено ${grossAmount} ₽, полностью зачтено в погашение долга ${debtDeducted} ₽`;
     logAction('salary_payment', 'Выплата зарплаты', payLabel, salPayment.id, 'salary_payment');
     schedulePush();
-    console.log(`[SalaryPayment] ${employeeName}: gross=${grossAmount}, debtDeducted=${debtDeducted}, netPaid=${netPaid}`);
+    console.log(`[SalaryPayment] ${employeeName}: gross=${grossAmount}, debtDeducted=${debtDeducted}, netPaid=${netPaid} (from admin finances)`);
     return { success: true, netPaid };
-  }, [currentUser, shifts, salaryAdvances, getShiftCashBalance, updateShiftExpected, addTransaction, addCashOperation, logAction, schedulePush]);
+  }, [currentUser, salaryAdvances, getAdminFinanceBalance, addTransaction, addCashOperation, logAction, schedulePush]);
 
   const getEmployeeSalaryDebt = useCallback((employeeId: string): number => {
     return roundMoney(salaryAdvances.filter(a => a.employeeId === employeeId && a.remainingAmount > 0).reduce((s, a) => s + a.remainingAmount, 0));
@@ -3779,6 +3818,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     paySalary,
     getEmployeeSalaryDebt,
     employeeSalaryDebts,
+    getAdminFinanceBalance,
   }), [
     clients, cars, activeClients, activeCars, isClientDeleted,
     sessions, subscriptions, payments, debts, transactions, tariffs,
@@ -3803,5 +3843,6 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     addManualDebt, deleteManualDebt,
     calculateDebtByMethod,
     salaryAdvances, salaryPayments, issueSalaryAdvance, paySalary, getEmployeeSalaryDebt, employeeSalaryDebts,
+    getAdminFinanceBalance,
   ]);
 });
