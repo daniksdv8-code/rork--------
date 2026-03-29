@@ -15,7 +15,7 @@ type RevenuePeriod = 'day' | 'week' | 'month' | 'quarter' | 'year' | 'all';
 export default function ReportsScreen() {
   const {
     transactions, debtors, expiringSubscriptions, debts, sessions, cars, clients,
-    shifts, expenses, withdrawals,
+    shifts, expenses, withdrawals, clientDebts,
   } = useParking();
   const [tab, setTab] = useState<ReportTab>('revenue');
   const [revenuePeriod, setRevenuePeriod] = useState<RevenuePeriod>('month');
@@ -75,13 +75,8 @@ export default function ReportsScreen() {
     const cashRefunded = refundTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0);
     const cardRefunded = refundTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0);
 
-    const expenseTx = transactions.filter(t =>
-      (t.type === 'manager_expense' || t.type === 'admin_expense') &&
-      (!cutoff || new Date(t.date) >= cutoff)
-    );
-    const totalExpensesTx = expenseTx.reduce((s, t) => s + t.amount, 0);
-
     const filteredExpenses = expenses.filter(e => !cutoff || new Date(e.date) >= cutoff);
+    const totalExpensesAmount = filteredExpenses.reduce((s, e) => s + e.amount, 0);
     const expByCategory: Record<string, { total: number; count: number }> = {};
     for (const e of filteredExpenses) {
       const cat = e.category || 'Прочее';
@@ -94,10 +89,15 @@ export default function ReportsScreen() {
     const cash = cashGross - cashCancelled - cashRefunded;
     const card = cardGross - cardCancelled - cardRefunded;
     const totalRefunds = cashRefunded + cardRefunded;
-    const totalDebtAmount = debts.reduce((s, d) => s + d.remainingAmount, 0);
 
-    return { cash, card, total: cash + card, totalDebtAmount, totalRefunds, totalExpensesTx, expenseCategories };
-  }, [transactions, debts, revenuePeriod, expenses]);
+    const oldDebtTotal = debts.filter(d => d.remainingAmount > 0).reduce((s, d) => s + d.remainingAmount, 0);
+    const clientDebtTotal = clientDebts.reduce((s, cd) => s + cd.totalAmount, 0);
+    const totalDebtAmount = oldDebtTotal + clientDebtTotal;
+    const debtorsCount = debtors.length;
+    const expenseCount = filteredExpenses.length;
+
+    return { cash, card, total: cash + card, totalDebtAmount, debtorsCount, totalRefunds, totalExpensesAmount, expenseCount, expenseCategories };
+  }, [transactions, debts, clientDebts, debtors, revenuePeriod, expenses]);
 
   const vehicleData = useMemo(() => {
     const cutoff = getCutoff(vehiclePeriod);
@@ -291,14 +291,14 @@ export default function ReportsScreen() {
           )}
 
           <View style={[styles.breakdownCard, { borderLeftColor: Colors.danger, marginHorizontal: 0 }]}>
-            <Text style={styles.breakdownLabel}>Неоплаченные долги</Text>
+            <Text style={styles.breakdownLabel}>Неоплаченные долги ({revenueData.debtorsCount} клиент.)</Text>
             <Text style={[styles.breakdownValue, { color: Colors.danger }]}>{revenueData.totalDebtAmount} ₽</Text>
           </View>
 
-          {revenueData.totalExpensesTx > 0 && (
+          {revenueData.totalExpensesAmount > 0 && (
             <View style={[styles.breakdownCard, { borderLeftColor: '#e74c3c', marginHorizontal: 0, marginTop: 8 }]}>
-              <Text style={styles.breakdownLabel}>Расходы за период</Text>
-              <Text style={[styles.breakdownValue, { color: '#e74c3c' }]}>-{revenueData.totalExpensesTx} ₽</Text>
+              <Text style={styles.breakdownLabel}>Расходы за период ({revenueData.expenseCount} опер.)</Text>
+              <Text style={[styles.breakdownValue, { color: '#e74c3c' }]}>-{revenueData.totalExpensesAmount} ₽</Text>
             </View>
           )}
 
