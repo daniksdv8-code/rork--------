@@ -1811,10 +1811,14 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
     const newRemainingTotal = isFullPayment ? 0 : roundMoney(effectiveTotal - actualAmount);
 
+    const resolvedCarId = (clientOldDebts.length > 0 && clientOldDebts[0].carId)
+      ? clientOldDebts[0].carId
+      : (cars.find(c => c.clientId === clientId && !c.deleted)?.id ?? '');
+
     const newPayment: Payment = {
       id: generateId(),
       clientId,
-      carId: '',
+      carId: resolvedCarId,
       amount: actualAmount,
       method,
       date: now,
@@ -1829,7 +1833,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
     addTransaction({
       clientId,
-      carId: '',
+      carId: resolvedCarId,
       type: 'debt_payment',
       amount: actualAmount,
       method,
@@ -1857,7 +1861,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     logAction('debt_payment', 'Погашение долга клиента', `${actualAmount} ₽ (${method === 'cash' ? 'нал' : 'безнал'}), остаток: ${newRemainingTotal > 0 ? newRemainingTotal + ' ₽' : 'полностью'}`, clientId, 'client_debt');
     schedulePush();
     console.log(`[PayClientDebt] FIFO paid ${actualAmount} for client ${clientId}, old debts touched: ${updatedDebtIds.length}, remaining: ${newRemainingTotal}`);
-  }, [debts, clientDebts, currentUser, shifts, addTransaction, updateShiftExpected, logAction, schedulePush, addCashOperation, getShiftCashBalance]);
+  }, [debts, clientDebts, currentUser, shifts, addTransaction, updateShiftExpected, logAction, schedulePush, addCashOperation, getShiftCashBalance, cars]);
 
   const getCashBalance = useCallback((): number => {
     const isUserAdmin = currentUser?.role === 'admin';

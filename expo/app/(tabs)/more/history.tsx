@@ -189,7 +189,10 @@ export default function HistoryScreen() {
 
   const renderItem = useCallback(({ item }: { item: Transaction }) => {
     const client = clients.find(c => c.id === item.clientId);
-    const car = cars.find(c => c.id === item.carId);
+    let car = cars.find(c => c.id === item.carId);
+    if (!car && item.clientId && (item.type === 'debt_payment')) {
+      car = cars.find(c => c.clientId === item.clientId && !c.deleted) ?? cars.find(c => c.clientId === item.clientId);
+    }
     const clientDeleted = item.clientId ? isClientDeleted(item.clientId) : false;
     const { Icon, color, bg } = getTransactionIcon(item.type);
 
