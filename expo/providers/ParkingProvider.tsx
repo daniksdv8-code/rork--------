@@ -1064,17 +1064,30 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       const entryAccruals = dailyDebtAccruals.filter(a => a.parkingEntryId === sessionId);
       const accrualTotal = roundMoney(entryAccruals.reduce((s, a) => s + a.amount, 0));
 
-      setClientDebts(prev => {
-        const existing = prev.find(cd => cd.clientId === session.clientId);
-        if (!existing) return prev;
-        return prev.map(cd => cd.clientId === session.clientId ? {
-          ...cd,
-          frozenAmount: roundMoney(cd.frozenAmount + accrualTotal),
-          activeAmount: roundMoney(Math.max(0, cd.activeAmount - accrualTotal)),
-          frozenDate: now,
-          lastUpdate: now,
-        } : cd);
-      });
+      let newDebtId: string | null = null;
+      if (accrualTotal > 0) {
+        const isLombardSession = session.tariffType === 'lombard' || session.serviceType === 'lombard';
+        const rate = isLombardSession ? (session.lombardRateApplied ?? tariffs.lombardRate) : (session.serviceType === 'monthly' ? tariffs.monthlyCash : tariffs.onetimeCash);
+        const debtId = generateId();
+        newDebtId = debtId;
+        const serviceLabel = isLombardSession ? 'ломбард' : (session.serviceType === 'monthly' ? 'месяц' : 'разово');
+        const newDebt: Debt = {
+          id: debtId,
+          clientId: session.clientId,
+          carId: session.carId,
+          totalAmount: accrualTotal,
+          remainingAmount: accrualTotal,
+          createdAt: now,
+          updatedAt: now,
+          description: `${isLombardSession ? 'Ломбард' : 'Стоянка'}: ${entryAccruals.length} сут. × ${rate} ₽ (${serviceLabel})`,
+          parkingEntryId: sessionId,
+          status: 'active',
+        };
+        setDebts(prev => [...prev, newDebt]);
+        console.log(`[CheckOut] Created Debt record ${debtId} for released session ${sessionId}: ${accrualTotal} ₽`);
+      }
+
+      updateClientDebt(session.clientId, -accrualTotal);
 
       addTransaction({
         clientId: session.clientId,
@@ -1083,14 +1096,14 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         amount: accrualTotal,
         method: null,
         date: now,
-        description: `Выпуск в долг: заморожено ${accrualTotal} ₽ (${entryAccruals.length} дн.)`,
+        description: `Выпуск в долг: ${accrualTotal} ₽ (${entryAccruals.length} дн.)`,
       });
 
       const carF = cars.find(c => c.id === session.carId);
-      logAction('debt_freeze', 'Выпуск авто в долг', `${carF?.plateNumber ?? session.carId}, долг заморожен: ${accrualTotal} ₽`, sessionId, 'session');
+      logAction('debt_freeze', 'Выпуск авто в долг', `${carF?.plateNumber ?? session.carId}, долг: ${accrualTotal} ₽`, sessionId, 'session');
       schedulePush();
-      console.log(`[CheckOut] Debt session released: ${sessionId}, frozen: ${accrualTotal} ₽`);
-      return { debtId: null, amount: accrualTotal, days: entryAccruals.length, paid: 0 };
+      console.log(`[CheckOut] Debt session released: ${sessionId}, debt record: ${accrualTotal} ₽`);
+      return { debtId: newDebtId, amount: accrualTotal, days: entryAccruals.length, paid: 0 };
     }
 
     if (isDebtSession && paymentAtExit) {
@@ -1098,6 +1111,9 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       const accrualTotal = roundMoney(entryAccruals.reduce((s, a) => s + a.amount, 0));
       const paidAmount = Math.min(paymentAtExit.amount, accrualTotal);
       const afterPay = roundMoney(accrualTotal - paidAmount);
+
+      const isLombardSession = session.tariffType === 'lombard' || session.serviceType === 'lombard';
+      const exitServiceType = isLombardSession ? 'lombard' as const : session.serviceType;
 
       setSessions(prev => prev.map(s =>
         s.id === sessionId ? { ...s, exitTime: now, status: (afterPay > 0 ? 'released_debt' : 'completed') as any, updatedAt: now } : s
@@ -1112,7 +1128,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
           amount: paidAmount,
           method: paymentAtExit.method,
           date: now,
-          serviceType: 'onetime',
+          serviceType: exitServiceType,
           operatorId: currentUser?.id ?? 'unknown',
           operatorName: currentUser?.name ?? 'Неизвестно',
           description: payDesc,
@@ -1137,36 +1153,53 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         addCashOperation({
           type: 'income',
           amount: paidAmount,
-          category: 'Оплата долга при выезде',
+          category: isLombardSession ? 'Оплата ломбардного долга при выезде' : 'Оплата долга при выезде',
           description: payDesc,
           method: paymentAtExit.method,
           shiftId: activeShift?.id ?? null,
           balanceBefore: debtExitBalBefore,
           balanceAfter: paymentAtExit.method === 'cash' ? roundMoney(debtExitBalBefore + paidAmount) : debtExitBalBefore,
         });
-
-        updateClientDebt(session.clientId, -paidAmount);
       }
 
+      updateClientDebt(session.clientId, -accrualTotal);
+
+      let newDebtId: string | null = null;
       if (afterPay > 0) {
-        setClientDebts(prev => {
-          const existing = prev.find(cd => cd.clientId === session.clientId);
-          if (!existing) return prev;
-          return prev.map(cd => cd.clientId === session.clientId ? {
-            ...cd,
-            frozenAmount: roundMoney(cd.frozenAmount + afterPay),
-            activeAmount: roundMoney(Math.max(0, cd.activeAmount - afterPay)),
-            frozenDate: now,
-            lastUpdate: now,
-          } : cd);
+        const rate = isLombardSession ? (session.lombardRateApplied ?? tariffs.lombardRate) : (session.serviceType === 'monthly' ? tariffs.monthlyCash : tariffs.onetimeCash);
+        const debtId = generateId();
+        newDebtId = debtId;
+        const serviceLabel = isLombardSession ? 'ломбард' : (session.serviceType === 'monthly' ? 'месяц' : 'разово');
+        const newDebt: Debt = {
+          id: debtId,
+          clientId: session.clientId,
+          carId: session.carId,
+          totalAmount: afterPay,
+          remainingAmount: afterPay,
+          createdAt: now,
+          updatedAt: now,
+          description: `${isLombardSession ? 'Ломбард' : 'Стоянка'}: ${entryAccruals.length} сут. × ${rate} ₽, оплачено ${paidAmount} ₽, остаток ${afterPay} ₽ (${serviceLabel})`,
+          parkingEntryId: sessionId,
+          status: 'active',
+        };
+        setDebts(prev => [...prev, newDebt]);
+        addTransaction({
+          clientId: session.clientId,
+          carId: session.carId,
+          type: 'debt',
+          amount: afterPay,
+          method: null,
+          date: now,
+          description: `Остаток долга после частичной оплаты при выезде: ${afterPay} ₽`,
         });
+        console.log(`[CheckOut] Created Debt record ${debtId} for remaining: ${afterPay} ₽`);
       }
 
       const carD = cars.find(c => c.id === session.carId);
       logAction('checkout', 'Выезд (долговая сессия)', `${carD?.plateNumber ?? session.carId}, начислено ${accrualTotal} ₽, оплачено ${paidAmount} ₽${afterPay > 0 ? `, остаток долга ${afterPay} ₽` : ''}`, sessionId, 'session');
       schedulePush();
       console.log(`[CheckOut] Debt session exit: paid=${paidAmount}, remaining=${afterPay}`);
-      return { debtId: null, amount: afterPay, days: entryAccruals.length, paid: paidAmount };
+      return { debtId: newDebtId, amount: afterPay, days: entryAccruals.length, paid: paidAmount };
     }
 
     const newStatus = releaseInDebt ? 'released_debt' : 'completed';
@@ -2190,7 +2223,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   } => {
     const clientDebtSessions = sessions.filter(s =>
       s.clientId === clientId &&
-      (s.status === 'active_debt' || s.status === 'released_debt') &&
+      s.status === 'active_debt' &&
       !s.cancelled
     );
 

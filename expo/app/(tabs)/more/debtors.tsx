@@ -29,7 +29,7 @@ export default function DebtorsScreen() {
     for (const clientId of clientIds) {
       const clientSessions = sessions.filter(s =>
         s.clientId === clientId &&
-        (s.status === 'active_debt' || s.status === 'released_debt') &&
+        s.status === 'active_debt' &&
         !s.cancelled
       );
 

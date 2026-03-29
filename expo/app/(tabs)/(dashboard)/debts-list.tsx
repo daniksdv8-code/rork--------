@@ -56,8 +56,10 @@ export default function DebtsListScreen() {
       });
     }
 
+    const activeDebtIds = new Set(activeOldDebts.map(d => d.parkingEntryId).filter(Boolean));
+
     const debtSessions = sessions.filter(s =>
-      (s.status === 'active_debt' || s.status === 'released_debt') && !s.cancelled
+      s.status === 'active_debt' && !s.cancelled && !activeDebtIds.has(s.id)
     );
 
     for (const session of debtSessions) {
@@ -78,7 +80,6 @@ export default function DebtsListScreen() {
 
       const days = sessionAccruals.length;
       const amount = roundMoney(days * rate);
-      const isFrozen = session.status === 'released_debt';
       const serviceLabel = isLombard ? 'ломбард' : session.serviceType === 'monthly' ? 'месяц' : 'разово';
 
       rows.push({
@@ -91,8 +92,8 @@ export default function DebtsListScreen() {
         description: `${serviceLabel} · ${days} дн. × ${rate} ₽`,
         date: sessionAccruals[0]?.createdAt ?? session.entryTime,
         source: 'accrual',
-        status: isFrozen ? 'Заморожен' : 'На парковке',
-        isFrozen,
+        status: 'На парковке',
+        isFrozen: false,
         days,
         rate,
         serviceType: serviceLabel,

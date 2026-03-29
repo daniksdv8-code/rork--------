@@ -7,7 +7,7 @@ import { useParking } from '@/providers/ParkingProvider';
 
 export default function DebtorsListScreen() {
   const router = useRouter();
-  const { debtors, sessions, dailyDebtAccruals } = useParking();
+  const { debtors, sessions, dailyDebtAccruals, debts } = useParking();
   const [search, setSearch] = useState<string>('');
 
   const totalDebt = useMemo(() => debtors.reduce((s, d) => s + d.totalDebt, 0), [debtors]);
@@ -26,20 +26,23 @@ export default function DebtorsListScreen() {
   }, [router]);
 
   const renderItem = useCallback(({ item, index }: { item: typeof filtered[0]; index: number }) => {
-    const hasLombardSession = item.client ? sessions.some(s =>
-      s.clientId === item.client!.id &&
-      (s.tariffType === 'lombard' || s.serviceType === 'lombard') &&
-      (s.status === 'active_debt' || s.status === 'released_debt')
+    const hasLombardSession = item.client ? (
+      sessions.some(s =>
+        s.clientId === item.client!.id &&
+        (s.tariffType === 'lombard' || s.serviceType === 'lombard') &&
+        s.status === 'active_debt'
+      ) ||
+      item.debts.some(d => d.description?.includes('Ломбард'))
     ) : false;
 
-    const accrualSessionCount = item.client ? sessions.filter(s =>
+    const activeAccrualCount = item.client ? sessions.filter(s =>
       s.clientId === item.client!.id &&
-      (s.status === 'active_debt' || s.status === 'released_debt') &&
+      s.status === 'active_debt' &&
       !s.cancelled &&
       dailyDebtAccruals.some(a => a.parkingEntryId === s.id)
     ).length : 0;
 
-    const totalDebtSources = item.debts.length + accrualSessionCount;
+    const totalDebtSources = item.debts.length + activeAccrualCount;
 
     return (
       <TouchableOpacity
