@@ -7,7 +7,10 @@ import {
 import Colors from '@/constants/colors';
 import { useParking } from '@/providers/ParkingProvider';
 import { formatDate, formatDateTime } from '@/utils/date';
+import { formatMoney } from '@/utils/money';
 import { CashShift } from '@/types';
+
+const fm = (n: number) => formatMoney(n);
 
 type ReportTab = 'revenue' | 'shifts' | 'vehicles' | 'debtors' | 'expiring';
 type RevenuePeriod = 'day' | 'week' | 'month' | 'quarter' | 'year' | 'all';
@@ -269,36 +272,36 @@ export default function ReportsScreen() {
 
           <View style={styles.revenueCard}>
             <Text style={styles.revenueLabel}>Общая выручка</Text>
-            <Text style={styles.revenueTotal}>{revenueData.total} ₽</Text>
+            <Text style={styles.revenueTotal}>{fm(revenueData.total)} ₽</Text>
           </View>
 
           <View style={styles.breakdownRow}>
             <View style={[styles.breakdownCard, { borderLeftColor: Colors.success }]}>
               <Text style={styles.breakdownLabel}>Наличные</Text>
-              <Text style={[styles.breakdownValue, { color: Colors.success }]}>{revenueData.cash} ₽</Text>
+              <Text style={[styles.breakdownValue, { color: Colors.success }]}>{fm(revenueData.cash)} ₽</Text>
             </View>
             <View style={[styles.breakdownCard, { borderLeftColor: Colors.info }]}>
               <Text style={styles.breakdownLabel}>Безнал</Text>
-              <Text style={[styles.breakdownValue, { color: Colors.info }]}>{revenueData.card} ₽</Text>
+              <Text style={[styles.breakdownValue, { color: Colors.info }]}>{fm(revenueData.card)} ₽</Text>
             </View>
           </View>
 
           {revenueData.totalRefunds > 0 && (
             <View style={[styles.breakdownCard, { borderLeftColor: Colors.warning, marginHorizontal: 0 }]}>
               <Text style={styles.breakdownLabel}>Возвраты</Text>
-              <Text style={[styles.breakdownValue, { color: Colors.warning }]}>−{revenueData.totalRefunds} ₽</Text>
+              <Text style={[styles.breakdownValue, { color: Colors.warning }]}>−{fm(revenueData.totalRefunds)} ₽</Text>
             </View>
           )}
 
           <View style={[styles.breakdownCard, { borderLeftColor: Colors.danger, marginHorizontal: 0 }]}>
             <Text style={styles.breakdownLabel}>Неоплаченные долги ({revenueData.debtorsCount} клиент.)</Text>
-            <Text style={[styles.breakdownValue, { color: Colors.danger }]}>{revenueData.totalDebtAmount} ₽</Text>
+            <Text style={[styles.breakdownValue, { color: Colors.danger }]}>{fm(revenueData.totalDebtAmount)} ₽</Text>
           </View>
 
           {revenueData.totalExpensesAmount > 0 && (
             <View style={[styles.breakdownCard, { borderLeftColor: '#e74c3c', marginHorizontal: 0, marginTop: 8 }]}>
               <Text style={styles.breakdownLabel}>Расходы за период ({revenueData.expenseCount} опер.)</Text>
-              <Text style={[styles.breakdownValue, { color: '#e74c3c' }]}>-{revenueData.totalExpensesAmount} ₽</Text>
+              <Text style={[styles.breakdownValue, { color: '#e74c3c' }]}>-{fm(revenueData.totalExpensesAmount)} ₽</Text>
             </View>
           )}
 
@@ -311,7 +314,7 @@ export default function ReportsScreen() {
                     <Text style={styles.debtorName}>{cat}</Text>
                     <Text style={styles.debtorCars}>Операций: {info.count}</Text>
                   </View>
-                  <Text style={[styles.debtorAmount, { color: '#e74c3c' }]}>-{info.total} ₽</Text>
+                  <Text style={[styles.debtorAmount, { color: '#e74c3c' }]}>-{fm(info.total)} ₽</Text>
                 </View>
               ))}
             </View>
@@ -352,19 +355,19 @@ export default function ReportsScreen() {
             <View style={styles.shiftsSummaryDivider} />
             <View style={styles.shiftsSumRow}>
               <Text style={styles.shiftsSumLabel}>Наличные:</Text>
-              <Text style={[styles.shiftsSumValue, { color: Colors.success }]}>{shiftsSummary.totalCashIn} ₽</Text>
+              <Text style={[styles.shiftsSumValue, { color: Colors.success }]}>{fm(shiftsSummary.totalCashIn)} ₽</Text>
             </View>
             <View style={styles.shiftsSumRow}>
               <Text style={styles.shiftsSumLabel}>Безнал:</Text>
-              <Text style={[styles.shiftsSumValue, { color: Colors.info }]}>{shiftsSummary.totalCardIn} ₽</Text>
+              <Text style={[styles.shiftsSumValue, { color: Colors.info }]}>{fm(shiftsSummary.totalCardIn)} ₽</Text>
             </View>
             <View style={styles.shiftsSumRow}>
               <Text style={styles.shiftsSumLabel}>Расходы:</Text>
-              <Text style={[styles.shiftsSumValue, { color: Colors.danger }]}>{shiftsSummary.totalExp} ₽</Text>
+              <Text style={[styles.shiftsSumValue, { color: Colors.danger }]}>{fm(shiftsSummary.totalExp)} ₽</Text>
             </View>
             <View style={styles.shiftsSumRow}>
               <Text style={styles.shiftsSumLabel}>Снятия:</Text>
-              <Text style={[styles.shiftsSumValue, { color: Colors.warning }]}>{shiftsSummary.totalWd} ₽</Text>
+              <Text style={[styles.shiftsSumValue, { color: Colors.warning }]}>{fm(shiftsSummary.totalWd)} ₽</Text>
             </View>
           </View>
 
@@ -417,7 +420,7 @@ export default function ReportsScreen() {
                       </View>
                     </View>
                     <View style={styles.shiftHeaderRight}>
-                      <Text style={styles.shiftTotal}>{cashIn + cardIn} ₽</Text>
+                      <Text style={styles.shiftTotal}>{fm(cashIn + cardIn)} ₽</Text>
                       {isExpanded ? (
                         <ChevronUp size={16} color={Colors.textMuted} />
                       ) : (
@@ -430,29 +433,29 @@ export default function ReportsScreen() {
                     <View style={styles.shiftDetails}>
                       <View style={styles.detailRow}>
                         <Text style={styles.detailLabel}>Остаток с пред. смены:</Text>
-                        <Text style={styles.detailValue}>{shift.carryOver} ₽</Text>
+                        <Text style={styles.detailValue}>{fm(shift.carryOver)} ₽</Text>
                       </View>
                       <View style={styles.detailDivider} />
                       <View style={styles.detailRow}>
                         <Text style={styles.detailLabel}>Наличные за смену:</Text>
-                        <Text style={[styles.detailValue, { color: Colors.success }]}>{cashIn} ₽</Text>
+                        <Text style={[styles.detailValue, { color: Colors.success }]}>{fm(cashIn)} ₽</Text>
                       </View>
                       <View style={styles.detailRow}>
                         <Text style={styles.detailLabel}>Безнал за смену:</Text>
-                        <Text style={[styles.detailValue, { color: Colors.info }]}>{cardIn} ₽</Text>
+                        <Text style={[styles.detailValue, { color: Colors.info }]}>{fm(cardIn)} ₽</Text>
                       </View>
                       <View style={styles.detailRow}>
                         <Text style={styles.detailLabel}>Расходы:</Text>
-                        <Text style={[styles.detailValue, { color: Colors.danger }]}>−{expTotal} ₽</Text>
+                        <Text style={[styles.detailValue, { color: Colors.danger }]}>−{fm(expTotal)} ₽</Text>
                       </View>
                       <View style={styles.detailRow}>
                         <Text style={styles.detailLabel}>Снятия из кассы:</Text>
-                        <Text style={[styles.detailValue, { color: Colors.warning }]}>−{wTotal} ₽</Text>
+                        <Text style={[styles.detailValue, { color: Colors.warning }]}>−{fm(wTotal)} ₽</Text>
                       </View>
                       <View style={styles.detailDivider} />
                       <View style={styles.detailRow}>
                         <Text style={[styles.detailLabel, { fontWeight: '600' as const }]}>Расчёт в кассе:</Text>
-                        <Text style={[styles.detailValue, { fontWeight: '700' as const }]}>{calcBalance} ₽</Text>
+                        <Text style={[styles.detailValue, { fontWeight: '700' as const }]}>{fm(calcBalance)} ₽</Text>
                       </View>
                       {isClosed && (
                         <>
@@ -465,14 +468,14 @@ export default function ReportsScreen() {
                                 ? { color: Colors.danger }
                                 : { color: Colors.success },
                             ]}>
-                              {shift.actualCash ?? 0} ₽
+                              {fm(shift.actualCash ?? 0)} ₽
                             </Text>
                           </View>
                           {(shift.actualCash ?? 0) !== calcBalance && (
                             <View style={styles.discrepancyRow}>
                               <Text style={styles.discrepancyLabel}>Расхождение:</Text>
                               <Text style={styles.discrepancyValue}>
-                                {(shift.actualCash ?? 0) - calcBalance} ₽
+                                {fm((shift.actualCash ?? 0) - calcBalance)} ₽
                               </Text>
                             </View>
                           )}
@@ -566,7 +569,7 @@ export default function ReportsScreen() {
             <Text style={[styles.summaryValue, { color: Colors.danger }]}>{debtors.length}</Text>
             <Text style={styles.summaryLabel}>Общая задолженность</Text>
             <Text style={[styles.summaryValue, { color: Colors.danger }]}>
-              {debtors.reduce((s, d) => s + d.totalDebt, 0)} ₽
+              {fm(debtors.reduce((s, d) => s + d.totalDebt, 0))} ₽
             </Text>
           </View>
 
@@ -576,7 +579,7 @@ export default function ReportsScreen() {
                 <Text style={styles.debtorName}>{d.client?.name ?? '—'}</Text>
                 <Text style={styles.debtorCars}>{d.cars.map(c => c.plateNumber).join(', ')}</Text>
               </View>
-              <Text style={styles.debtorAmount}>{d.totalDebt} ₽</Text>
+              <Text style={styles.debtorAmount}>{fm(d.totalDebt)} ₽</Text>
             </View>
           ))}
         </View>

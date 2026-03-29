@@ -318,7 +318,7 @@ export function verifySalaryAdvanceConsistency(
 }
 
 export function normalizeRoundingArtifact(value: number): number {
-  if (Math.abs(value) < 0.005) return 0;
+  if (Math.abs(value) < 1) return 0;
   return roundMoney(value);
 }
 
@@ -398,7 +398,7 @@ export function runFullDiagnostic(data: FullDiagnosticData): {
       });
     }
 
-    if (Math.abs(debt.remainingAmount) < 0.005 && debt.remainingAmount !== 0) {
+    if (debt.remainingAmount !== Math.round(debt.remainingAmount)) {
       roundingArtifacts.push({ entityType: 'debt', entityId: debt.id, field: 'remainingAmount', value: debt.remainingAmount });
     }
   }
@@ -429,7 +429,7 @@ export function runFullDiagnostic(data: FullDiagnosticData): {
       });
     }
 
-    if (Math.abs(cd.totalAmount) < 0.005 && cd.totalAmount !== 0) {
+    if (cd.totalAmount !== Math.round(cd.totalAmount)) {
       roundingArtifacts.push({ entityType: 'client_debt', entityId: cd.clientId, field: 'totalAmount', value: cd.totalAmount });
     }
   }
@@ -487,7 +487,7 @@ export function performSafeHealing(data: HealableData): {
   let advancesChanged = false;
 
   const healedDebts = data.debts.map(d => {
-    if (d.remainingAmount < 0 && d.remainingAmount > -0.01) {
+    if (d.remainingAmount < 0 && d.remainingAmount > -1) {
       logAnomaly({
         severity: 'info',
         category: 'rounding_artifact',
@@ -502,7 +502,7 @@ export function performSafeHealing(data: HealableData): {
       debtsChanged = true;
       return { ...d, remainingAmount: 0, updatedAt: new Date().toISOString() };
     }
-    if (d.remainingAmount > d.totalAmount && d.remainingAmount - d.totalAmount < 0.01) {
+    if (d.remainingAmount > d.totalAmount && d.remainingAmount - d.totalAmount < 1) {
       logAnomaly({
         severity: 'info',
         category: 'rounding_artifact',
@@ -524,7 +524,7 @@ export function performSafeHealing(data: HealableData): {
     let changed = false;
     let newCd = { ...cd };
 
-    if (cd.totalAmount < 0 && cd.totalAmount > -0.01) {
+    if (cd.totalAmount < 0 && cd.totalAmount > -1) {
       newCd.totalAmount = 0;
       changed = true;
       logAnomaly({
@@ -536,7 +536,7 @@ export function performSafeHealing(data: HealableData): {
         entityType: 'client_debt',
       });
     }
-    if (cd.activeAmount < 0 && cd.activeAmount > -0.01) {
+    if (cd.activeAmount < 0 && cd.activeAmount > -1) {
       newCd.activeAmount = 0;
       changed = true;
       logAnomaly({
@@ -548,7 +548,7 @@ export function performSafeHealing(data: HealableData): {
         entityType: 'client_debt',
       });
     }
-    if (cd.frozenAmount < 0 && cd.frozenAmount > -0.01) {
+    if (cd.frozenAmount < 0 && cd.frozenAmount > -1) {
       newCd.frozenAmount = 0;
       changed = true;
     }
@@ -562,7 +562,7 @@ export function performSafeHealing(data: HealableData): {
   });
 
   const healedSalaryAdvances = data.salaryAdvances.map(a => {
-    if (a.remainingAmount < 0 && a.remainingAmount > -0.01) {
+    if (a.remainingAmount < 0 && a.remainingAmount > -1) {
       logAnomaly({
         severity: 'info',
         category: 'rounding_artifact',

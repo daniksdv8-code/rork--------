@@ -13,7 +13,10 @@ import Colors from '@/constants/colors';
 import { useParking } from '@/providers/ParkingProvider';
 import { useAuth } from '@/providers/AuthProvider';
 import { formatDateTime, isToday } from '@/utils/date';
+import { formatMoney } from '@/utils/money';
 import { CashShift } from '@/types';
+
+const fm = (n: number) => formatMoney(n);
 
 type CashTab = 'current' | 'report' | 'history';
 type ReportPeriod = 'day' | 'week' | 'month' | 'all';
@@ -481,7 +484,7 @@ export default function CashRegisterScreen() {
                           <Text style={styles.expenseDesc}>{exp.description}</Text>
                           <Text style={styles.expenseMeta}>{exp.category} • {formatDateTime(exp.date)}</Text>
                         </View>
-                        <Text style={styles.expenseAmount}>-{exp.amount} ₽</Text>
+                        <Text style={styles.expenseAmount}>-{fm(exp.amount)} ₽</Text>
                       </View>
                     ))}
                   </View>
@@ -507,7 +510,7 @@ export default function CashRegisterScreen() {
                     <Text style={styles.shiftInfoText}>С {formatDateTime(activeShift.openedAt)}</Text>
                   </View>
                   {activeShift.carryOver > 0 && (
-                    <Text style={styles.carryOverText}>Остаток с прошлой смены: {activeShift.carryOver} ₽</Text>
+                    <Text style={styles.carryOverText}>Остаток с прошлой смены: {fm(activeShift.carryOver)} ₽</Text>
                   )}
                 </View>
 
@@ -515,13 +518,13 @@ export default function CashRegisterScreen() {
                   <View style={[styles.shiftStatCard, { borderLeftColor: Colors.success }]}>
                     <Text style={styles.shiftStatLabel}>Наличные (в кассе)</Text>
                     <Text style={[styles.shiftStatValue, { color: Colors.success }]}>
-                      {shiftCashIncome(activeShift)} ₽
+                      {fm(shiftCashIncome(activeShift))} ₽
                     </Text>
                   </View>
                   <View style={[styles.shiftStatCard, { borderLeftColor: Colors.info }]}>
                     <Text style={styles.shiftStatLabel}>Безнал → админ</Text>
                     <Text style={[styles.shiftStatValue, { color: Colors.info }]}>
-                      {shiftCardIncome(activeShift)} ₽
+                      {fm(shiftCardIncome(activeShift))} ₽
                     </Text>
                   </View>
                 </View>
@@ -530,13 +533,13 @@ export default function CashRegisterScreen() {
                   <View style={[styles.shiftStatCard, { borderLeftColor: Colors.danger }]}>
                     <Text style={styles.shiftStatLabel}>Расходы (нал)</Text>
                     <Text style={[styles.shiftStatValue, { color: Colors.danger }]}>
-                      {shiftExpenseTotal(activeShift.id)} ₽
+                      {fm(shiftExpenseTotal(activeShift.id))} ₽
                     </Text>
                   </View>
                   <View style={[styles.shiftStatCard, { borderLeftColor: Colors.warning }]}>
                     <Text style={styles.shiftStatLabel}>Снято → админ</Text>
                     <Text style={[styles.shiftStatValue, { color: Colors.warning }]}>
-                      {shiftWithdrawalTotal(activeShift.id)} ₽
+                      {fm(shiftWithdrawalTotal(activeShift.id))} ₽
                     </Text>
                   </View>
                 </View>
@@ -544,14 +547,14 @@ export default function CashRegisterScreen() {
                 <View style={[styles.shiftStatCard, { borderLeftColor: Colors.primary, marginBottom: 12 }]}>
                   <Text style={styles.shiftStatLabel}>Остаток наличных в кассе</Text>
                   <Text style={[styles.shiftStatValue, { color: Colors.primary }]}>
-                    {activeShift.carryOver + shiftCashIncome(activeShift) - shiftExpenseTotal(activeShift.id) - shiftWithdrawalTotal(activeShift.id)} ₽
+                    {fm(activeShift.carryOver + shiftCashIncome(activeShift) - shiftExpenseTotal(activeShift.id) - shiftWithdrawalTotal(activeShift.id))} ₽
                   </Text>
                 </View>
 
                 {shiftCardIncome(activeShift) > 0 && (
                   <View style={styles.transitInfoCard}>
                     <Text style={styles.transitInfoText}>
-                      💳 Безнал {shiftCardIncome(activeShift)} ₽ принят за смену и автоматически зачислен в финансы администратора
+                      💳 Безнал {fm(shiftCardIncome(activeShift))} ₽ принят за смену и автоматически зачислен в финансы администратора
                     </Text>
                   </View>
                 )}
@@ -568,7 +571,7 @@ export default function CashRegisterScreen() {
                           <Text style={styles.expenseDesc}>{exp.description}</Text>
                           <Text style={styles.expenseMeta}>{exp.category} • {formatDateTime(exp.date)}</Text>
                         </View>
-                        <Text style={styles.expenseAmount}>-{exp.amount} ₽</Text>
+                        <Text style={styles.expenseAmount}>-{fm(exp.amount)} ₽</Text>
                       </View>
                     ))}
                   </>
@@ -586,7 +589,7 @@ export default function CashRegisterScreen() {
                           <Text style={styles.expenseDesc}>{w.notes || 'Снятие'}</Text>
                           <Text style={styles.expenseMeta}>{w.operatorName} • {formatDateTime(w.date)}</Text>
                         </View>
-                        <Text style={[styles.expenseAmount, { color: Colors.warning }]}>-{w.amount} ₽</Text>
+                        <Text style={[styles.expenseAmount, { color: Colors.warning }]}>-{fm(w.amount)} ₽</Text>
                       </View>
                     ))}
                   </>
@@ -714,7 +717,7 @@ export default function CashRegisterScreen() {
                       <Text style={styles.expenseDesc}>{w.notes || 'Снятие'}</Text>
                       <Text style={styles.expenseMeta}>{w.operatorName} • {formatDateTime(w.date)}</Text>
                     </View>
-                    <Text style={[styles.expenseAmount, { color: Colors.warning }]}>-{w.amount} ₽</Text>
+                    <Text style={[styles.expenseAmount, { color: Colors.warning }]}>-{fm(w.amount)} ₽</Text>
                   </View>
                 ))}
               </>
@@ -732,7 +735,7 @@ export default function CashRegisterScreen() {
                       <Text style={styles.expenseDesc}>{cat}</Text>
                       <Text style={styles.expenseMeta}>Операций: {info.count}</Text>
                     </View>
-                    <Text style={styles.expenseAmount}>-{info.total} ₽</Text>
+                    <Text style={styles.expenseAmount}>-{fm(info.total)} ₽</Text>
                   </View>
                 ))}
               </>
@@ -752,7 +755,7 @@ export default function CashRegisterScreen() {
                         {exp.category} • {exp.operatorName} • {formatDateTime(exp.date)}
                       </Text>
                     </View>
-                    <Text style={styles.expenseAmount}>-{exp.amount} ₽</Text>
+                    <Text style={styles.expenseAmount}>-{fm(exp.amount)} ₽</Text>
                   </View>
                 ))}
               </>
@@ -780,13 +783,13 @@ export default function CashRegisterScreen() {
                           {op.userName} ({op.userRole === 'admin' ? 'админ' : 'менеджер'}) • {op.category} • {formatDateTime(op.date)}
                         </Text>
                         <Text style={styles.expenseMeta}>
-                          Баланс: {op.balanceBefore} → {op.balanceAfter} ₽
+                          Баланс: {fm(op.balanceBefore)} → {fm(op.balanceAfter)} ₽
                         </Text>
                       </View>
                       <Text style={[styles.expenseAmount, {
                         color: isExpenseOp ? Colors.danger : Colors.success,
                       }]}>
-                        {isExpenseOp ? '-' : '+'}{op.amount} ₽
+                        {isExpenseOp ? '-' : '+'}{fm(op.amount)} ₽
                       </Text>
                     </View>
                   );
@@ -857,14 +860,14 @@ export default function CashRegisterScreen() {
                                 styles.varianceBadgeText,
                                 isShortage ? styles.varianceBadgeTextShort : styles.varianceBadgeTextOver,
                               ]}>
-                                {isShortage ? `Недостача ${Math.abs(variance)} ₽` : `Излишек +${variance} ₽`}
+                                {isShortage ? `Недостача ${fm(Math.abs(variance))} ₽` : `Излишек +${fm(variance)} ₽`}
                               </Text>
                             </View>
                           )}
                         </View>
                       </View>
                       <View style={styles.shiftHistoryRight}>
-                        <Text style={styles.shiftHistoryAmount}>{cashIn + cardIn} ₽</Text>
+                        <Text style={styles.shiftHistoryAmount}>{fm(cashIn + cardIn)} ₽</Text>
                         {isExpanded ? (
                           <ChevronUp size={16} color={Colors.textMuted} />
                         ) : (
@@ -877,23 +880,23 @@ export default function CashRegisterScreen() {
                       <View style={styles.shiftHistoryDetails}>
                         <View style={styles.shiftDetailRow}>
                           <Text style={styles.shiftDetailLabel}>Наличные:</Text>
-                          <Text style={[styles.shiftDetailValue, { color: Colors.success }]}>{cashIn} ₽</Text>
+                          <Text style={[styles.shiftDetailValue, { color: Colors.success }]}>{fm(cashIn)} ₽</Text>
                         </View>
                         <View style={styles.shiftDetailRow}>
                           <Text style={styles.shiftDetailLabel}>Безнал:</Text>
-                          <Text style={[styles.shiftDetailValue, { color: Colors.info }]}>{cardIn} ₽</Text>
+                          <Text style={[styles.shiftDetailValue, { color: Colors.info }]}>{fm(cardIn)} ₽</Text>
                         </View>
                         <View style={styles.shiftDetailRow}>
                           <Text style={styles.shiftDetailLabel}>Расходы:</Text>
-                          <Text style={[styles.shiftDetailValue, { color: Colors.danger }]}>{expTotal} ₽</Text>
+                          <Text style={[styles.shiftDetailValue, { color: Colors.danger }]}>{fm(expTotal)} ₽</Text>
                         </View>
                         <View style={styles.shiftDetailRow}>
                           <Text style={styles.shiftDetailLabel}>Снято админом:</Text>
-                          <Text style={[styles.shiftDetailValue, { color: Colors.warning }]}>{wTotal} ₽</Text>
+                          <Text style={[styles.shiftDetailValue, { color: Colors.warning }]}>{fm(wTotal)} ₽</Text>
                         </View>
                         <View style={styles.shiftDetailRow}>
                           <Text style={styles.shiftDetailLabel}>Остаток с пред. смены:</Text>
-                          <Text style={styles.shiftDetailValue}>{shift.carryOver} ₽</Text>
+                          <Text style={styles.shiftDetailValue}>{fm(shift.carryOver)} ₽</Text>
                         </View>
                         {shift.status === 'closed' && (
                           <>
@@ -920,12 +923,12 @@ export default function CashRegisterScreen() {
                               </View>
                               <View style={styles.varianceBlockRow}>
                                 <Text style={styles.varianceBlockLabel}>Ожидалось:</Text>
-                                <Text style={styles.varianceBlockValue}>{calcBalance} ₽</Text>
+                                <Text style={styles.varianceBlockValue}>{fm(calcBalance)} ₽</Text>
                               </View>
                               <View style={styles.varianceBlockRow}>
                                 <Text style={styles.varianceBlockLabel}>Факт:</Text>
                                 <Text style={[styles.varianceBlockValue, { fontWeight: '700' as const }]}>
-                                  {shift.actualCash ?? 0} ₽
+                                  {fm(shift.actualCash ?? 0)} ₽
                                 </Text>
                               </View>
                               <View style={styles.varianceBlockRow}>
@@ -937,7 +940,7 @@ export default function CashRegisterScreen() {
                                   isOverage && { color: Colors.warning },
                                   !hasVariance && { color: Colors.success },
                                 ]}>
-                                  {variance > 0 ? '+' : ''}{variance} ₽
+                                  {variance > 0 ? '+' : ''}{fm(variance)} ₽
                                 </Text>
                               </View>
                             </View>
@@ -955,7 +958,7 @@ export default function CashRegisterScreen() {
                               <View key={op.name} style={styles.shiftDetailRow}>
                                 <Text style={styles.shiftDetailLabel}>{op.name}</Text>
                                 <Text style={styles.shiftDetailValue}>
-                                  {op.cash} + {op.card} = {op.cash + op.card} ₽
+                                  {fm(op.cash)} + {fm(op.card)} = {fm(op.cash + op.card)} ₽
                                 </Text>
                               </View>
                             ))}
@@ -969,7 +972,7 @@ export default function CashRegisterScreen() {
                             {shiftExps.map(exp => (
                               <View key={exp.id} style={styles.shiftDetailRow}>
                                 <Text style={styles.shiftDetailLabel}>{exp.description}</Text>
-                                <Text style={[styles.shiftDetailValue, { color: Colors.danger }]}>-{exp.amount} ₽</Text>
+                                <Text style={[styles.shiftDetailValue, { color: Colors.danger }]}>-{fm(exp.amount)} ₽</Text>
                               </View>
                             ))}
                           </>
@@ -982,7 +985,7 @@ export default function CashRegisterScreen() {
                             {shiftWds.map(w => (
                               <View key={w.id} style={styles.shiftDetailRow}>
                                 <Text style={styles.shiftDetailLabel}>{w.operatorName}: {w.notes || 'Снятие'}</Text>
-                                <Text style={[styles.shiftDetailValue, { color: Colors.warning }]}>-{w.amount} ₽</Text>
+                                <Text style={[styles.shiftDetailValue, { color: Colors.warning }]}>-{fm(w.amount)} ₽</Text>
                               </View>
                             ))}
                           </>
@@ -1030,7 +1033,7 @@ export default function CashRegisterScreen() {
                     <View style={styles.modalExpectedRow}>
                       <Text style={styles.modalExpectedLabel}>Расчёт в кассе:</Text>
                       <Text style={styles.modalExpectedValue}>
-                        {activeShift.carryOver + shiftCashIncome(activeShift) - shiftExpenseTotal(activeShift.id) - shiftWithdrawalTotal(activeShift.id)} ₽
+                        {fm(activeShift.carryOver + shiftCashIncome(activeShift) - shiftExpenseTotal(activeShift.id) - shiftWithdrawalTotal(activeShift.id))} ₽
                       </Text>
                     </View>
                   )}
@@ -1085,7 +1088,7 @@ export default function CashRegisterScreen() {
             <View style={styles.modalExpectedRow}>
               <Text style={styles.modalExpectedLabel}>Остаток кассы:</Text>
               <Text style={[styles.modalExpectedValue, currentCashBalance < 0 ? { color: Colors.danger } : undefined]}>
-                {currentCashBalance} ₽
+                {fm(currentCashBalance)} ₽
               </Text>
             </View>
             {Number(expenseAmount) > 0 && Number(expenseAmount) > currentCashBalance && (
@@ -1093,8 +1096,8 @@ export default function CashRegisterScreen() {
                 <AlertTriangle size={16} color={Colors.danger} />
                 <Text style={styles.negativeWarningText}>
                   {isAdmin
-                    ? `Внимание: касса уйдёт в минус (${currentCashBalance - Number(expenseAmount)} ₽)`
-                    : `Недостаточно средств! Максимум: ${currentCashBalance} ₽`}
+                    ? `Внимание: касса уйдёт в минус (${fm(currentCashBalance - Number(expenseAmount))} ₽)`
+                    : `Недостаточно средств! Максимум: ${fm(currentCashBalance)} ₽`}
                 </Text>
               </View>
             )}
@@ -1152,7 +1155,7 @@ export default function CashRegisterScreen() {
             <View style={styles.modalExpectedRow}>
               <Text style={styles.modalExpectedLabel}>Остаток кассы:</Text>
               <Text style={[styles.modalExpectedValue, currentCashBalance < 0 ? { color: Colors.danger } : undefined]}>
-                {currentCashBalance} ₽
+                {fm(currentCashBalance)} ₽
               </Text>
             </View>
             {Number(withdrawAmount) > 0 && Number(withdrawAmount) > currentCashBalance && (
@@ -1160,8 +1163,8 @@ export default function CashRegisterScreen() {
                 <AlertTriangle size={16} color={Colors.danger} />
                 <Text style={styles.negativeWarningText}>
                   {isAdmin
-                    ? `Внимание: касса уйдёт в минус (${currentCashBalance - Number(withdrawAmount)} ₽)`
-                    : `Недостаточно средств! Максимум: ${currentCashBalance} ₽`}
+                    ? `Внимание: касса уйдёт в минус (${fm(currentCashBalance - Number(withdrawAmount))} ₽)`
+                    : `Недостаточно средств! Максимум: ${fm(currentCashBalance)} ₽`}
                 </Text>
               </View>
             )}

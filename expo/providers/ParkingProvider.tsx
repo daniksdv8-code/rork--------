@@ -11,7 +11,7 @@ import {
 } from '@/types';
 import { EMPTY_DATA } from '@/mocks/initialData';
 import { generateId } from '@/utils/id';
-import { roundMoney } from '@/utils/money';
+import { roundMoney, normalizeMoneyData } from '@/utils/money';
 import { calculateDays, addMonths, isExpired, isToday, daysUntil, getMonthlyAmount } from '@/utils/date';
 import { formatPlateNumber } from '@/utils/plate';
 import { useAuth } from './AuthProvider';
@@ -106,7 +106,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     throwOnError: false,
   });
 
-  const applyServerData = useCallback((d: Record<string, any>, source?: string) => {
+  const applyServerData = useCallback((rawD: Record<string, any>, source?: string) => {
+    const d = normalizeMoneyData(rawD) as Record<string, any>;
     const serverClients = d.clients || [];
     const localData = latestDataRef.current;
     const localClientCount = localData.clients?.length ?? 0;
@@ -163,7 +164,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         }
         const stored = await AsyncStorage.getItem(STORAGE_KEY);
         if (stored && !serverDataAppliedRef.current) {
-          const data = JSON.parse(stored);
+          const data = normalizeMoneyData(JSON.parse(stored)) as Record<string, any>;
           if (data.clients) setClients(data.clients);
           if (data.cars) setCars(data.cars);
           if (data.sessions) setSessions(data.sessions);
