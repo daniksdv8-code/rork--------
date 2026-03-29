@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
-import { AlertTriangle, Clock, BarChart3, Settings, ChevronRight, Banknote, CalendarDays, FileText, Download, Wallet, Briefcase } from 'lucide-react-native';
+import { AlertTriangle, Clock, BarChart3, Settings, ChevronRight, Banknote, CalendarDays, FileText, Download, Wallet, Briefcase, ShieldCheck } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/providers/AuthProvider';
 import { useParking } from '@/providers/ParkingProvider';
@@ -69,6 +69,12 @@ export default function MoreScreen() {
       icon: Download,
       route: '/(tabs)/more/export',
       color: '#0EA5E9',
+    });
+    menuItems.push({
+      label: 'Самодиагностика',
+      icon: ShieldCheck,
+      route: '/(tabs)/more/anomalylog',
+      color: '#059669',
     });
     menuItems.push({
       label: 'Настройки',

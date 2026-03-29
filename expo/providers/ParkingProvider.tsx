@@ -17,6 +17,9 @@ import { formatPlateNumber } from '@/utils/plate';
 import { useAuth } from './AuthProvider';
 import { trpc, vanillaTrpc } from '@/lib/trpc';
 import { migrateBackupData, detectBackupVersion } from '@/utils/backup-migration';
+import { useSelfDiagnosis } from '@/hooks/useSelfDiagnosis';
+import { FullDiagnosticData } from '@/utils/integrity';
+import { logAnomaly, getAnomalySummary } from '@/utils/anomaly-logger';
 
 const STORAGE_KEY = 'park_data';
 const MAX_TRANSACTIONS = 10000;
@@ -3739,6 +3742,59 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     }));
   }, [salaryAdvances]);
 
+  const getDiagnosticData = useCallback((): FullDiagnosticData => ({
+    clients,
+    cars,
+    sessions,
+    subscriptions,
+    payments,
+    debts,
+    transactions,
+    shifts,
+    expenses,
+    withdrawals,
+    clientDebts,
+    dailyDebtAccruals,
+    salaryAdvances,
+    salaryPayments,
+    adminExpenses,
+  }), [clients, cars, sessions, subscriptions, payments, debts, transactions, shifts, expenses, withdrawals, clientDebts, dailyDebtAccruals, salaryAdvances, salaryPayments, adminExpenses]);
+
+  const handleSelfHeal = useCallback((healed: {
+    debts?: FullDiagnosticData['debts'];
+    clientDebts?: FullDiagnosticData['clientDebts'];
+    salaryAdvances?: FullDiagnosticData['salaryAdvances'];
+  }) => {
+    let changed = false;
+    if (healed.debts) {
+      setDebts(healed.debts);
+      changed = true;
+      console.log('[SelfHeal] Applied healed debts');
+    }
+    if (healed.clientDebts) {
+      setClientDebts(healed.clientDebts);
+      changed = true;
+      console.log('[SelfHeal] Applied healed clientDebts');
+    }
+    if (healed.salaryAdvances) {
+      setSalaryAdvances(healed.salaryAdvances);
+      changed = true;
+      console.log('[SelfHeal] Applied healed salaryAdvances');
+    }
+    if (changed) {
+      schedulePush();
+    }
+  }, [schedulePush]);
+
+  const { runDiagnostic } = useSelfDiagnosis(
+    isLoaded,
+    isServerSynced,
+    getDiagnosticData,
+    handleSelfHeal,
+  );
+
+  const getAnomalyStats = useCallback(() => getAnomalySummary(), []);
+
   return useMemo(() => ({
     clients,
     cars,
@@ -3846,6 +3902,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     getEmployeeSalaryDebt,
     employeeSalaryDebts,
     getAdminFinanceBalance,
+    runDiagnostic,
+    getAnomalyStats,
   }), [
     clients, cars, activeClients, activeCars, isClientDeleted,
     sessions, subscriptions, payments, debts, transactions, tariffs,
@@ -3871,5 +3929,6 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     calculateDebtByMethod,
     salaryAdvances, salaryPayments, issueSalaryAdvance, paySalary, getEmployeeSalaryDebt, employeeSalaryDebts,
     getAdminFinanceBalance,
+    runDiagnostic, getAnomalyStats,
   ]);
 });
