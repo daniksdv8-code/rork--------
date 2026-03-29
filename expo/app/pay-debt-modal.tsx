@@ -71,7 +71,7 @@ export default function PayDebtModal() {
       Alert.alert('Смена не открыта', 'Откройте смену, чтобы принять оплату.');
       return;
     }
-    const numAmount = Number(amount);
+    const numAmount = roundMoney(Number(amount) || 0);
     if (!numAmount || numAmount <= 0) {
       Alert.alert('Ошибка', 'Введите сумму');
       return;

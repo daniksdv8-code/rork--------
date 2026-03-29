@@ -1516,7 +1516,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       return { refundAmount: 0, daysUsed: 0, dailyRate: 0, paidAmount: 0 };
     }
 
-    const paidAmount = lastPayment.originalAmount ?? lastPayment.amount;
+    const paidAmount = roundMoney(lastPayment.originalAmount ?? lastPayment.amount);
     const paymentMethod = lastPayment.method;
     const dailyRate = paymentMethod === 'cash' ? tariffs.monthlyCash : tariffs.monthlyCard;
 
@@ -1526,8 +1526,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     todayDate.setHours(0, 0, 0, 0);
     const diffMs = todayDate.getTime() - periodStart.getTime();
     const daysUsed = Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)) + 1);
-    const usedAmount = daysUsed * dailyRate;
-    const refundAmount = Math.max(0, paidAmount - usedAmount);
+    const usedAmount = roundMoney(daysUsed * dailyRate);
+    const refundAmount = roundMoney(Math.max(0, paidAmount - usedAmount));
 
     setSessions(prev => prev.map(s =>
       s.id === sessionId ? { ...s, exitTime: now, status: 'completed' as const, updatedAt: now } : s
@@ -1840,6 +1840,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   }, [tariffs, currentUser, addTransaction, schedulePush, shifts, updateShiftExpected, cars, clients, logAction, addCashOperation, getShiftCashBalance]);
 
   const payDebt = useCallback((debtId: string, amount: number, method: PaymentMethod) => {
+    amount = roundMoney(amount);
     const debt = debts.find(d => d.id === debtId);
     if (!debt) return;
 
@@ -1882,6 +1883,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   }, [debts, addTransaction, schedulePush, shifts, updateShiftExpected, logAction, addCashOperation, getShiftCashBalance]);
 
   const payClientDebt = useCallback((clientId: string, amount: number, method: PaymentMethod, _calculatedTotal?: number) => {
+    amount = roundMoney(amount);
     const now = new Date().toISOString();
 
     const clientOldDebts = debts.filter(d => d.clientId === clientId && d.remainingAmount > 0)
@@ -2096,6 +2098,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   }, [shifts, currentUser, schedulePush, updateShiftExpected, addTransaction, addCashOperation, getShiftCashBalance, logAction]);
 
   const addManualDebt = useCallback((clientId: string, amount: number, date: string, comment: string) => {
+    amount = roundMoney(amount);
     if (amount <= 0) return;
     const now = new Date().toISOString();
     const debtDate = date || now;
@@ -2340,25 +2343,25 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     const todayRefundTx = todayTx.filter(t => t.type === 'refund');
     const _cancelledAmount = todayCancelTx.reduce((s, t) => s + t.amount, 0);
 
-    const cashToday = todayPaymentTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0);
-    const cardToday = todayPaymentTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0);
-    const cashCancelled = todayCancelTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0);
-    const cardCancelled = todayCancelTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0);
-    const cashRefunded = todayRefundTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0);
-    const cardRefunded = todayRefundTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0);
+    const cashToday = roundMoney(todayPaymentTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0));
+    const cardToday = roundMoney(todayPaymentTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0));
+    const cashCancelled = roundMoney(todayCancelTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0));
+    const cardCancelled = roundMoney(todayCancelTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0));
+    const cashRefunded = roundMoney(todayRefundTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0));
+    const cardRefunded = roundMoney(todayRefundTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0));
 
-    const netCash = cashToday - cashCancelled - cashRefunded;
-    const netCard = cardToday - cardCancelled - cardRefunded;
-    const oldDebtTotal = activeDebts.reduce((s, d) => s + d.remainingAmount, 0);
-    const clientDebtTotal = clientDebts.reduce((s, cd) => s + cd.totalAmount, 0);
+    const netCash = roundMoney(cashToday - cashCancelled - cashRefunded);
+    const netCard = roundMoney(cardToday - cardCancelled - cardRefunded);
+    const oldDebtTotal = roundMoney(activeDebts.reduce((s, d) => s + d.remainingAmount, 0));
+    const clientDebtTotal = roundMoney(clientDebts.reduce((s, cd) => s + cd.totalAmount, 0));
     const totalDebt = roundMoney(oldDebtTotal + clientDebtTotal);
-    const totalRefunds = cashRefunded + cardRefunded;
+    const totalRefunds = roundMoney(cashRefunded + cardRefunded);
 
     return {
       carsOnParking: activeSessions.length,
       cashToday: netCash,
       cardToday: netCard,
-      totalRevenue: netCash + netCard,
+      totalRevenue: roundMoney(netCash + netCard),
       debtorsCount: debtors.length,
       totalDebt,
       totalRefunds,
@@ -3776,6 +3779,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       console.log(`[SalaryAdvance] BLOCKED: user ${currentUser?.name} (role=${currentUser?.role}) attempted salary advance`);
       return { success: false, error: 'Операцию может выполнить только администратор' };
     }
+    amount = roundMoney(amount);
     if (amount <= 0) return { success: false, error: 'Сумма должна быть больше 0' };
     const effectiveMethod: PaymentMethod = method ?? 'cash';
     const effectiveSource = source ?? 'admin';
@@ -3905,6 +3909,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       console.log(`[SalaryPayment] BLOCKED: user ${currentUser?.name} (role=${currentUser?.role}) attempted salary payment`);
       return { success: false, error: 'Операцию может выполнить только администратор' };
     }
+    grossAmount = roundMoney(grossAmount);
     if (grossAmount <= 0) return { success: false, error: 'Сумма должна быть больше 0' };
     const effectiveSource = source ?? 'admin';
     const now = new Date().toISOString();

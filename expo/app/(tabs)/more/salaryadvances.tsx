@@ -99,7 +99,7 @@ export default function SalaryAdvancesScreen() {
   }, [managerShift]);
 
   const handleIssue = useCallback((forceNegative?: boolean) => {
-    const amount = Number(issueAmount);
+    const amount = Math.round(Number(issueAmount) || 0);
     if (!issueEmployeeId) {
       Alert.alert('Ошибка', 'Выберите сотрудника');
       return;
@@ -142,7 +142,7 @@ export default function SalaryAdvancesScreen() {
   }, [issueEmployeeId, issueAmount, issueComment, issueMethod, issueSource, activeUsers, issueSalaryAdvance, managerShift, getSourceLabel]);
 
   const handlePay = useCallback((forceNegative?: boolean) => {
-    const gross = Number(payGrossAmount);
+    const gross = Math.round(Number(payGrossAmount) || 0);
     if (!payEmployeeId) {
       Alert.alert('Ошибка', 'Выберите сотрудника');
       return;

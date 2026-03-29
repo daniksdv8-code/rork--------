@@ -71,15 +71,15 @@ export default function ReportsScreen() {
       (!cutoff || new Date(t.date) >= cutoff)
     );
 
-    const cashGross = paymentTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0);
-    const cardGross = paymentTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0);
-    const cashCancelled = cancelTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0);
-    const cardCancelled = cancelTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0);
-    const cashRefunded = refundTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0);
-    const cardRefunded = refundTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0);
+    const cashGross = Math.round(paymentTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0));
+    const cardGross = Math.round(paymentTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0));
+    const cashCancelled = Math.round(cancelTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0));
+    const cardCancelled = Math.round(cancelTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0));
+    const cashRefunded = Math.round(refundTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0));
+    const cardRefunded = Math.round(refundTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0));
 
     const filteredExpenses = expenses.filter(e => !cutoff || new Date(e.date) >= cutoff);
-    const totalExpensesAmount = filteredExpenses.reduce((s, e) => s + e.amount, 0);
+    const totalExpensesAmount = Math.round(filteredExpenses.reduce((s, e) => s + e.amount, 0));
     const expByCategory: Record<string, { total: number; count: number }> = {};
     for (const e of filteredExpenses) {
       const cat = e.category || 'Прочее';
@@ -89,17 +89,17 @@ export default function ReportsScreen() {
     }
     const expenseCategories = Object.entries(expByCategory).sort((a, b) => b[1].total - a[1].total);
 
-    const cash = cashGross - cashCancelled - cashRefunded;
-    const card = cardGross - cardCancelled - cardRefunded;
-    const totalRefunds = cashRefunded + cardRefunded;
+    const cash = Math.round(cashGross - cashCancelled - cashRefunded);
+    const card = Math.round(cardGross - cardCancelled - cardRefunded);
+    const totalRefunds = Math.round(cashRefunded + cardRefunded);
 
-    const oldDebtTotal = debts.filter(d => d.remainingAmount > 0).reduce((s, d) => s + d.remainingAmount, 0);
-    const clientDebtTotal = clientDebts.reduce((s, cd) => s + cd.totalAmount, 0);
-    const totalDebtAmount = oldDebtTotal + clientDebtTotal;
+    const oldDebtTotal = Math.round(debts.filter(d => d.remainingAmount > 0).reduce((s, d) => s + d.remainingAmount, 0));
+    const clientDebtTotal = Math.round(clientDebts.reduce((s, cd) => s + cd.totalAmount, 0));
+    const totalDebtAmount = Math.round(oldDebtTotal + clientDebtTotal);
     const debtorsCount = debtors.length;
     const expenseCount = filteredExpenses.length;
 
-    return { cash, card, total: cash + card, totalDebtAmount, debtorsCount, totalRefunds, totalExpensesAmount, expenseCount, expenseCategories };
+    return { cash, card, total: Math.round(cash + card), totalDebtAmount, debtorsCount, totalRefunds, totalExpensesAmount, expenseCount, expenseCategories };
   }, [transactions, debts, clientDebts, debtors, revenuePeriod, expenses]);
 
   const vehicleData = useMemo(() => {

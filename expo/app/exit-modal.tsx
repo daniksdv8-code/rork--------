@@ -98,8 +98,8 @@ export default function ExitModal() {
     todayDate.setHours(0, 0, 0, 0);
     const diffMs = todayDate.getTime() - periodStart.getTime();
     const daysUsed = Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)) + 1);
-    const usedAmount = daysUsed * rate;
-    const refundAmount = Math.max(0, paidAmount - usedAmount);
+    const usedAmount = roundMoney(daysUsed * rate);
+    const refundAmount = roundMoney(Math.max(0, paidAmount - usedAmount));
 
     const paidUntilDate = new Date(sub.paidUntil);
     paidUntilDate.setHours(0, 0, 0, 0);

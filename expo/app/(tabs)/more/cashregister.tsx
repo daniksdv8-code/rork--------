@@ -161,7 +161,7 @@ export default function CashRegisterScreen() {
 
   const handleAddExpense = useCallback((forceNegative?: boolean) => {
     try {
-      const amount = Number(expenseAmount);
+      const amount = Math.round(Number(expenseAmount) || 0);
       if (!amount || amount <= 0) {
         Alert.alert('Ошибка', 'Укажите сумму расхода');
         return;
@@ -205,7 +205,7 @@ export default function CashRegisterScreen() {
       Alert.alert('Доступ запрещён', 'Операцию может выполнить только администратор');
       return;
     }
-    const amount = Number(withdrawAmount);
+    const amount = Math.round(Number(withdrawAmount) || 0);
     if (!amount || amount <= 0) {
       Alert.alert('Ошибка', 'Укажите сумму');
       return;

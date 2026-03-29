@@ -109,13 +109,28 @@ export default function FinanceScreen() {
     return { totalAdvances, totalRemaining, totalSalaryPaid };
   }, [salaryAdvances, salaryPayments]);
 
-  const handleWithdraw = useCallback(() => {
-    const amount = Number(withdrawAmount);
+  const handleWithdraw = useCallback((forceNegative?: boolean) => {
+    const amount = Math.round(Number(withdrawAmount) || 0);
     if (!amount || amount <= 0) {
       Alert.alert('Ошибка', 'Укажите сумму');
       return;
     }
-    withdrawCash(amount, withdrawNotes.trim());
+    const result = withdrawCash(amount, withdrawNotes.trim(), forceNegative);
+    if (result && !result.success) {
+      if (result.wouldGoNegative) {
+        Alert.alert(
+          '⚠️ КАССА УЙДЁТ В МИНУС!',
+          `Остаток: ${result.currentBalance} ₽\nСнимаете: ${amount} ₽\nБудет: ${(result.currentBalance ?? 0) - amount} ₽`,
+          [
+            { text: 'Отмена', style: 'cancel' },
+            { text: '⚠️ Разрешить минус', style: 'destructive', onPress: () => handleWithdraw(true) },
+          ]
+        );
+        return;
+      }
+      Alert.alert('Ошибка', result.error ?? 'Не удалось снять');
+      return;
+    }
     setShowWithdrawModal(false);
     setWithdrawAmount('');
     setWithdrawNotes('');
@@ -123,7 +138,7 @@ export default function FinanceScreen() {
   }, [withdrawAmount, withdrawNotes, withdrawCash]);
 
   const handleAddAdminExpense = useCallback(() => {
-    const amount = Number(adminExpAmount);
+    const amount = Math.round(Number(adminExpAmount) || 0);
     if (!amount || amount <= 0) {
       Alert.alert('Ошибка', 'Укажите сумму расхода');
       return;

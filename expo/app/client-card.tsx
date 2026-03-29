@@ -241,7 +241,7 @@ export default function ClientCardScreen() {
     endDate.setMonth(endDate.getMonth() + months);
     const totalDays = Math.max(1, Math.floor((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)));
     const price30 = dailyRate * 30;
-    const totalPrice = roundMoney((price30 / 30) * totalDays);
+    const totalPrice = roundMoney(dailyRate * totalDays);
     const paidUntil = endDate.toISOString();
     return { months, dailyRate, startDate, endDate, totalDays, price30, totalPrice, paidUntil };
   }, [monthlyMonths, monthlyStartDate, paymentMethod, tariffs]);
