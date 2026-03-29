@@ -7,17 +7,27 @@ import {
 import {
   Wallet, ArrowDownCircle, ArrowUpCircle, MinusCircle,
   Plus, X, CreditCard, Banknote, Trash2, Edit3,
-  Briefcase,
+  Briefcase, Filter,
 } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useParking } from '@/providers/ParkingProvider';
 import { useAuth } from '@/providers/AuthProvider';
 import { formatDateTime } from '@/utils/date';
 import { formatMoney } from '@/utils/money';
-import { PaymentMethod } from '@/types';
+import { PaymentMethod, Transaction, Expense, CashWithdrawal, AdminExpense, SalaryAdvance, SalaryPayment, ExpenseCategory } from '@/types';
 
 type FinanceTab = 'dashboard' | 'admin_register' | 'manager_register';
 type PeriodKey = 'today' | 'week' | 'month' | 'all';
+type ExpenseCategoryFilter = 'all' | 'advances' | 'salary' | 'household' | 'refunds' | 'other';
+
+const EXPENSE_CATEGORY_FILTERS: { key: ExpenseCategoryFilter; label: string }[] = [
+  { key: 'all', label: 'Все расходы' },
+  { key: 'advances', label: 'Авансы' },
+  { key: 'salary', label: 'Зарплата' },
+  { key: 'household', label: 'Хоз.расходы' },
+  { key: 'refunds', label: 'Возвраты' },
+  { key: 'other', label: 'Прочие' },
+];
 
 function getPeriodDates(period: PeriodKey): { from?: Date; to?: Date } {
   const now = new Date();
@@ -46,7 +56,7 @@ export default function FinanceScreen() {
     getManagerCategories, getAdminCategories,
     getManagerCashRegister, getAdminCashRegister,
     getAdminFinanceBalance, salaryAdvances, salaryPayments,
-  } = useParking();
+  } = useParking() as any;
 
   const [tab, setTab] = useState<FinanceTab>('dashboard');
   const [period, setPeriod] = useState<PeriodKey>('today');
@@ -65,6 +75,7 @@ export default function FinanceScreen() {
   const [categoryName, setCategoryName] = useState<string>('');
   const [categoryOwner, setCategoryOwner] = useState<'admin' | 'manager'>('admin');
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
+  const [expenseCategoryFilter, setExpenseCategoryFilter] = useState<ExpenseCategoryFilter>('all');
 
   const periodDates = useMemo(() => getPeriodDates(period), [period]);
   const managerReg = useMemo(
@@ -78,9 +89,9 @@ export default function FinanceScreen() {
   const adminFinBal = useMemo(() => getAdminFinanceBalance(), [getAdminFinanceBalance]);
 
   const salaryStats = useMemo(() => {
-    const totalAdvances = salaryAdvances.reduce((s, a) => s + a.amount, 0);
-    const totalRemaining = salaryAdvances.filter(a => a.remainingAmount > 0).reduce((s, a) => s + a.remainingAmount, 0);
-    const totalSalaryPaid = salaryPayments.reduce((s, p) => s + p.netPaid, 0);
+    const totalAdvances = salaryAdvances.reduce((s: number, a: SalaryAdvance) => s + a.amount, 0);
+    const totalRemaining = salaryAdvances.filter((a: SalaryAdvance) => a.remainingAmount > 0).reduce((s: number, a: SalaryAdvance) => s + a.remainingAmount, 0);
+    const totalSalaryPaid = salaryPayments.reduce((s: number, p: SalaryPayment) => s + p.netPaid, 0);
     return { totalAdvances, totalRemaining, totalSalaryPaid };
   }, [salaryAdvances, salaryPayments]);
 
@@ -159,11 +170,11 @@ export default function FinanceScreen() {
 
     const ops: OpItem[] = [];
 
-    const periodTx = transactions.filter(t => filterDate(t.date));
+    const periodTx: Transaction[] = transactions.filter((t: Transaction) => filterDate(t.date));
 
-    periodTx.filter(t =>
+    periodTx.filter((t: Transaction) =>
       (t.type === 'payment' || t.type === 'debt_payment') && t.amount > 0 && t.method === 'cash'
-    ).forEach(t => {
+    ).forEach((t: Transaction) => {
       ops.push({
         id: t.id,
         date: t.date,
@@ -175,9 +186,9 @@ export default function FinanceScreen() {
       });
     });
 
-    periodTx.filter(t =>
+    periodTx.filter((t: Transaction) =>
       (t.type === 'payment' || t.type === 'debt_payment') && t.amount > 0 && t.method === 'card'
-    ).forEach(t => {
+    ).forEach((t: Transaction) => {
       ops.push({
         id: t.id,
         date: t.date,
@@ -189,7 +200,7 @@ export default function FinanceScreen() {
       });
     });
 
-    periodTx.filter(t => t.type === 'refund' && t.method === 'cash').forEach(t => {
+    periodTx.filter((t: Transaction) => t.type === 'refund' && t.method === 'cash').forEach((t: Transaction) => {
       ops.push({
         id: t.id + '_refund',
         date: t.date,
@@ -200,7 +211,7 @@ export default function FinanceScreen() {
       });
     });
 
-    expenses.filter(e => filterDate(e.date)).forEach(e => {
+    expenses.filter((e: Expense) => filterDate(e.date)).forEach((e: Expense) => {
       ops.push({
         id: e.id,
         date: e.date,
@@ -211,7 +222,7 @@ export default function FinanceScreen() {
       });
     });
 
-    withdrawals.filter(w => filterDate(w.date)).forEach(w => {
+    withdrawals.filter((w: CashWithdrawal) => filterDate(w.date)).forEach((w: CashWithdrawal) => {
       ops.push({
         id: w.id,
         date: w.date,
@@ -246,11 +257,11 @@ export default function FinanceScreen() {
 
     const ops: OpItem[] = [];
 
-    const periodTx = transactions.filter(t => filterDate(t.date));
+    const periodTx: Transaction[] = transactions.filter((t: Transaction) => filterDate(t.date));
 
-    periodTx.filter(t =>
+    periodTx.filter((t: Transaction) =>
       (t.type === 'payment' || t.type === 'debt_payment') && t.amount > 0 && t.method === 'card'
-    ).forEach(t => {
+    ).forEach((t: Transaction) => {
       ops.push({
         id: t.id,
         date: t.date,
@@ -262,7 +273,7 @@ export default function FinanceScreen() {
       });
     });
 
-    periodTx.filter(t => t.type === 'cancel_payment' && t.method === 'card').forEach(t => {
+    periodTx.filter((t: Transaction) => t.type === 'cancel_payment' && t.method === 'card').forEach((t: Transaction) => {
       ops.push({
         id: t.id + '_cancel',
         date: t.date,
@@ -274,7 +285,7 @@ export default function FinanceScreen() {
       });
     });
 
-    periodTx.filter(t => t.type === 'refund' && t.method === 'card').forEach(t => {
+    periodTx.filter((t: Transaction) => t.type === 'refund' && t.method === 'card').forEach((t: Transaction) => {
       ops.push({
         id: t.id + '_refund',
         date: t.date,
@@ -286,7 +297,7 @@ export default function FinanceScreen() {
       });
     });
 
-    withdrawals.filter(w => filterDate(w.date)).forEach(w => {
+    withdrawals.filter((w: CashWithdrawal) => filterDate(w.date)).forEach((w: CashWithdrawal) => {
       ops.push({
         id: w.id + '_admin',
         date: w.date,
@@ -298,7 +309,7 @@ export default function FinanceScreen() {
       });
     });
 
-    adminExpenses.filter(e => filterDate(e.date)).forEach(e => {
+    adminExpenses.filter((e: AdminExpense) => filterDate(e.date)).forEach((e: AdminExpense) => {
       ops.push({
         id: e.id,
         date: e.date,
@@ -310,7 +321,7 @@ export default function FinanceScreen() {
       });
     });
 
-    salaryAdvances.filter(a => filterDate(a.issuedAt)).forEach(a => {
+    salaryAdvances.filter((a: SalaryAdvance) => filterDate(a.issuedAt)).forEach((a: SalaryAdvance) => {
       ops.push({
         id: a.id + '_sal_adv',
         date: a.issuedAt,
@@ -322,7 +333,7 @@ export default function FinanceScreen() {
       });
     });
 
-    salaryPayments.filter(p => filterDate(p.paidAt) && p.netPaid > 0).forEach(p => {
+    salaryPayments.filter((p: SalaryPayment) => filterDate(p.paidAt) && p.netPaid > 0).forEach((p: SalaryPayment) => {
       ops.push({
         id: p.id + '_sal_pay',
         date: p.paidAt,
@@ -336,6 +347,43 @@ export default function FinanceScreen() {
 
     return ops.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [transactions, withdrawals, adminExpenses, salaryAdvances, salaryPayments, periodDates]);
+
+  const classifyExpenseCategory = useCallback((op: { type: string; description: string; method?: string }): ExpenseCategoryFilter => {
+    if (op.type === 'salary_advance') return 'advances';
+    if (op.type === 'salary_payment') return 'salary';
+    if (op.type === 'card_income' || op.type === 'cash_from_manager') return 'other';
+    if (op.type === 'admin_expense') {
+      const desc = op.description.toLowerCase();
+      if (desc.startsWith('возврат') || desc.includes('возврат')) return 'refunds';
+      const householdKeywords = ['хоз', 'бытов', 'закупк', 'сервис', 'уборк', 'ремонт', 'канцел', 'транспорт', 'бензин', 'топливо'];
+      if (householdKeywords.some(kw => desc.includes(kw))) return 'household';
+      const categoryPart = op.description.split(':')[0]?.toLowerCase().trim() ?? '';
+      if (householdKeywords.some(kw => categoryPart.includes(kw))) return 'household';
+      return 'other';
+    }
+    return 'other';
+  }, []);
+
+  const isExpenseOp = useCallback((opType: string, amount?: number): boolean => {
+    return opType === 'admin_expense' || opType === 'salary_advance' || opType === 'salary_payment' || (opType === 'card_income' && (amount ?? 0) < 0);
+  }, []);
+
+  const filteredAdminOps = useMemo(() => {
+    if (expenseCategoryFilter === 'all') return allAdminOps;
+    return allAdminOps.filter(op => {
+      if (!isExpenseOp(op.type, op.amount)) return true;
+      return classifyExpenseCategory(op) === expenseCategoryFilter;
+    });
+  }, [allAdminOps, expenseCategoryFilter, classifyExpenseCategory, isExpenseOp]);
+
+  const expenseFilterStats = useMemo(() => {
+    const expenseOps = allAdminOps.filter(op => isExpenseOp(op.type, op.amount));
+    const filteredExpenseOps = expenseCategoryFilter === 'all'
+      ? expenseOps
+      : expenseOps.filter(op => classifyExpenseCategory(op) === expenseCategoryFilter);
+    const totalSum = filteredExpenseOps.reduce((s, op) => s + Math.abs(op.amount), 0);
+    return { count: filteredExpenseOps.length, sum: totalSum };
+  }, [allAdminOps, expenseCategoryFilter, classifyExpenseCategory, isExpenseOp]);
 
   if (!isAdmin) {
     return (
@@ -522,7 +570,7 @@ export default function FinanceScreen() {
               {getAdminCategories.length === 0 ? (
                 <Text style={styles.emptySmall}>Нет категорий</Text>
               ) : (
-                getAdminCategories.map(c => (
+                getAdminCategories.map((c: ExpenseCategory) => (
                   <View key={c.id} style={styles.categoryRow}>
                     <Text style={styles.categoryName}>{c.name}</Text>
                     <View style={styles.categoryActions}>
@@ -546,7 +594,7 @@ export default function FinanceScreen() {
               {getManagerCategories.length === 0 ? (
                 <Text style={styles.emptySmall}>Нет категорий</Text>
               ) : (
-                getManagerCategories.map(c => (
+                getManagerCategories.map((c: ExpenseCategory) => (
                   <View key={c.id} style={styles.categoryRow}>
                     <Text style={styles.categoryName}>{c.name}</Text>
                     <View style={styles.categoryActions}>
@@ -616,13 +664,47 @@ export default function FinanceScreen() {
               )}
             </View>
 
+            <View style={styles.filterSection}>
+              <View style={styles.filterHeader}>
+                <Filter size={14} color={Colors.textSecondary} />
+                <Text style={styles.filterTitle}>Фильтр расходов</Text>
+                {expenseCategoryFilter !== 'all' && (
+                  <View style={styles.filterBadge}>
+                    <Text style={styles.filterBadgeText}>{expenseFilterStats.count} оп. • {fmtAmount(expenseFilterStats.sum)} ₽</Text>
+                  </View>
+                )}
+              </View>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterChipsScroll} contentContainerStyle={styles.filterChipsContent}>
+                {EXPENSE_CATEGORY_FILTERS.map(f => (
+                  <TouchableOpacity
+                    key={f.key}
+                    style={[
+                      styles.filterChip,
+                      expenseCategoryFilter === f.key && styles.filterChipActive,
+                    ]}
+                    onPress={() => setExpenseCategoryFilter(f.key)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[
+                      styles.filterChipText,
+                      expenseCategoryFilter === f.key && styles.filterChipTextActive,
+                    ]}>{f.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+
             <Text style={styles.sectionTitle}>Операции</Text>
-            {allAdminOps.length === 0 ? (
+            {filteredAdminOps.length === 0 ? (
               <View style={styles.emptyState}>
-                <Text style={styles.emptyText}>Нет операций за выбранный период</Text>
+                <Text style={styles.emptyText}>
+                  {expenseCategoryFilter !== 'all'
+                    ? 'Нет расходных операций по выбранной категории'
+                    : 'Нет операций за выбранный период'}
+                </Text>
               </View>
             ) : (
-              allAdminOps.map(op => {
+              filteredAdminOps.map(op => {
                 const isIncome = op.type === 'card_income' || op.type === 'cash_from_manager';
                 const isExpense = op.type === 'admin_expense';
                 const isSalary = op.type === 'salary_advance' || op.type === 'salary_payment';
@@ -870,7 +952,7 @@ export default function FinanceScreen() {
                   <Text style={styles.modalFieldLabel}>Категория</Text>
                   {getAdminCategories.length > 0 ? (
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoriesScroll}>
-                      {getAdminCategories.map(c => (
+                      {getAdminCategories.map((c: ExpenseCategory) => (
                         <TouchableOpacity
                           key={c.id}
                           style={[
@@ -1486,6 +1568,63 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
   },
   categoryChipTextActive: {
+    color: Colors.white,
+  },
+  filterSection: {
+    backgroundColor: Colors.card,
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: Colors.cardBorder,
+    marginBottom: 16,
+  },
+  filterHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 10,
+  },
+  filterTitle: {
+    fontSize: 13,
+    fontWeight: '600' as const,
+    color: Colors.textSecondary,
+    flex: 1,
+  },
+  filterBadge: {
+    backgroundColor: Colors.dangerLight,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  filterBadgeText: {
+    fontSize: 11,
+    fontWeight: '600' as const,
+    color: Colors.danger,
+  },
+  filterChipsScroll: {
+    flexGrow: 0,
+  },
+  filterChipsContent: {
+    gap: 6,
+  },
+  filterChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 8,
+    backgroundColor: Colors.inputBg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  filterChipActive: {
+    backgroundColor: Colors.danger,
+    borderColor: Colors.danger,
+  },
+  filterChipText: {
+    fontSize: 12,
+    fontWeight: '500' as const,
+    color: Colors.textSecondary,
+  },
+  filterChipTextActive: {
     color: Colors.white,
   },
 });
