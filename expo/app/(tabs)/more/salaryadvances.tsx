@@ -7,7 +7,7 @@ import {
 import {
   Briefcase, Plus, CreditCard, ChevronDown, ChevronUp,
   X, Users, Banknote, ArrowDownCircle, ArrowUpCircle,
-  Clock, AlertTriangle,
+  Clock, AlertTriangle, Wallet, Building2,
 } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useParking } from '@/providers/ParkingProvider';
@@ -16,12 +16,14 @@ import { formatDateTime } from '@/utils/date';
 import { PaymentMethod } from '@/types';
 
 type SalaryTab = 'debts' | 'issue' | 'pay' | 'history';
+type CashSource = 'admin' | 'manager_shift';
 
 export default function SalaryAdvancesScreen() {
   const { isAdmin } = useAuth();
   const {
     users, salaryAdvances, salaryPayments,
     issueSalaryAdvance, paySalary, getEmployeeSalaryDebt, employeeSalaryDebts,
+    getAdminFinanceBalance, getActiveManagerShift, getShiftCashBalance,
   } = useParking();
 
   const [tab, setTab] = useState<SalaryTab>('debts');
@@ -29,11 +31,14 @@ export default function SalaryAdvancesScreen() {
   const [issueEmployeeId, setIssueEmployeeId] = useState<string>('');
   const [issueAmount, setIssueAmount] = useState<string>('');
   const [issueComment, setIssueComment] = useState<string>('');
+  const [issueMethod, setIssueMethod] = useState<PaymentMethod>('cash');
+  const [issueSource, setIssueSource] = useState<CashSource>('admin');
   const [showEmployeePicker, setShowEmployeePicker] = useState<boolean>(false);
 
   const [payEmployeeId, setPayEmployeeId] = useState<string>('');
   const [payGrossAmount, setPayGrossAmount] = useState<string>('');
   const [payMethod, setPayMethod] = useState<PaymentMethod>('cash');
+  const [paySource, setPaySource] = useState<CashSource>('admin');
   const [payComment, setPayComment] = useState<string>('');
   const [showPayEmployeePicker, setShowPayEmployeePicker] = useState<boolean>(false);
 
@@ -70,6 +75,29 @@ export default function SalaryAdvancesScreen() {
     employeeSalaryDebts.filter(e => e.remaining > 0),
   [employeeSalaryDebts]);
 
+  const adminFinBal = useMemo(() => getAdminFinanceBalance(), [getAdminFinanceBalance]);
+
+  const managerShift = useMemo(() => getActiveManagerShift(), [getActiveManagerShift]);
+
+  const managerShiftBalance = useMemo(() => {
+    if (!managerShift) return 0;
+    return getShiftCashBalance(managerShift);
+  }, [managerShift, getShiftCashBalance]);
+
+  const getSourceBalance = useCallback((source: CashSource, method: PaymentMethod): number => {
+    if (source === 'manager_shift') {
+      return managerShiftBalance;
+    }
+    return method === 'cash' ? adminFinBal.cash : adminFinBal.card;
+  }, [adminFinBal, managerShiftBalance]);
+
+  const getSourceLabel = useCallback((source: CashSource, method: PaymentMethod): string => {
+    if (source === 'manager_shift') {
+      return `Касса менеджера${managerShift ? ` (${managerShift.operatorName})` : ''}`;
+    }
+    return method === 'cash' ? 'Финансы админа (наличные)' : 'Финансы админа (безнал)';
+  }, [managerShift]);
+
   const handleIssue = useCallback((forceNegative?: boolean) => {
     const amount = Number(issueAmount);
     if (!issueEmployeeId) {
@@ -80,18 +108,22 @@ export default function SalaryAdvancesScreen() {
       Alert.alert('Ошибка', 'Укажите сумму');
       return;
     }
+    if (issueSource === 'manager_shift' && !managerShift) {
+      Alert.alert('Ошибка', 'Нет открытой смены менеджера для списания');
+      return;
+    }
     const employee = activeUsers.find(u => u.id === issueEmployeeId);
     if (!employee) {
       Alert.alert('Ошибка', 'Сотрудник не найден');
       return;
     }
-    const result = issueSalaryAdvance(employee.id, employee.name, amount, issueComment.trim(), forceNegative);
+    const result = issueSalaryAdvance(employee.id, employee.name, amount, issueComment.trim(), forceNegative, issueMethod, issueSource);
     if (result && !result.success) {
       if (result.wouldGoNegative) {
         const balAfter = (result.currentBalance ?? 0) - amount;
         Alert.alert(
           '⚠️ КАССА УЙДЁТ В МИНУС!',
-          `Текущий остаток: ${result.currentBalance} ₽\nВыдаёте: ${amount} ₽\nБудет: ${balAfter} ₽`,
+          `Источник: ${getSourceLabel(issueSource, issueMethod)}\nТекущий остаток: ${result.currentBalance} ₽\nВыдаёте: ${amount} ₽\nБудет: ${balAfter} ₽`,
           [
             { text: 'Отмена', style: 'cancel' },
             { text: '⚠️ Разрешить минус', style: 'destructive', onPress: () => handleIssue(true) },
@@ -105,9 +137,9 @@ export default function SalaryAdvancesScreen() {
     setIssueEmployeeId('');
     setIssueAmount('');
     setIssueComment('');
-    Alert.alert('Готово', `Выдано в долг под ЗП: ${amount} ₽ — ${employee.name}`);
+    Alert.alert('Готово', `Выдано в долг под ЗП: ${amount} ₽ — ${employee.name}\nИсточник: ${getSourceLabel(issueSource, issueMethod)}`);
     setTab('debts');
-  }, [issueEmployeeId, issueAmount, issueComment, activeUsers, issueSalaryAdvance]);
+  }, [issueEmployeeId, issueAmount, issueComment, issueMethod, issueSource, activeUsers, issueSalaryAdvance, managerShift, getSourceLabel]);
 
   const handlePay = useCallback((forceNegative?: boolean) => {
     const gross = Number(payGrossAmount);
@@ -119,28 +151,33 @@ export default function SalaryAdvancesScreen() {
       Alert.alert('Ошибка', 'Укажите начисленную сумму');
       return;
     }
+    if (paySource === 'manager_shift' && !managerShift && payNet > 0) {
+      Alert.alert('Ошибка', 'Нет открытой смены менеджера для списания');
+      return;
+    }
     const employee = activeUsers.find(u => u.id === payEmployeeId);
     if (!employee) {
       Alert.alert('Ошибка', 'Сотрудник не найден');
       return;
     }
 
+    const sourceInfo = payNet > 0 ? `\nИсточник: ${getSourceLabel(paySource, payMethod)}` : '';
     const confirmMsg = payDeduction > 0
-      ? `Начислено: ${gross} ₽\nЗачтено долга: ${payDeduction} ₽\nК выдаче: ${payNet} ₽ (${payMethod === 'cash' ? 'наличные' : 'безнал'})`
-      : `К выдаче: ${gross} ₽ (${payMethod === 'cash' ? 'наличные' : 'безнал'})`;
+      ? `Начислено: ${gross} ₽\nЗачтено долга: ${payDeduction} ₽\nК выдаче: ${payNet} ₽ (${payMethod === 'cash' ? 'наличные' : 'безнал'})${sourceInfo}`
+      : `К выдаче: ${gross} ₽ (${payMethod === 'cash' ? 'наличные' : 'безнал'})${sourceInfo}`;
 
     Alert.alert('Подтверждение', `Выплата зарплаты: ${employee.name}\n\n${confirmMsg}`, [
       { text: 'Отмена', style: 'cancel' },
       {
         text: 'Выплатить',
         onPress: () => {
-          const result = paySalary(employee.id, employee.name, gross, payMethod, payComment.trim(), forceNegative);
+          const result = paySalary(employee.id, employee.name, gross, payMethod, payComment.trim(), forceNegative, paySource);
           if (result && !result.success) {
             if (result.wouldGoNegative) {
               const balAfter = (result.currentBalance ?? 0) - (result.netPaid ?? payNet);
               Alert.alert(
                 '⚠️ КАССА УЙДЁТ В МИНУС!',
-                `Текущий остаток: ${result.currentBalance} ₽\nК выдаче: ${result.netPaid ?? payNet} ₽\nБудет: ${balAfter} ₽`,
+                `Источник: ${getSourceLabel(paySource, payMethod)}\nТекущий остаток: ${result.currentBalance} ₽\nК выдаче: ${result.netPaid ?? payNet} ₽\nБудет: ${balAfter} ₽`,
                 [
                   { text: 'Отмена', style: 'cancel' },
                   { text: '⚠️ Разрешить минус', style: 'destructive', onPress: () => handlePay(true) },
@@ -162,7 +199,7 @@ export default function SalaryAdvancesScreen() {
         },
       },
     ]);
-  }, [payEmployeeId, payGrossAmount, payMethod, payComment, payDeduction, payNet, activeUsers, paySalary]);
+  }, [payEmployeeId, payGrossAmount, payMethod, paySource, payComment, payDeduction, payNet, activeUsers, paySalary, managerShift, getSourceLabel]);
 
   const tabs: { key: SalaryTab; label: string }[] = [
     { key: 'debts', label: 'Долги' },
@@ -233,6 +270,112 @@ export default function SalaryAdvancesScreen() {
         </View>
       </TouchableWithoutFeedback>
     </Modal>
+  );
+
+  const renderSourceSelector = (
+    source: CashSource,
+    setSource: (s: CashSource) => void,
+    method: PaymentMethod,
+  ) => (
+    <View>
+      <Text style={styles.inputLabel}>Источник списания</Text>
+      <View style={styles.sourceRow}>
+        <TouchableOpacity
+          style={[styles.sourceBtn, source === 'admin' && styles.sourceBtnActive]}
+          onPress={() => setSource('admin')}
+          activeOpacity={0.7}
+        >
+          <Building2 size={16} color={source === 'admin' ? Colors.white : Colors.text} />
+          <View style={styles.sourceBtnContent}>
+            <Text style={[styles.sourceBtnText, source === 'admin' && styles.sourceBtnTextActive]}>
+              Финансы админа
+            </Text>
+            <Text style={[styles.sourceBtnBalance, source === 'admin' && styles.sourceBtnBalanceActive]}>
+              {method === 'cash' ? adminFinBal.cash : adminFinBal.card} ₽
+            </Text>
+          </View>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.sourceBtn,
+            source === 'manager_shift' && styles.sourceBtnActive,
+            !managerShift && styles.sourceBtnDisabled,
+          ]}
+          onPress={() => {
+            if (managerShift) setSource('manager_shift');
+            else Alert.alert('Недоступно', 'Нет открытой смены менеджера');
+          }}
+          activeOpacity={managerShift ? 0.7 : 1}
+        >
+          <Wallet size={16} color={source === 'manager_shift' ? Colors.white : (!managerShift ? Colors.textMuted : Colors.text)} />
+          <View style={styles.sourceBtnContent}>
+            <Text style={[
+              styles.sourceBtnText,
+              source === 'manager_shift' && styles.sourceBtnTextActive,
+              !managerShift && styles.sourceBtnTextDisabled,
+            ]}>
+              Касса менеджера
+            </Text>
+            <Text style={[
+              styles.sourceBtnBalance,
+              source === 'manager_shift' && styles.sourceBtnBalanceActive,
+              !managerShift && styles.sourceBtnTextDisabled,
+            ]}>
+              {managerShift ? `${managerShiftBalance} ₽` : 'нет смены'}
+            </Text>
+          </View>
+        </TouchableOpacity>
+      </View>
+
+      {source === 'admin' && (
+        <View style={styles.sourceInfoBanner}>
+          <Building2 size={14} color={Colors.info} />
+          <Text style={styles.sourceInfoText}>
+            Остаток ({method === 'cash' ? 'нал' : 'безнал'}): {method === 'cash' ? adminFinBal.cash : adminFinBal.card} ₽
+          </Text>
+        </View>
+      )}
+      {source === 'manager_shift' && managerShift && (
+        <View style={styles.sourceInfoBanner}>
+          <Wallet size={14} color={Colors.info} />
+          <Text style={styles.sourceInfoText}>
+            Касса {managerShift.operatorName}: {managerShiftBalance} ₽
+          </Text>
+        </View>
+      )}
+    </View>
+  );
+
+  const renderMethodSelector = (
+    method: PaymentMethod,
+    setMethod: (m: PaymentMethod) => void,
+    source: CashSource,
+  ) => (
+    <View>
+      <Text style={styles.inputLabel}>Способ оплаты</Text>
+      <View style={styles.methodRow}>
+        <TouchableOpacity
+          style={[styles.methodBtn, method === 'cash' && styles.methodBtnActive]}
+          onPress={() => setMethod('cash')}
+        >
+          <Banknote size={16} color={method === 'cash' ? Colors.white : Colors.text} />
+          <Text style={[styles.methodBtnText, method === 'cash' && styles.methodBtnTextActive]}>
+            Наличные
+          </Text>
+        </TouchableOpacity>
+        {source !== 'manager_shift' && (
+          <TouchableOpacity
+            style={[styles.methodBtn, method === 'card' && styles.methodBtnActive]}
+            onPress={() => setMethod('card')}
+          >
+            <CreditCard size={16} color={method === 'card' ? Colors.white : Colors.text} />
+            <Text style={[styles.methodBtnText, method === 'card' && styles.methodBtnTextActive]}>
+              Безнал
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    </View>
   );
 
   return (
@@ -346,7 +489,7 @@ export default function SalaryAdvancesScreen() {
             <View style={styles.formCard}>
               <Text style={styles.formTitle}>Выдача в долг под зарплату</Text>
               <Text style={styles.formHint}>
-                Сумма будет списана из кассы. Долг сотрудника увеличится.
+                Сумма будет списана из выбранной кассы. Долг сотрудника увеличится.
               </Text>
 
               <Text style={styles.inputLabel}>Сотрудник</Text>
@@ -379,6 +522,39 @@ export default function SalaryAdvancesScreen() {
                 placeholderTextColor={Colors.textMuted}
               />
 
+              {renderSourceSelector(issueSource, (s) => {
+                setIssueSource(s);
+                if (s === 'manager_shift') setIssueMethod('cash');
+              }, issueMethod)}
+
+              {renderMethodSelector(issueMethod, setIssueMethod, issueSource)}
+
+              {Number(issueAmount) > 0 && (
+                <View style={styles.balanceCheckCard}>
+                  <View style={styles.balanceCheckRow}>
+                    <Text style={styles.balanceCheckLabel}>Остаток на кассе:</Text>
+                    <Text style={styles.balanceCheckValue}>
+                      {getSourceBalance(issueSource, issueMethod)} ₽
+                    </Text>
+                  </View>
+                  <View style={styles.balanceCheckRow}>
+                    <Text style={styles.balanceCheckLabel}>Выдаёте:</Text>
+                    <Text style={[styles.balanceCheckValue, { color: Colors.danger }]}>
+                      −{Number(issueAmount)} ₽
+                    </Text>
+                  </View>
+                  <View style={[styles.balanceCheckRow, styles.balanceCheckRowTotal]}>
+                    <Text style={styles.balanceCheckLabelBold}>После выдачи:</Text>
+                    <Text style={[
+                      styles.balanceCheckValueBold,
+                      { color: getSourceBalance(issueSource, issueMethod) - Number(issueAmount) < 0 ? Colors.danger : Colors.success },
+                    ]}>
+                      {getSourceBalance(issueSource, issueMethod) - Number(issueAmount)} ₽
+                    </Text>
+                  </View>
+                </View>
+              )}
+
               <Text style={styles.inputLabel}>Комментарий</Text>
               <TextInput
                 style={[styles.input, styles.inputMultiline]}
@@ -395,7 +571,9 @@ export default function SalaryAdvancesScreen() {
                 activeOpacity={0.7}
               >
                 <ArrowDownCircle size={18} color={Colors.white} />
-                <Text style={styles.submitBtnText}>Выдать в долг</Text>
+                <Text style={styles.submitBtnText}>
+                  Выдать в долг{Number(issueAmount) > 0 ? ` ${Number(issueAmount)} ₽` : ''}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -465,27 +643,51 @@ export default function SalaryAdvancesScreen() {
                 </View>
               )}
 
-              <Text style={styles.inputLabel}>Способ выплаты</Text>
-              <View style={styles.methodRow}>
-                <TouchableOpacity
-                  style={[styles.methodBtn, payMethod === 'cash' && styles.methodBtnActive]}
-                  onPress={() => setPayMethod('cash')}
-                >
-                  <Banknote size={16} color={payMethod === 'cash' ? Colors.white : Colors.text} />
-                  <Text style={[styles.methodBtnText, payMethod === 'cash' && styles.methodBtnTextActive]}>
-                    Наличные
+              {payNet > 0 && (
+                <>
+                  {renderSourceSelector(paySource, (s) => {
+                    setPaySource(s);
+                    if (s === 'manager_shift') setPayMethod('cash');
+                  }, payMethod)}
+
+                  {renderMethodSelector(payMethod, setPayMethod, paySource)}
+
+                  {Number(payGrossAmount) > 0 && (
+                    <View style={styles.balanceCheckCard}>
+                      <View style={styles.balanceCheckRow}>
+                        <Text style={styles.balanceCheckLabel}>Остаток на кассе:</Text>
+                        <Text style={styles.balanceCheckValue}>
+                          {getSourceBalance(paySource, payMethod)} ₽
+                        </Text>
+                      </View>
+                      <View style={styles.balanceCheckRow}>
+                        <Text style={styles.balanceCheckLabel}>К выдаче:</Text>
+                        <Text style={[styles.balanceCheckValue, { color: Colors.danger }]}>
+                          −{payNet} ₽
+                        </Text>
+                      </View>
+                      <View style={[styles.balanceCheckRow, styles.balanceCheckRowTotal]}>
+                        <Text style={styles.balanceCheckLabelBold}>После выдачи:</Text>
+                        <Text style={[
+                          styles.balanceCheckValueBold,
+                          { color: getSourceBalance(paySource, payMethod) - payNet < 0 ? Colors.danger : Colors.success },
+                        ]}>
+                          {getSourceBalance(paySource, payMethod) - payNet} ₽
+                        </Text>
+                      </View>
+                    </View>
+                  )}
+                </>
+              )}
+
+              {payNet <= 0 && Number(payGrossAmount) > 0 && (
+                <View style={styles.sourceInfoBanner}>
+                  <Wallet size={14} color={Colors.info} />
+                  <Text style={styles.sourceInfoText}>
+                    Вся сумма зачтена в погашение долга — деньги из кассы не списываются
                   </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.methodBtn, payMethod === 'card' && styles.methodBtnActive]}
-                  onPress={() => setPayMethod('card')}
-                >
-                  <CreditCard size={16} color={payMethod === 'card' ? Colors.white : Colors.text} />
-                  <Text style={[styles.methodBtnText, payMethod === 'card' && styles.methodBtnTextActive]}>
-                    Безнал
-                  </Text>
-                </TouchableOpacity>
-              </View>
+                </View>
+              )}
 
               <Text style={styles.inputLabel}>Комментарий</Text>
               <TextInput
@@ -503,7 +705,9 @@ export default function SalaryAdvancesScreen() {
                 activeOpacity={0.7}
               >
                 <ArrowUpCircle size={18} color={Colors.white} />
-                <Text style={styles.submitBtnText}>Выплатить зарплату</Text>
+                <Text style={styles.submitBtnText}>
+                  Выплатить зарплату{Number(payGrossAmount) > 0 ? ` ${Number(payGrossAmount)} ₽` : ''}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -865,6 +1069,105 @@ const styles = StyleSheet.create({
   distributionValue: {
     fontSize: 15,
     fontWeight: '600' as const,
+    color: Colors.text,
+  },
+  sourceRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  sourceBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.inputBg,
+  },
+  sourceBtnActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  sourceBtnDisabled: {
+    opacity: 0.5,
+  },
+  sourceBtnContent: {
+    flex: 1,
+  },
+  sourceBtnText: {
+    fontSize: 12,
+    fontWeight: '600' as const,
+    color: Colors.text,
+  },
+  sourceBtnTextActive: {
+    color: Colors.white,
+  },
+  sourceBtnTextDisabled: {
+    color: Colors.textMuted,
+  },
+  sourceBtnBalance: {
+    fontSize: 11,
+    color: Colors.textMuted,
+    marginTop: 2,
+  },
+  sourceBtnBalanceActive: {
+    color: 'rgba(255,255,255,0.8)',
+  },
+  sourceInfoBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.infoLight,
+    borderRadius: 8,
+    padding: 10,
+    gap: 8,
+    marginTop: 8,
+  },
+  sourceInfoText: {
+    fontSize: 12,
+    color: Colors.info,
+    fontWeight: '500' as const,
+    flex: 1,
+  },
+  balanceCheckCard: {
+    backgroundColor: Colors.inputBg,
+    borderRadius: 10,
+    padding: 14,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  balanceCheckRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 3,
+  },
+  balanceCheckRowTotal: {
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+    marginTop: 4,
+    paddingTop: 6,
+  },
+  balanceCheckLabel: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+  },
+  balanceCheckValue: {
+    fontSize: 14,
+    fontWeight: '500' as const,
+    color: Colors.text,
+  },
+  balanceCheckLabelBold: {
+    fontSize: 13,
+    fontWeight: '700' as const,
+    color: Colors.text,
+  },
+  balanceCheckValueBold: {
+    fontSize: 15,
+    fontWeight: '700' as const,
     color: Colors.text,
   },
   methodRow: {
