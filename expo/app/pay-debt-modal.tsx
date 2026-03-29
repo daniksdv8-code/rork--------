@@ -1,13 +1,13 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { Check, Banknote, CreditCard, Info, ArrowRightLeft } from 'lucide-react-native';
+import { Check, Banknote, CreditCard, Info } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useParking } from '@/providers/ParkingProvider';
 import { useAuth } from '@/providers/AuthProvider';
 import { PaymentMethod } from '@/types';
 import { roundMoney } from '@/utils/money';
-import { Wallet } from 'lucide-react-native';
+
 
 export default function PayDebtModal() {
   const router = useRouter();
@@ -18,7 +18,7 @@ export default function PayDebtModal() {
     totalDebt: string;
     mode: string;
   }>();
-  const { payDebt, payClientDebt, debts, needsShiftCheck, calculateDebtByMethod } = useParking();
+  const { payDebt, payClientDebt, debts, needsShiftCheck, calculateDebtByMethod, getClientTotalDebt } = useParking();
   const { isAdmin } = useAuth();
   const shiftRequired = needsShiftCheck();
   const [method, setMethod] = useState<PaymentMethod>('cash');
@@ -28,28 +28,23 @@ export default function PayDebtModal() {
   const isClientDebtMode = mode === 'client_debt';
   const debt = !isClientDebtMode ? debts.find(d => d.id === debtId) : null;
 
+  const storedClientDebt = useMemo(() => {
+    if (!isClientDebtMode || !clientId) return 0;
+    return getClientTotalDebt(clientId);
+  }, [isClientDebtMode, clientId, getClientTotalDebt]);
+
   const calculatedDebt = useMemo(() => {
     if (!isClientDebtMode || !clientId) return null;
     return calculateDebtByMethod(clientId, method);
   }, [isClientDebtMode, clientId, method, calculateDebtByMethod]);
 
-  const calculatedCash = useMemo(() => {
-    if (!isClientDebtMode || !clientId) return null;
-    return calculateDebtByMethod(clientId, 'cash');
-  }, [isClientDebtMode, clientId, calculateDebtByMethod]);
-
-  const calculatedCard = useMemo(() => {
-    if (!isClientDebtMode || !clientId) return null;
-    return calculateDebtByMethod(clientId, 'card');
-  }, [isClientDebtMode, clientId, calculateDebtByMethod]);
-
   const displayDebt = useMemo(() => {
-    if (isClientDebtMode && calculatedDebt) {
-      return calculatedDebt.total;
+    if (isClientDebtMode) {
+      return storedClientDebt;
     }
     if (debt) return debt.remainingAmount;
     return Number(totalDebt) || 0;
-  }, [isClientDebtMode, calculatedDebt, debt, totalDebt]);
+  }, [isClientDebtMode, storedClientDebt, debt, totalDebt]);
 
   useEffect(() => {
     if (!amountManuallyEdited) {
@@ -59,10 +54,7 @@ export default function PayDebtModal() {
 
   const handleMethodChange = useCallback((newMethod: PaymentMethod) => {
     setMethod(newMethod);
-    if (!amountManuallyEdited) {
-      // amount will update via useEffect
-    }
-  }, [amountManuallyEdited]);
+  }, []);
 
   const handleAmountChange = useCallback((text: string) => {
     setAmount(text);
@@ -85,14 +77,18 @@ export default function PayDebtModal() {
       return;
     }
 
+    if (numAmount > displayDebt && displayDebt > 0) {
+      Alert.alert('Ошибка', `Сумма не может превышать текущий долг: ${displayDebt} ₽`);
+      return;
+    }
+
     if (isClientDebtMode && clientId) {
-      const effectiveTotal = calculatedDebt?.total ?? displayDebt;
-      payClientDebt(clientId, numAmount, method, effectiveTotal);
-      const remaining = roundMoney(effectiveTotal - numAmount);
+      payClientDebt(clientId, numAmount, method);
+      const remaining = roundMoney(displayDebt - numAmount);
       if (remaining <= 0) {
         Alert.alert('Готово', 'Долг полностью погашен');
       } else {
-        Alert.alert('Готово', `Оплачено ${numAmount} ₽. Остаток: ${Math.max(0, remaining)} ₽`);
+        Alert.alert('Готово', `Оплачено ${numAmount} ₽. Остаток: ${remaining} ₽`);
       }
     } else if (debtId) {
       payDebt(debtId, numAmount, method);
@@ -104,18 +100,14 @@ export default function PayDebtModal() {
       }
     }
     router.back();
-  }, [amount, method, debtId, clientId, isClientDebtMode, payDebt, payClientDebt, debt, displayDebt, calculatedDebt, router, shiftRequired, isAdmin]);
-
-  const cashTotal = calculatedCash?.total ?? 0;
-  const cardTotal = calculatedCard?.total ?? 0;
-  const hasDifferentRates = isClientDebtMode && Math.abs(cashTotal - cardTotal) > 0.01;
+  }, [amount, method, debtId, clientId, isClientDebtMode, payDebt, payClientDebt, debt, displayDebt, router, shiftRequired, isAdmin]);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.header}>
         <Text style={styles.title}>{clientName ?? 'Клиент'}</Text>
         <View style={styles.debtBadge}>
-          <Text style={styles.debtBadgeText}>Долг: {displayDebt} ₽</Text>
+          <Text style={styles.debtBadgeText}>Текущий долг: {displayDebt} ₽</Text>
         </View>
       </View>
 
@@ -139,20 +131,11 @@ export default function PayDebtModal() {
         </TouchableOpacity>
       </View>
 
-      {hasDifferentRates && (
-        <View style={styles.rateCompare}>
-          <ArrowRightLeft size={14} color={Colors.primary} />
-          <Text style={styles.rateCompareText}>
-            Наличные: {cashTotal} ₽  |  Безнал: {cardTotal} ₽
-          </Text>
-        </View>
-      )}
-
       {isClientDebtMode && calculatedDebt && calculatedDebt.details.length > 0 && (
         <View style={styles.detailsBlock}>
           <View style={styles.detailsHeader}>
             <Info size={14} color={Colors.textSecondary} />
-            <Text style={styles.detailsTitle}>Расчёт по тарифам ({method === 'cash' ? 'наличные' : 'безнал'})</Text>
+            <Text style={styles.detailsTitle}>Детализация долга</Text>
           </View>
           {calculatedDebt.details.map((d, i) => (
             <View key={d.sessionId + i} style={styles.detailRow}>
@@ -160,7 +143,7 @@ export default function PayDebtModal() {
                 {d.serviceType === 'lombard' ? 'Ломбард' : d.serviceType === 'monthly' ? 'Месячный' : 'Дневной'}:
               </Text>
               <Text style={styles.detailValue}>
-                {d.days} сут. × {d.rate} ₽ = {d.amount} ₽
+                {d.days} сут.
               </Text>
             </View>
           ))}
@@ -170,19 +153,6 @@ export default function PayDebtModal() {
               <Text style={styles.detailValue}>{calculatedDebt.oldDebtsTotal} ₽</Text>
             </View>
           )}
-          <View style={[styles.detailRow, styles.detailRowTotal]}>
-            <Text style={styles.detailTotalLabel}>Итого:</Text>
-            <Text style={styles.detailTotalValue}>{calculatedDebt.total} ₽</Text>
-          </View>
-        </View>
-      )}
-
-      {isClientDebtMode && (
-        <View style={styles.recalcNotice}>
-          <Info size={14} color={Colors.warning} />
-          <Text style={styles.recalcNoticeText}>
-            Итоговая сумма пересчитана по текущим тарифам для выбранного способа оплаты.
-          </Text>
         </View>
       )}
 
@@ -220,32 +190,35 @@ export default function PayDebtModal() {
 
       {amountManuallyEdited && Number(amount) !== displayDebt && (
         <TouchableOpacity style={styles.resetAmountBtn} onPress={handleSetFullAmount}>
-          <Text style={styles.resetAmountText}>Вернуть рассчитанную сумму: {displayDebt} ₽</Text>
+          <Text style={styles.resetAmountText}>Погасить полностью: {displayDebt} ₽</Text>
         </TouchableOpacity>
+      )}
+
+      {Number(amount) > 0 && Number(amount) <= displayDebt && displayDebt > 0 && (
+        <View style={styles.distributionCard}>
+          <View style={styles.distributionRow}>
+            <Text style={styles.distributionLabel}>Долг до оплаты:</Text>
+            <Text style={styles.distributionValue}>{displayDebt} ₽</Text>
+          </View>
+          <View style={styles.distributionRow}>
+            <Text style={[styles.distributionLabel, { color: Colors.success }]}>Оплата:</Text>
+            <Text style={[styles.distributionValue, { color: Colors.success }]}>−{Number(amount)} ₽</Text>
+          </View>
+          <View style={[styles.distributionRow, styles.detailRowTotal]}>
+            <Text style={styles.detailTotalLabel}>Остаток после оплаты:</Text>
+            <Text style={[styles.detailTotalValue, { color: roundMoney(displayDebt - Number(amount)) <= 0 ? Colors.success : Colors.danger }]}>
+              {roundMoney(displayDebt - Number(amount))} ₽
+            </Text>
+          </View>
+        </View>
       )}
 
       {Number(amount) > displayDebt && displayDebt > 0 && (
         <View style={styles.overpayNotice}>
-          <Wallet size={14} color={Colors.success} />
-          <Text style={styles.overpayNoticeText}>
-            {roundMoney(Number(amount) - displayDebt)} ₽ пойдёт как аванс по активным заездам
+          <Info size={14} color={Colors.danger} />
+          <Text style={[styles.overpayNoticeText, { color: Colors.danger }]}>
+            Сумма превышает долг. Максимум: {displayDebt} ₽
           </Text>
-        </View>
-      )}
-
-      {Number(amount) > 0 && displayDebt > 0 && (
-        <View style={styles.distributionCard}>
-          <Text style={styles.distributionTitle}>Авто-распределение:</Text>
-          <View style={styles.distributionRow}>
-            <Text style={[styles.distributionLabel, { color: Colors.danger }]}>→ Долг:</Text>
-            <Text style={[styles.distributionValue, { color: Colors.danger }]}>{roundMoney(Math.min(Number(amount), displayDebt))} ₽</Text>
-          </View>
-          {Number(amount) > displayDebt && (
-            <View style={styles.distributionRow}>
-              <Text style={[styles.distributionLabel, { color: Colors.success }]}>→ Аванс:</Text>
-              <Text style={[styles.distributionValue, { color: Colors.success }]}>{roundMoney(Number(amount) - displayDebt)} ₽</Text>
-            </View>
-          )}
         </View>
       )}
 

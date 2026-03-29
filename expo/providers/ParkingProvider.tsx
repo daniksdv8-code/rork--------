@@ -1799,7 +1799,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     schedulePush();
   }, [debts, addTransaction, schedulePush, shifts, updateShiftExpected, logAction, addCashOperation, getShiftCashBalance]);
 
-  const payClientDebt = useCallback((clientId: string, amount: number, method: PaymentMethod, calculatedTotal?: number) => {
+  const payClientDebt = useCallback((clientId: string, amount: number, method: PaymentMethod, _calculatedTotal?: number) => {
     const now = new Date().toISOString();
 
     const clientOldDebts = debts.filter(d => d.clientId === clientId && d.remainingAmount > 0)
@@ -1811,13 +1811,10 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
     if (storedTotal <= 0) return;
 
-    const effectiveTotal = calculatedTotal && calculatedTotal > 0 ? calculatedTotal : storedTotal;
-    const actualAmount = roundMoney(Math.min(amount, effectiveTotal));
-    const payRatio = effectiveTotal > 0 ? actualAmount / effectiveTotal : 1;
-    const isFullPayment = actualAmount >= effectiveTotal;
+    const actualAmount = roundMoney(Math.min(amount, storedTotal));
+    const isFullPayment = actualAmount >= storedTotal;
 
-    const storedReduction = isFullPayment ? storedTotal : roundMoney(storedTotal * payRatio);
-    let remaining = storedReduction;
+    let remaining = actualAmount;
 
     const updatedDebtIds: string[] = [];
     if (isFullPayment) {
@@ -1868,7 +1865,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       }
     }
 
-    const newRemainingTotal = isFullPayment ? 0 : roundMoney(effectiveTotal - actualAmount);
+    const newRemainingTotal = isFullPayment ? 0 : roundMoney(storedTotal - actualAmount);
 
     const resolvedCarId = (clientOldDebts.length > 0 && clientOldDebts[0].carId)
       ? clientOldDebts[0].carId
