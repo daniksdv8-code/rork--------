@@ -357,6 +357,8 @@ export interface TeamViolationMonth {
   violations: ViolationEntry[];
 }
 
+export type SalarySource = 'admin' | 'manager_shift';
+
 export interface SalaryAdvance {
   id: string;
   employeeId: string;
@@ -368,6 +370,8 @@ export interface SalaryAdvance {
   issuedByName: string;
   issuedAt: string;
   updatedAt: string;
+  source?: SalarySource;
+  method?: PaymentMethod;
 }
 
 export interface SalaryPayment {
@@ -382,6 +386,7 @@ export interface SalaryPayment {
   paidBy: string;
   paidByName: string;
   paidAt: string;
+  source?: SalarySource;
 }
 
 export interface AppData {

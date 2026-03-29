@@ -89,9 +89,11 @@ export default function FinanceScreen() {
   const adminFinBal = useMemo(() => getAdminFinanceBalance(), [getAdminFinanceBalance]);
 
   const salaryStats = useMemo(() => {
-    const totalAdvances = salaryAdvances.reduce((s: number, a: SalaryAdvance) => s + a.amount, 0);
-    const totalRemaining = salaryAdvances.filter((a: SalaryAdvance) => a.remainingAmount > 0).reduce((s: number, a: SalaryAdvance) => s + a.remainingAmount, 0);
-    const totalSalaryPaid = salaryPayments.reduce((s: number, p: SalaryPayment) => s + p.netPaid, 0);
+    const adminAdvances = salaryAdvances.filter((a: SalaryAdvance) => !(a as any).source || (a as any).source === 'admin');
+    const totalAdvances = adminAdvances.reduce((s: number, a: SalaryAdvance) => s + a.amount, 0);
+    const totalRemaining = adminAdvances.filter((a: SalaryAdvance) => a.remainingAmount > 0).reduce((s: number, a: SalaryAdvance) => s + a.remainingAmount, 0);
+    const adminPayments = salaryPayments.filter((p: SalaryPayment) => !(p as any).source || (p as any).source === 'admin');
+    const totalSalaryPaid = adminPayments.reduce((s: number, p: SalaryPayment) => s + p.netPaid, 0);
     return { totalAdvances, totalRemaining, totalSalaryPaid };
   }, [salaryAdvances, salaryPayments]);
 
@@ -321,19 +323,19 @@ export default function FinanceScreen() {
       });
     });
 
-    salaryAdvances.filter((a: SalaryAdvance) => filterDate(a.issuedAt)).forEach((a: SalaryAdvance) => {
+    salaryAdvances.filter((a: SalaryAdvance) => filterDate(a.issuedAt) && (!(a as any).source || (a as any).source === 'admin')).forEach((a: SalaryAdvance) => {
       ops.push({
         id: a.id + '_sal_adv',
         date: a.issuedAt,
         type: 'salary_advance',
         amount: a.amount,
-        method: 'наличные',
+        method: (a as any).method === 'card' ? 'безнал' : 'наличные',
         description: `Аванс (долг под ЗП): ${a.employeeName} — ${a.amount} ₽${a.comment ? ` (${a.comment})` : ''}`,
         operator: a.issuedByName,
       });
     });
 
-    salaryPayments.filter((p: SalaryPayment) => filterDate(p.paidAt) && p.netPaid > 0).forEach((p: SalaryPayment) => {
+    salaryPayments.filter((p: SalaryPayment) => filterDate(p.paidAt) && p.netPaid > 0 && (!(p as any).source || (p as any).source === 'admin')).forEach((p: SalaryPayment) => {
       ops.push({
         id: p.id + '_sal_pay',
         date: p.paidAt,

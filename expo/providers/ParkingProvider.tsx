@@ -2642,10 +2642,10 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     const periodAdminExpenses = filterByPeriod(adminExpenses);
     const totalAdminExpenses = roundMoney(periodAdminExpenses.reduce((s, e) => s + e.amount, 0));
 
-    const periodSalaryAdvances = filterByPeriodKey(salaryAdvances, 'issuedAt');
+    const periodSalaryAdvances = filterByPeriodKey(salaryAdvances, 'issuedAt').filter(a => !a.source || a.source === 'admin');
     const totalSalaryAdvances = roundMoney(periodSalaryAdvances.reduce((s, a) => s + a.amount, 0));
 
-    const periodSalaryPayments = filterByPeriodKey(salaryPayments, 'paidAt');
+    const periodSalaryPayments = filterByPeriodKey(salaryPayments, 'paidAt').filter(p => !p.source || p.source === 'admin');
     const totalSalaryPaid = roundMoney(periodSalaryPayments.filter(p => p.netPaid > 0).reduce((s, p) => s + p.netPaid, 0));
 
     const totalSalaryExpenses = roundMoney(totalSalaryAdvances + totalSalaryPaid);
@@ -3652,15 +3652,35 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       - transactions.filter(t => t.type === 'refund' && t.method === 'card').reduce((s, t) => s + t.amount, 0)
     );
     const cashFromManagers = roundMoney(withdrawals.reduce((s, w) => s + w.amount, 0));
-    const _totalAdminExp = roundMoney(adminExpenses.reduce((s, e) => s + e.amount, 0));
-    const salaryAdvanceTotal = roundMoney(
-      salaryAdvances.reduce((s, a) => s + a.amount, 0)
+
+    const adminSourcedAdvances = salaryAdvances.filter(a => !a.source || a.source === 'admin');
+    const salaryAdvanceCash = roundMoney(
+      adminSourcedAdvances.filter(a => !a.method || a.method === 'cash').reduce((s, a) => s + a.amount, 0)
     );
-    const salaryPayTotal = roundMoney(
-      salaryPayments.filter(p => p.netPaid > 0).reduce((s, p) => s + p.netPaid, 0)
+    const salaryAdvanceCard = roundMoney(
+      adminSourcedAdvances.filter(a => a.method === 'card').reduce((s, a) => s + a.amount, 0)
     );
-    const cashBalance = roundMoney(cashFromManagers - adminExpenses.filter(e => e.method === 'cash').reduce((s, e) => s + e.amount, 0) - salaryAdvanceTotal - salaryPayTotal);
-    const cardBalance = roundMoney(allCardIncome - adminExpenses.filter(e => e.method === 'card').reduce((s, e) => s + e.amount, 0));
+
+    const adminSourcedPayments = salaryPayments.filter(p => !p.source || p.source === 'admin');
+    const salaryPayCash = roundMoney(
+      adminSourcedPayments.filter(p => p.netPaid > 0 && p.method === 'cash').reduce((s, p) => s + p.netPaid, 0)
+    );
+    const salaryPayCard = roundMoney(
+      adminSourcedPayments.filter(p => p.netPaid > 0 && p.method === 'card').reduce((s, p) => s + p.netPaid, 0)
+    );
+
+    const cashBalance = roundMoney(
+      cashFromManagers
+      - adminExpenses.filter(e => e.method === 'cash').reduce((s, e) => s + e.amount, 0)
+      - salaryAdvanceCash
+      - salaryPayCash
+    );
+    const cardBalance = roundMoney(
+      allCardIncome
+      - adminExpenses.filter(e => e.method === 'card').reduce((s, e) => s + e.amount, 0)
+      - salaryAdvanceCard
+      - salaryPayCard
+    );
     return { cash: cashBalance, card: cardBalance, total: roundMoney(cashBalance + cardBalance) };
   }, [transactions, withdrawals, adminExpenses, salaryAdvances, salaryPayments]);
 
@@ -3712,6 +3732,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       issuedByName: currentUser?.name ?? 'Неизвестно',
       issuedAt: now,
       updatedAt: now,
+      source: effectiveSource,
+      method: effectiveMethod,
     };
     setSalaryAdvances(prev => [advance, ...prev]);
 
@@ -3854,6 +3876,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       paidBy: currentUser?.id ?? 'unknown',
       paidByName: currentUser?.name ?? 'Неизвестно',
       paidAt: now,
+      source: effectiveSource,
     };
     setSalaryPayments(prev => [salPayment, ...prev]);
 
