@@ -827,13 +827,15 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     return op;
   }, [currentUser]);
 
-  const checkIn = useCallback((carId: string, clientId: string, serviceType: ServiceType, plannedDepartureTime?: string, paymentAtEntry?: { method: PaymentMethod; amount: number; days?: number; paidUntilDate?: string; baseAmount?: number; adjustmentReason?: string }, debtAtEntry?: { amount: number; description?: string }, isSecondary?: boolean, lombardEntry?: boolean) => {
+  const checkIn = useCallback((carId: string, clientId: string, serviceType: ServiceType, plannedDepartureTime?: string, paymentAtEntry?: { method: PaymentMethod; amount: number; days?: number; paidUntilDate?: string; baseAmount?: number; adjustmentReason?: string }, debtAtEntry?: { amount: number; description?: string; paidUntilDate?: string }, isSecondary?: boolean, lombardEntry?: boolean) => {
     const activeShift = shifts.find(s => s.status === 'open');
     const sessionNow = new Date().toISOString();
     const isLombard = lombardEntry === true || serviceType === 'lombard';
     const isDebtEntry = isLombard || (!!debtAtEntry && debtAtEntry.amount > 0);
-    const sessionStatus = isDebtEntry ? 'active_debt' : 'active';
+    const isStandardDebt = isDebtEntry && !isLombard;
+    const sessionStatus = isLombard ? 'active_debt' : 'active';
     const lombardRate = isLombard ? tariffs.lombardRate : undefined;
+    const debtPrepaidAmount = isStandardDebt ? (debtAtEntry?.amount ?? 0) : 0;
     const session: ParkingSession = {
       id: generateId(),
       carId,
@@ -847,7 +849,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       managerName: currentUser?.name ?? 'Неизвестно',
       shiftId: activeShift?.id ?? null,
       updatedAt: sessionNow,
-      prepaidAmount: paymentAtEntry?.amount ?? 0,
+      prepaidAmount: paymentAtEntry?.amount ?? debtPrepaidAmount,
       prepaidMethod: paymentAtEntry?.method ?? null,
       tariffType: isLombard ? 'lombard' : 'standard',
       lombardRateApplied: lombardRate,
@@ -952,53 +954,94 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     }
 
     if (isDebtEntry) {
-      const todayNow = new Date();
-      const todayStr = `${todayNow.getFullYear()}-${String(todayNow.getMonth() + 1).padStart(2, '0')}-${String(todayNow.getDate()).padStart(2, '0')}`;
-      let dailyRate: number;
       if (isLombard) {
-        dailyRate = lombardRate ?? tariffs.lombardRate;
-      } else if (serviceType === 'monthly') {
-        dailyRate = tariffs.monthlyCash;
+        const todayNow = new Date();
+        const todayStr = `${todayNow.getFullYear()}-${String(todayNow.getMonth() + 1).padStart(2, '0')}-${String(todayNow.getDate()).padStart(2, '0')}`;
+        const dailyRate = lombardRate ?? tariffs.lombardRate;
+        const firstAccrual: DailyDebtAccrual = {
+          id: generateId(),
+          parkingEntryId: session.id,
+          clientId,
+          carId,
+          accrualDate: todayStr,
+          amount: dailyRate,
+          tariffRate: dailyRate,
+          createdAt: sessionNow,
+        };
+        setDailyDebtAccruals(prev => [...prev, firstAccrual]);
+        updateClientDebt(clientId, dailyRate);
+        addTransaction({
+          clientId,
+          carId,
+          type: 'debt',
+          amount: dailyRate,
+          method: null,
+          date: sessionNow,
+          description: `Ломбард: первое начисление ${dailyRate} ₽/сут.`,
+        });
+        console.log(`[CheckIn] Lombard entry: first accrual ${dailyRate} ₽, session ${session.id}`);
       } else {
-        dailyRate = tariffs.onetimeCash;
-      }
-      const firstAccrual: DailyDebtAccrual = {
-        id: generateId(),
-        parkingEntryId: session.id,
-        clientId,
-        carId,
-        accrualDate: todayStr,
-        amount: dailyRate,
-        tariffRate: dailyRate,
-        createdAt: sessionNow,
-      };
-      setDailyDebtAccruals(prev => [...prev, firstAccrual]);
-      updateClientDebt(clientId, dailyRate);
+        const debtAmount = debtAtEntry?.amount ?? 0;
+        if (debtAmount > 0) {
+          const newDebt: Debt = {
+            id: generateId(),
+            clientId,
+            carId,
+            totalAmount: debtAmount,
+            remainingAmount: debtAmount,
+            createdAt: sessionNow,
+            updatedAt: sessionNow,
+            description: debtAtEntry?.description ?? `Постановка в долг: ${debtAmount} ₽`,
+            parkingEntryId: session.id,
+            status: 'active',
+          };
+          setDebts(prev => [...prev, newDebt]);
+          addTransaction({
+            clientId,
+            carId,
+            type: 'debt',
+            amount: debtAmount,
+            method: null,
+            date: sessionNow,
+            description: debtAtEntry?.description ?? `Постановка в долг: ${debtAmount} ₽`,
+          });
 
-      addTransaction({
-        clientId,
-        carId,
-        type: 'debt',
-        amount: dailyRate,
-        method: null,
-        date: sessionNow,
-        description: isLombard
-          ? `Ломбард: первое начисление ${dailyRate} ₽/сут.`
-          : `Постановка в долг: первое начисление ${dailyRate} ₽/сут.`,
-      });
-      console.log(`[CheckIn] ${isLombard ? 'Lombard' : 'Debt'} entry: first accrual ${dailyRate} ₽, session ${session.id}`);
+          if (serviceType === 'monthly' && debtAtEntry?.paidUntilDate) {
+            const paidUntil = debtAtEntry.paidUntilDate;
+            setSubscriptions(prev => {
+              const existing = prev.find(s => s.carId === carId && s.clientId === clientId);
+              if (existing) {
+                return prev.map(s => s.id === existing.id ? { ...s, paidUntil, updatedAt: sessionNow } : s);
+              } else {
+                const newSub: MonthlySubscription = {
+                  id: generateId(),
+                  carId,
+                  clientId,
+                  paidUntil,
+                  updatedAt: sessionNow,
+                };
+                return [...prev, newSub];
+              }
+            });
+          }
+
+          console.log(`[CheckIn] Standard debt entry: ${debtAmount} ₽, session ${session.id}, parkingEntryId set`);
+        }
+      }
     }
 
     const car = cars.find(c => c.id === carId);
     const client = clients.find(c => c.id === clientId);
     const payInfo = paymentAtEntry && paymentAtEntry.amount > 0 ? `, оплата ${paymentAtEntry.amount} ₽` : '';
-    const debtInfo = isDebtEntry ? (isLombard ? `, ломбард ${lombardRate ?? tariffs.lombardRate} ₽/сут.` : `, в долг`) : '';
+    const debtInfo = isDebtEntry ? (isLombard ? `, ломбард ${lombardRate ?? tariffs.lombardRate} ₽/сут.` : `, в долг ${debtAtEntry?.amount ?? 0} ₽`) : '';
     const typeLabel = isLombard ? 'ломбард' : (serviceType === 'monthly' ? 'месяц' : 'разово');
     const entryLabel = isSecondary ? 'Вторичная постановка авто' : 'Заезд';
     logAction('checkin', entryLabel, `${car?.plateNumber ?? carId} (${client?.name ?? clientId}), ${typeLabel}${payInfo}${debtInfo}`, session.id, 'session');
     if (isSecondary && isDebtEntry) {
-      const accrualRate = isLombard ? (lombardRate ?? tariffs.lombardRate) : tariffs.onetimeCash;
-      logAction('checkin', 'Создан долг по вторичной постановке', `${car?.plateNumber ?? carId} (${client?.name ?? clientId}), начисление: ${accrualRate} ₽/сут.`, session.id, 'session');
+      const debtLabel = isLombard
+        ? `начисление: ${lombardRate ?? tariffs.lombardRate} ₽/сут.`
+        : `долг: ${debtAtEntry?.amount ?? 0} ₽`;
+      logAction('checkin', 'Создан долг по вторичной постановке', `${car?.plateNumber ?? carId} (${client?.name ?? clientId}), ${debtLabel}`, session.id, 'session');
     }
     schedulePush();
     console.log(`[CheckIn] Session created for car ${carId}, status=${sessionStatus}, planned departure: ${plannedDepartureTime ?? 'not set'}`);
@@ -1262,6 +1305,19 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         console.log(`[CheckOut] Onetime exit, debt created: ${debtId}, amount: ${remaining}, prepaid: ${prepaid}`);
         return { debtId, amount: remaining, days, paid: 0 };
       } else {
+        const linkedDebtsForSession = debts.filter(d => d.parkingEntryId === sessionId && d.remainingAmount > 0);
+        if (linkedDebtsForSession.length > 0 && totalAmount < prepaid) {
+          setDebts(prev => prev.map(d => {
+            if (d.parkingEntryId !== sessionId || d.remainingAmount <= 0) return d;
+            const paidSoFar = roundMoney(d.totalAmount - d.remainingAmount);
+            const adjustedTotal = roundMoney(Math.min(d.totalAmount, totalAmount));
+            const adjustedRemaining = roundMoney(Math.max(0, adjustedTotal - paidSoFar));
+            console.log(`[CheckOut] Adjusted linked debt ${d.id}: total ${d.totalAmount} → ${adjustedTotal}, remaining ${d.remainingAmount} → ${adjustedRemaining}`);
+            return { ...d, totalAmount: adjustedTotal, remainingAmount: adjustedRemaining, updatedAt: now, status: adjustedRemaining <= 0 ? 'paid' as const : d.status };
+          }));
+          const carAdj = cars.find(c => c.id === session.carId);
+          logAction('checkout', 'Корректировка долга при досрочном выезде', `${carAdj?.plateNumber ?? session.carId}, долг скорректирован: ${prepaid} ₽ → ${totalAmount} ₽ (фактически ${days} сут.)`, sessionId, 'session');
+        }
         const carO = cars.find(c => c.id === session.carId);
         logAction('checkout', 'Выезд (разово)', `${carO?.plateNumber ?? session.carId}, ${days} сут., полностью оплачено при постановке`, sessionId, 'session');
         schedulePush();

@@ -211,7 +211,7 @@ export default function CheckinScreen() {
     return { ...base, paidUntilDate: monthlyCalc.paidUntil };
   }, [paymentStatus, paymentAmount, paymentMethod, serviceType, payDays, monthlyCalc, customAmountEnabled, adjustmentDiff, basePaymentAmount, adjustmentReason]);
 
-  const buildDebtAtEntry = useCallback((): { amount: number; description?: string } | undefined => {
+  const buildDebtAtEntry = useCallback((): { amount: number; description?: string; paidUntilDate?: string } | undefined => {
     if (tariffType === 'lombard') {
       return { amount: tariffs.lombardRate, description: `Ломбард: ${tariffs.lombardRate} ₽/сут.` };
     }
@@ -219,8 +219,11 @@ export default function CheckinScreen() {
     const desc = serviceType === 'onetime'
       ? `Парковка без оплаты: ${Math.max(1, parseInt(payDays, 10) || 1)} сут. × ${paymentMethod === 'cash' ? tariffs.onetimeCash : tariffs.onetimeCard} ₽`
       : `Месячный абонемент без оплаты: ${paymentAmount} ₽`;
+    if (serviceType === 'monthly') {
+      return { amount: paymentAmount, description: desc, paidUntilDate: monthlyCalc.paidUntil };
+    }
     return { amount: paymentAmount, description: desc };
-  }, [paymentStatus, paymentAmount, serviceType, tariffType, payDays, paymentMethod, tariffs]);
+  }, [paymentStatus, paymentAmount, serviceType, tariffType, payDays, paymentMethod, tariffs, monthlyCalc]);
 
   const handleCheckin = useCallback(() => {
     if (!isAdmin && shiftRequired) {

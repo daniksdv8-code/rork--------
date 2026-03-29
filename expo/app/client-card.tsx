@@ -288,7 +288,7 @@ export default function ClientCardScreen() {
     return { ...base, paidUntilDate: monthlyCalc.paidUntil };
   }, [paymentStatus, checkInPaymentAmount, paymentMethod, checkInServiceType, checkInTariffType, payDays, monthlyCalc, customAmountEnabled, checkInAdjustmentDiff, baseCheckInPaymentAmount, adjustmentReason]);
 
-  const buildCheckInDebt = useCallback((): { amount: number; description?: string } | undefined => {
+  const buildCheckInDebt = useCallback((): { amount: number; description?: string; paidUntilDate?: string } | undefined => {
     if (checkInTariffType === 'lombard') {
       return { amount: tariffs.lombardRate, description: `Ломбард: ${tariffs.lombardRate} ₽/сут.` };
     }
@@ -296,8 +296,11 @@ export default function ClientCardScreen() {
     const desc = checkInServiceType === 'onetime'
       ? `Вторичная постановка без оплаты: ${Math.max(1, parseInt(payDays, 10) || 1)} сут. × ${paymentMethod === 'cash' ? tariffs.onetimeCash : tariffs.onetimeCard} ₽`
       : `Вторичная постановка, месяц без оплаты: ${checkInPaymentAmount} ₽`;
+    if (checkInServiceType === 'monthly') {
+      return { amount: checkInPaymentAmount, description: desc, paidUntilDate: monthlyCalc.paidUntil };
+    }
     return { amount: checkInPaymentAmount, description: desc };
-  }, [paymentStatus, checkInPaymentAmount, checkInServiceType, checkInTariffType, payDays, paymentMethod, tariffs]);
+  }, [paymentStatus, checkInPaymentAmount, checkInServiceType, checkInTariffType, payDays, paymentMethod, tariffs, monthlyCalc]);
 
   const resetCheckInForm = useCallback(() => {
     setShowCheckInForm(false);
