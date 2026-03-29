@@ -2557,6 +2557,16 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       });
     };
 
+    const filterByPeriodKey = <T>(items: T[], dateKey: keyof T): T[] => {
+      if (!from && !to) return items;
+      return items.filter(item => {
+        const d = new Date(item[dateKey] as unknown as string);
+        if (from && d < from) return false;
+        if (to && d > to) return false;
+        return true;
+      });
+    };
+
     const periodTx = filterByPeriod(transactions);
     const paymentTx = periodTx.filter(t =>
       (t.type === 'payment' || t.type === 'debt_payment') && t.amount > 0
@@ -2576,7 +2586,15 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     const periodAdminExpenses = filterByPeriod(adminExpenses);
     const totalAdminExpenses = roundMoney(periodAdminExpenses.reduce((s, e) => s + e.amount, 0));
 
-    const balance = roundMoney(cardIncome + cashFromManager - totalAdminExpenses);
+    const periodSalaryAdvances = filterByPeriodKey(salaryAdvances, 'issuedAt');
+    const totalSalaryAdvances = roundMoney(periodSalaryAdvances.reduce((s, a) => s + a.amount, 0));
+
+    const periodSalaryPayments = filterByPeriodKey(salaryPayments, 'paidAt');
+    const totalSalaryPaid = roundMoney(periodSalaryPayments.filter(p => p.netPaid > 0).reduce((s, p) => s + p.netPaid, 0));
+
+    const totalSalaryExpenses = roundMoney(totalSalaryAdvances + totalSalaryPaid);
+
+    const balance = roundMoney(cardIncome + cashFromManager - totalAdminExpenses - totalSalaryExpenses);
 
     const periodOps = filterByPeriod(adminCashOperations);
 
@@ -2584,11 +2602,16 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       cardIncome,
       cashFromManager,
       totalAdminExpenses,
+      totalSalaryAdvances,
+      totalSalaryPaid,
+      totalSalaryExpenses,
       balance,
       adminExpenses: periodAdminExpenses,
       operations: periodOps,
+      salaryAdvances: periodSalaryAdvances,
+      salaryPayments: periodSalaryPayments,
     };
-  }, [transactions, withdrawals, adminExpenses, adminCashOperations]);
+  }, [transactions, withdrawals, adminExpenses, adminCashOperations, salaryAdvances, salaryPayments]);
 
   const expiringSubscriptions = useMemo(() => {
     return subscriptions.filter(s => {

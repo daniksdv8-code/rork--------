@@ -7,6 +7,7 @@ import {
 import {
   Wallet, ArrowDownCircle, ArrowUpCircle, MinusCircle,
   Plus, X, CreditCard, Banknote, Trash2, Edit3,
+  Briefcase,
 } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useParking } from '@/providers/ParkingProvider';
@@ -236,7 +237,7 @@ export default function FinanceScreen() {
     type OpItem = {
       id: string;
       date: string;
-      type: 'card_income' | 'cash_from_manager' | 'admin_expense';
+      type: 'card_income' | 'cash_from_manager' | 'admin_expense' | 'salary_advance' | 'salary_payment';
       amount: number;
       method: string;
       description: string;
@@ -309,8 +310,32 @@ export default function FinanceScreen() {
       });
     });
 
+    salaryAdvances.filter(a => filterDate(a.issuedAt)).forEach(a => {
+      ops.push({
+        id: a.id + '_sal_adv',
+        date: a.issuedAt,
+        type: 'salary_advance',
+        amount: a.amount,
+        method: 'наличные',
+        description: `Аванс (долг под ЗП): ${a.employeeName} — ${a.amount} ₽${a.comment ? ` (${a.comment})` : ''}`,
+        operator: a.issuedByName,
+      });
+    });
+
+    salaryPayments.filter(p => filterDate(p.paidAt) && p.netPaid > 0).forEach(p => {
+      ops.push({
+        id: p.id + '_sal_pay',
+        date: p.paidAt,
+        type: 'salary_payment',
+        amount: p.netPaid,
+        method: p.method === 'cash' ? 'наличные' : 'безнал',
+        description: `Зарплата: ${p.employeeName} — ${p.netPaid} ₽ к выдаче (начислено ${p.grossAmount} ₽${p.debtDeducted > 0 ? `, зачтено долга ${p.debtDeducted} ₽` : ''})`,
+        operator: p.paidByName,
+      });
+    });
+
     return ops.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [transactions, withdrawals, adminExpenses, periodDates]);
+  }, [transactions, withdrawals, adminExpenses, salaryAdvances, salaryPayments, periodDates]);
 
   if (!isAdmin) {
     return (
@@ -577,6 +602,18 @@ export default function FinanceScreen() {
                 <Text style={styles.regSummaryLabel}>Расходы админа</Text>
                 <Text style={[styles.regSummaryValue, { color: Colors.danger }]}>-{fmtAmount(adminReg.totalAdminExpenses)} ₽</Text>
               </View>
+              {adminReg.totalSalaryAdvances > 0 && (
+                <View style={styles.regSummaryRow}>
+                  <Text style={styles.regSummaryLabel}>Долги под ЗП</Text>
+                  <Text style={[styles.regSummaryValue, { color: '#7C3AED' }]}>-{fmtAmount(adminReg.totalSalaryAdvances)} ₽</Text>
+                </View>
+              )}
+              {adminReg.totalSalaryPaid > 0 && (
+                <View style={styles.regSummaryRow}>
+                  <Text style={styles.regSummaryLabel}>Выплаты ЗП</Text>
+                  <Text style={[styles.regSummaryValue, { color: '#7C3AED' }]}>-{fmtAmount(adminReg.totalSalaryPaid)} ₽</Text>
+                </View>
+              )}
             </View>
 
             <Text style={styles.sectionTitle}>Операции</Text>
@@ -588,7 +625,9 @@ export default function FinanceScreen() {
               allAdminOps.map(op => {
                 const isIncome = op.type === 'card_income' || op.type === 'cash_from_manager';
                 const isExpense = op.type === 'admin_expense';
+                const isSalary = op.type === 'salary_advance' || op.type === 'salary_payment';
                 const isNegative = op.amount < 0;
+                const salaryColor = '#7C3AED';
                 return (
                   <View
                     key={op.id}
@@ -596,13 +635,20 @@ export default function FinanceScreen() {
                       styles.opRow,
                       isExpense && styles.opRowExpense,
                       isNegative && styles.opRowExpense,
+                      isSalary && styles.opRowSalary,
                     ]}
                   >
                     <View style={[
                       styles.opIcon,
-                      isIncome && !isNegative ? { backgroundColor: Colors.successLight } : { backgroundColor: Colors.dangerLight },
+                      isSalary
+                        ? { backgroundColor: '#F3EEFF' }
+                        : isIncome && !isNegative
+                          ? { backgroundColor: Colors.successLight }
+                          : { backgroundColor: Colors.dangerLight },
                     ]}>
-                      {isExpense ? (
+                      {isSalary ? (
+                        <Briefcase size={16} color={salaryColor} />
+                      ) : isExpense ? (
                         <ArrowUpCircle size={16} color={Colors.danger} />
                       ) : isNegative ? (
                         <ArrowUpCircle size={16} color={Colors.danger} />
@@ -618,9 +664,13 @@ export default function FinanceScreen() {
                     </View>
                     <Text style={[
                       styles.opAmount,
-                      isIncome && !isNegative ? { color: Colors.success } : { color: Colors.danger },
+                      isSalary
+                        ? { color: salaryColor }
+                        : isIncome && !isNegative
+                          ? { color: Colors.success }
+                          : { color: Colors.danger },
                     ]}>
-                      {isIncome && !isNegative ? '+' : isExpense ? '-' : ''}{fmtAmount(Math.abs(op.amount))} ₽
+                      {isIncome && !isNegative ? '+' : '-'}{fmtAmount(Math.abs(op.amount))} ₽
                     </Text>
                   </View>
                 );
@@ -1263,6 +1313,10 @@ const styles = StyleSheet.create({
   opRowExpense: {
     borderLeftWidth: 3,
     borderLeftColor: Colors.danger,
+  },
+  opRowSalary: {
+    borderLeftWidth: 3,
+    borderLeftColor: '#7C3AED',
   },
   opRowTransit: {
     borderLeftWidth: 3,
