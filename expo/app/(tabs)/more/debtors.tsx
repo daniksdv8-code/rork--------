@@ -7,10 +7,24 @@ import { useParking } from '@/providers/ParkingProvider';
 import ShiftGuard from '@/components/ShiftGuard';
 import { formatDate } from '@/utils/date';
 import { roundMoney } from '@/utils/money';
+import { ParkingSession, Car, Debt, ClientDebt, DailyDebtAccrual } from '@/types';
+
+interface DebtorItem {
+  client: { id: string; name: string; phone: string } | undefined;
+  debts: Debt[];
+  totalDebt: number;
+  cars: Car[];
+  clientDebt: ClientDebt | null;
+}
 
 export default function DebtorsScreen() {
   const router = useRouter();
-  const { debtors, dailyDebtAccruals, sessions, cars } = useParking();
+  const { debtors, dailyDebtAccruals, sessions, cars } = useParking() as any as {
+    debtors: DebtorItem[];
+    dailyDebtAccruals: DailyDebtAccrual[];
+    sessions: ParkingSession[];
+    cars: Car[];
+  };
 
   const accrualDetailsByClient = useMemo(() => {
     const map: Record<string, Array<{
@@ -65,7 +79,7 @@ export default function DebtorsScreen() {
     return map;
   }, [debtors, dailyDebtAccruals, sessions, cars]);
 
-  const renderItem = useCallback(({ item }: { item: typeof debtors[0] }) => {
+  const renderItem = useCallback(({ item }: { item: DebtorItem }) => {
     if (!item.client) return null;
 
     const accrualDetails = accrualDetailsByClient[item.client.id] ?? [];
@@ -108,7 +122,7 @@ export default function DebtorsScreen() {
           </View>
         ))}
 
-        {item.debts.map(debt => (
+        {item.debts.map((debt: Debt) => (
           <View key={debt.id} style={styles.debtRow}>
             <View style={styles.debtInfo}>
               <Text style={styles.debtDesc}>{debt.description}</Text>
@@ -191,7 +205,7 @@ export default function DebtorsScreen() {
     <View style={styles.container}>
       <View style={styles.totalBar}>
         <Text style={styles.totalLabel}>Общий долг:</Text>
-        <Text style={styles.totalValue}>{debtors.reduce((s, d) => s + d.totalDebt, 0)} ₽</Text>
+        <Text style={styles.totalValue}>{roundMoney(debtors.reduce((s, d) => s + d.totalDebt, 0))} ₽</Text>
       </View>
       <FlatList
         data={debtors}

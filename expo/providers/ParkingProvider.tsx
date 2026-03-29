@@ -1228,7 +1228,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       const days = calculateDays(session.entryTime, now);
       const exitMethod = paymentAtExit?.method ?? 'cash';
       const dailyRate = exitMethod === 'cash' ? tariffs.onetimeCash : tariffs.onetimeCard;
-      const totalAmount = dailyRate * days;
+      const totalAmount = roundMoney(dailyRate * days);
       const prepaid = session.prepaidAmount ?? 0;
       const remaining = roundMoney(Math.max(0, totalAmount - prepaid));
 
@@ -2423,16 +2423,16 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       new Date(t.date).getTime() >= openTime &&
       new Date(t.date).getTime() <= closeTime
     );
-    const cashIncome = shiftTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0)
+    const cashIncome = roundMoney(shiftTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0)
       - shiftCancelTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0)
-      - shiftRefundTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0);
-    const cardIncome = shiftTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0)
+      - shiftRefundTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0));
+    const cardIncome = roundMoney(shiftTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0)
       - shiftCancelTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0)
-      - shiftRefundTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0);
-    const totalExpenses = expenses.filter(e => e.shiftId === shiftId).reduce((s, e) => s + e.amount, 0);
-    const totalWithdrawals = withdrawals.filter(w => w.shiftId === shiftId).reduce((s, w) => s + w.amount, 0);
-    const calculatedBalance = shift.carryOver + cashIncome - totalExpenses - totalWithdrawals;
-    const discrepancy = actualCash - calculatedBalance;
+      - shiftRefundTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0));
+    const totalExpenses = roundMoney(expenses.filter(e => e.shiftId === shiftId).reduce((s, e) => s + e.amount, 0));
+    const totalWithdrawals = roundMoney(withdrawals.filter(w => w.shiftId === shiftId).reduce((s, w) => s + w.amount, 0));
+    const calculatedBalance = roundMoney(shift.carryOver + cashIncome - totalExpenses - totalWithdrawals);
+    const discrepancy = roundMoney(actualCash - calculatedBalance);
 
     const closingSummary = {
       cashIncome,

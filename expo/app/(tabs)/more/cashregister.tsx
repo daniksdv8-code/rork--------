@@ -364,19 +364,19 @@ export default function CashRegisterScreen() {
       (!cutoff || new Date(t.date) >= cutoff)
     );
 
-    const cashCancelled = cancelTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0);
-    const cardCancelled = cancelTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0);
-    const cashRefunded = refundTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0);
-    const cardRefunded = refundTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0);
+    const cashCancelled = Math.round(cancelTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0));
+    const cardCancelled = Math.round(cancelTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0));
+    const cashRefunded = Math.round(refundTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0));
+    const cardRefunded = Math.round(refundTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0));
 
-    const totalCash = filteredTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0) - cashCancelled - cashRefunded;
-    const totalCard = filteredTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0) - cardCancelled - cardRefunded;
+    const totalCash = Math.round(filteredTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0) - cashCancelled - cashRefunded);
+    const totalCard = Math.round(filteredTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0) - cardCancelled - cardRefunded);
 
     const filteredExpenses = expenses.filter(e => !cutoff || new Date(e.date) >= cutoff);
-    const totalExpenses = filteredExpenses.reduce((s, e) => s + e.amount, 0);
+    const totalExpenses = Math.round(filteredExpenses.reduce((s, e) => s + e.amount, 0));
 
     const filteredWithdrawals = withdrawals.filter(w => !cutoff || new Date(w.date) >= cutoff);
-    const totalWithdrawals = filteredWithdrawals.reduce((s, w) => s + w.amount, 0);
+    const totalWithdrawals = Math.round(filteredWithdrawals.reduce((s, w) => s + w.amount, 0));
 
     const byOperator: Record<string, { name: string; cash: number; card: number }> = {};
     filteredTx.forEach(t => {
@@ -390,10 +390,10 @@ export default function CashRegisterScreen() {
     const filteredShifts = shifts.filter(s => !cutoff || new Date(s.openedAt) >= cutoff);
 
     return {
-      totalCash, totalCard, total: totalCash + totalCard,
+      totalCash, totalCard, total: Math.round(totalCash + totalCard),
       totalExpenses, totalWithdrawals,
-      totalRefunds: cashRefunded + cardRefunded,
-      netCash: totalCash - totalExpenses - totalWithdrawals,
+      totalRefunds: Math.round(cashRefunded + cardRefunded),
+      netCash: Math.round(totalCash - totalExpenses - totalWithdrawals),
       operators: Object.values(byOperator),
       periodExpenses: filteredExpenses,
       periodWithdrawals: filteredWithdrawals,
@@ -648,41 +648,41 @@ export default function CashRegisterScreen() {
 
             <View style={styles.reportTotalCard}>
               <Text style={styles.reportTotalLabel}>Приход за период</Text>
-              <Text style={styles.reportTotalValue}>{reportData.total} ₽</Text>
+              <Text style={styles.reportTotalValue}>{fm(reportData.total)} ₽</Text>
             </View>
 
             <View style={styles.shiftStatsRow}>
               <View style={[styles.shiftStatCard, { borderLeftColor: Colors.success }]}>
                 <Text style={styles.shiftStatLabel}>Наличные</Text>
-                <Text style={[styles.shiftStatValue, { color: Colors.success }]}>{reportData.totalCash} ₽</Text>
+                <Text style={[styles.shiftStatValue, { color: Colors.success }]}>{fm(reportData.totalCash)} ₽</Text>
               </View>
               <View style={[styles.shiftStatCard, { borderLeftColor: Colors.info }]}>
                 <Text style={styles.shiftStatLabel}>Безнал</Text>
-                <Text style={[styles.shiftStatValue, { color: Colors.info }]}>{reportData.totalCard} ₽</Text>
+                <Text style={[styles.shiftStatValue, { color: Colors.info }]}>{fm(reportData.totalCard)} ₽</Text>
               </View>
             </View>
 
             <View style={styles.shiftStatsRow}>
               <View style={[styles.shiftStatCard, { borderLeftColor: Colors.danger }]}>
                 <Text style={styles.shiftStatLabel}>Расходы</Text>
-                <Text style={[styles.shiftStatValue, { color: Colors.danger }]}>{reportData.totalExpenses} ₽</Text>
+                <Text style={[styles.shiftStatValue, { color: Colors.danger }]}>{fm(reportData.totalExpenses)} ₽</Text>
               </View>
               <View style={[styles.shiftStatCard, { borderLeftColor: Colors.warning }]}>
                 <Text style={styles.shiftStatLabel}>Снято</Text>
-                <Text style={[styles.shiftStatValue, { color: Colors.warning }]}>{reportData.totalWithdrawals} ₽</Text>
+                <Text style={[styles.shiftStatValue, { color: Colors.warning }]}>{fm(reportData.totalWithdrawals)} ₽</Text>
               </View>
             </View>
 
             {reportData.totalRefunds > 0 && (
               <View style={[styles.shiftStatCard, { borderLeftColor: '#e67e22', marginBottom: 10 }]}>
                 <Text style={styles.shiftStatLabel}>Возвраты (уже вычтены из прихода)</Text>
-                <Text style={[styles.shiftStatValue, { color: '#e67e22' }]}>−{reportData.totalRefunds} ₽</Text>
+                <Text style={[styles.shiftStatValue, { color: '#e67e22' }]}>−{fm(reportData.totalRefunds)} ₽</Text>
               </View>
             )}
 
             <View style={[styles.shiftStatCard, { borderLeftColor: Colors.primary, marginBottom: 12 }]}>
               <Text style={styles.shiftStatLabel}>Нал. итого (приход − расходы − снятия)</Text>
-              <Text style={[styles.shiftStatValue, { color: Colors.primary }]}>{reportData.netCash} ₽</Text>
+              <Text style={[styles.shiftStatValue, { color: Colors.primary }]}>{fm(reportData.netCash)} ₽</Text>
             </View>
 
             {reportData.operators.length > 0 && (
@@ -696,10 +696,10 @@ export default function CashRegisterScreen() {
                     <View style={styles.operatorInfo}>
                       <Text style={styles.operatorName}>{op.name}</Text>
                       <Text style={styles.operatorMeta}>
-                        Нал: {op.cash} ₽ • Безнал: {op.card} ₽
+                        Нал: {fm(op.cash)} ₽ • Безнал: {fm(op.card)} ₽
                       </Text>
                     </View>
-                    <Text style={styles.operatorTotal}>{op.cash + op.card} ₽</Text>
+                    <Text style={styles.operatorTotal}>{fm(op.cash + op.card)} ₽</Text>
                   </View>
                 ))}
               </>

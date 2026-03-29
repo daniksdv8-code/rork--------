@@ -61,8 +61,8 @@ export default function ExitModal() {
   }, [isLombard, isMonthly, lombardRate, tariffs]);
 
   const dailyRate = getDailyRate(method);
-  const onetimeAmountCash = isLombard ? debtAccrualTotal : tariffs.onetimeCash * days;
-  const onetimeAmountCard = isLombard ? debtAccrualTotal : tariffs.onetimeCard * days;
+  const onetimeAmountCash = isLombard ? debtAccrualTotal : roundMoney(tariffs.onetimeCash * days);
+  const onetimeAmountCard = isLombard ? debtAccrualTotal : roundMoney(tariffs.onetimeCard * days);
   const onetimeAmount = isLombard ? debtAccrualTotal : (method === 'cash' ? onetimeAmountCash : onetimeAmountCard);
   const debtRecalculated = isDebtSession && !isLombard
     ? roundMoney(debtAccrualDays * dailyRate)

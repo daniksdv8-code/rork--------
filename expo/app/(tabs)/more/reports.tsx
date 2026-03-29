@@ -87,6 +87,9 @@ export default function ReportsScreen() {
       expByCategory[cat].total += e.amount;
       expByCategory[cat].count++;
     }
+    for (const key of Object.keys(expByCategory)) {
+      expByCategory[key].total = Math.round(expByCategory[key].total);
+    }
     const expenseCategories = Object.entries(expByCategory).sort((a, b) => b[1].total - a[1].total);
 
     const cash = Math.round(cashGross - cashCancelled - cashRefunded);
@@ -213,10 +216,10 @@ export default function ReportsScreen() {
     return {
       count: closed.length,
       openCount: filteredShifts.filter(s => s.status === 'open').length,
-      totalCashIn,
-      totalCardIn,
-      totalExp,
-      totalWd,
+      totalCashIn: Math.round(totalCashIn),
+      totalCardIn: Math.round(totalCardIn),
+      totalExp: Math.round(totalExp),
+      totalWd: Math.round(totalWd),
     };
   }, [filteredShifts, shiftCashIncome, shiftCardIncome, shiftExpenseTotal, shiftWithdrawalTotal]);
 
