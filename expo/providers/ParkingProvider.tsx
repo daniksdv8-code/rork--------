@@ -3347,6 +3347,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       teamViolations: safeArr(snapshot?.teamViolations ?? teamViolations),
       salaryAdvances: safeArr(snapshot?.salaryAdvances ?? salaryAdvances),
       salaryPayments: safeArr(snapshot?.salaryPayments ?? salaryPayments),
+      cleanupChecklistTemplate: safeArr(snapshot?.cleanupChecklistTemplate ?? cleanupChecklistTemplate),
     };
 
     const backupData = {
@@ -3405,6 +3406,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         teamViolations: snapshot.teamViolations,
         salaryAdvances: snapshot.salaryAdvances,
         salaryPayments: snapshot.salaryPayments,
+        cleanupChecklistTemplate: snapshot.cleanupChecklistTemplate,
       },
     };
     return JSON.stringify(backupData);
@@ -3550,6 +3552,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       teamViolations: Array.isArray(d.teamViolations) ? d.teamViolations : [],
       salaryAdvances: Array.isArray(d.salaryAdvances) ? d.salaryAdvances : [],
       salaryPayments: Array.isArray(d.salaryPayments) ? d.salaryPayments : [],
+      cleanupChecklistTemplate: Array.isArray(d.cleanupChecklistTemplate) ? d.cleanupChecklistTemplate : [],
     };
 
     let serverResetSuccess = false;
@@ -3603,6 +3606,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     setTeamViolations(restorePayload.teamViolations);
     setSalaryAdvances(restorePayload.salaryAdvances);
     setSalaryPayments(restorePayload.salaryPayments);
+    setCleanupChecklistTemplate(restorePayload.cleanupChecklistTemplate ?? []);
 
     try {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(restorePayload));
@@ -3710,6 +3714,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     setTeamViolations([]);
     setSalaryAdvances([]);
     setSalaryPayments([]);
+    setCleanupChecklistTemplate([]);
 
     const resetPayload = {
       clients: [] as any[],
@@ -3736,6 +3741,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       teamViolations: [] as any[],
       salaryAdvances: [] as any[],
       salaryPayments: [] as any[],
+      cleanupChecklistTemplate: [] as any[],
     };
 
     try {

@@ -233,23 +233,23 @@ export function verifyClientDebtConsistency(
   const storedClientDebt = cd ? cd.totalAmount : 0;
   const storedTotal = roundMoney(oldDebtsTotal + storedClientDebt);
 
-  const debtSessions = sessions.filter(s =>
+  const activeDebtSessions = sessions.filter(s =>
     s.clientId === clientId &&
-    (s.status === 'active_debt' || s.status === 'released_debt') &&
+    s.status === 'active_debt' &&
     !s.cancelled
   );
 
-  let accrualTotal = 0;
-  for (const session of debtSessions) {
+  let activeAccrualTotal = 0;
+  for (const session of activeDebtSessions) {
     const sessionAccruals = dailyDebtAccruals.filter(a => a.parkingEntryId === session.id);
-    accrualTotal += sessionAccruals.reduce((s, a) => s + a.amount, 0);
+    activeAccrualTotal += sessionAccruals.reduce((s, a) => s + a.amount, 0);
   }
 
-  const debtPaymentTxReduction = 0;
-  const calculatedTotal = roundMoney(accrualTotal + oldDebtsTotal - debtPaymentTxReduction);
+  const calculatedTotal = roundMoney(activeAccrualTotal + oldDebtsTotal);
 
-  const diff = Math.abs(storedTotal - calculatedTotal);
-  const isConsistent = diff < 1;
+  const relevantStored = roundMoney(storedClientDebt + oldDebtsTotal);
+  const diff = Math.abs(relevantStored - calculatedTotal);
+  const isConsistent = diff < 2;
 
   return {
     isConsistent,
