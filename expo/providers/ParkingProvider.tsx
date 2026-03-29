@@ -7,7 +7,7 @@ import {
   PaymentMethod, ServiceType, CashShift, Expense, User, CashWithdrawal, ScheduledShift,
   ActionLog, ActionType, AdminExpense, AdminCashOperation, ExpenseCategory,
   DailyDebtAccrual, ClientDebt, CashOperation, TeamViolationMonth,
-  SalaryAdvance, SalaryPayment, CleanupChecklistItem
+  SalaryAdvance, SalaryPayment, CleanupChecklistItem, CleanupTemplateItem
 } from '@/types';
 import { EMPTY_DATA } from '@/mocks/initialData';
 import { generateId } from '@/utils/id';
@@ -51,6 +51,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   const [teamViolations, setTeamViolations] = useState<TeamViolationMonth[]>([]);
   const [salaryAdvances, setSalaryAdvances] = useState<SalaryAdvance[]>([]);
   const [salaryPayments, setSalaryPayments] = useState<SalaryPayment[]>([]);
+  const [cleanupChecklistTemplate, setCleanupChecklistTemplate] = useState<CleanupTemplateItem[]>([]);
   const [deletedClientIds, setDeletedClientIds] = useState<string[]>([]);
   const [isLoaded, setIsLoaded] = useState<boolean>(false);
   const [isServerSynced, setIsServerSynced] = useState<boolean>(false);
@@ -71,11 +72,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   const RESTORE_GRACE_MS = 300000;
 
   const latestDataRef = useRef({
-    clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories, dailyDebtAccruals, clientDebts, cashOperations, teamViolations, salaryAdvances, salaryPayments,
+    clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories, dailyDebtAccruals, clientDebts, cashOperations, teamViolations, salaryAdvances, salaryPayments, cleanupChecklistTemplate,
   });
   useEffect(() => {
-    latestDataRef.current = { clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories, dailyDebtAccruals, clientDebts, cashOperations, teamViolations, salaryAdvances, salaryPayments };
-  }, [clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories, dailyDebtAccruals, clientDebts, cashOperations, teamViolations, salaryAdvances, salaryPayments]);
+    latestDataRef.current = { clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories, dailyDebtAccruals, clientDebts, cashOperations, teamViolations, salaryAdvances, salaryPayments, cleanupChecklistTemplate };
+  }, [clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories, dailyDebtAccruals, clientDebts, cashOperations, teamViolations, salaryAdvances, salaryPayments, cleanupChecklistTemplate]);
 
   const logAction = useCallback((action: ActionType, label: string, details: string, entityId?: string, entityType?: string) => {
     const entry: ActionLog = {
@@ -152,6 +153,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     setTeamViolations(d.teamViolations ?? []);
     setSalaryAdvances(d.salaryAdvances ?? localData.salaryAdvances ?? []);
     setSalaryPayments(d.salaryPayments ?? localData.salaryPayments ?? []);
+    setCleanupChecklistTemplate(d.cleanupChecklistTemplate ?? localData.cleanupChecklistTemplate ?? []);
     console.log(`[Sync] Applied server data (${source ?? '?'}): clients=${serverClientCount}, sessions=${(d.sessions||[]).length}, shifts=${(d.shifts||[]).length}, users=${(serverUsers||[]).length}`);
   }, []);
 
@@ -188,6 +190,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
           if (data.teamViolations) setTeamViolations(data.teamViolations);
           if (data.salaryAdvances) setSalaryAdvances(data.salaryAdvances);
           if (data.salaryPayments) setSalaryPayments(data.salaryPayments);
+          if (data.cleanupChecklistTemplate) setCleanupChecklistTemplate(data.cleanupChecklistTemplate);
           if (data.users) {
             setUsers(data.users);
           }
@@ -3080,7 +3083,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     console.log(`[ScheduledShift] Deep cleaning toggled: ${shiftId} = ${value}`);
   }, [scheduledShifts, currentUser, logAction, schedulePush]);
 
-  const DEFAULT_CLEANUP_CHECKLIST: CleanupChecklistItem[] = [
+  const FALLBACK_CLEANUP_CHECKLIST: CleanupChecklistItem[] = [
     { id: '1', label: 'Приёмная (столы, стулья, пол)', completed: false },
     { id: '2', label: 'Парковка (навес, разметка, мусор)', completed: false },
     { id: '3', label: 'Санузел (ванная, туалет, зеркала)', completed: false },
@@ -3090,11 +3093,40 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     { id: '7', label: 'Финальная проверка', completed: false },
   ];
 
+  const getChecklistFromTemplate = useCallback((): CleanupChecklistItem[] => {
+    if (cleanupChecklistTemplate.length === 0) return FALLBACK_CLEANUP_CHECKLIST;
+    const sorted = [...cleanupChecklistTemplate].sort((a, b) => a.order - b.order);
+    return sorted.map(t => ({ id: t.id, label: t.label, completed: false }));
+  }, [cleanupChecklistTemplate]);
+
   const getCleanupChecklist = useCallback((shiftId: string): CleanupChecklistItem[] => {
     const shift = scheduledShifts.find(s => s.id === shiftId);
-    if (!shift) return DEFAULT_CLEANUP_CHECKLIST;
-    return shift.cleanupChecklist ?? DEFAULT_CLEANUP_CHECKLIST;
-  }, [scheduledShifts]);
+    if (!shift) return getChecklistFromTemplate();
+    return shift.cleanupChecklist ?? getChecklistFromTemplate();
+  }, [scheduledShifts, getChecklistFromTemplate]);
+
+  const getCleanupTemplate = useCallback((): CleanupTemplateItem[] => {
+    if (cleanupChecklistTemplate.length === 0) {
+      return FALLBACK_CLEANUP_CHECKLIST.map((item, idx) => ({
+        id: item.id,
+        label: item.label,
+        order: idx,
+      }));
+    }
+    return [...cleanupChecklistTemplate].sort((a, b) => a.order - b.order);
+  }, [cleanupChecklistTemplate]);
+
+  const updateCleanupTemplate = useCallback((items: CleanupTemplateItem[]) => {
+    if (currentUser?.role !== 'admin') {
+      console.log('[CleanupTemplate] BLOCKED: only admin can edit template');
+      return;
+    }
+    const ordered = items.map((item, idx) => ({ ...item, order: idx }));
+    setCleanupChecklistTemplate(ordered);
+    logAction('deep_cleaning_toggle', 'Обновлён шаблон чек-листа уборки', `Пунктов: ${ordered.length}`);
+    schedulePush();
+    console.log(`[CleanupTemplate] Updated: ${ordered.length} items`);
+  }, [currentUser, logAction, schedulePush]);
 
   const saveCleanupChecklist = useCallback((shiftId: string, checklist: CleanupChecklistItem[]) => {
     const now = new Date().toISOString();
@@ -4268,6 +4300,9 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     saveCleanupChecklist,
     completeCleanup,
     getTodayCleaningShift,
+    getCleanupTemplate,
+    updateCleanupTemplate,
+    cleanupChecklistTemplate,
   }), [
     clients, cars, activeClients, activeCars, isClientDeleted,
     sessions, subscriptions, payments, debts, transactions, tariffs,
@@ -4295,5 +4330,6 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     getAdminFinanceBalance,
     runDiagnostic, getAnomalyStats,
     getCleanupChecklist, saveCleanupChecklist, completeCleanup, getTodayCleaningShift,
+    getCleanupTemplate, updateCleanupTemplate, cleanupChecklistTemplate,
   ]);
 });

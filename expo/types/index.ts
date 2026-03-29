@@ -257,6 +257,12 @@ export interface CleanupChecklistItem {
   completed: boolean;
 }
 
+export interface CleanupTemplateItem {
+  id: string;
+  label: string;
+  order: number;
+}
+
 export interface ScheduledShift {
   id: string;
   date: string;
@@ -413,6 +419,7 @@ export interface AppData {
   teamViolations: TeamViolationMonth[];
   salaryAdvances: SalaryAdvance[];
   salaryPayments: SalaryPayment[];
+  cleanupChecklistTemplate?: CleanupTemplateItem[];
   deletedClientIds?: string[];
   restoreEpoch?: number;
 }
