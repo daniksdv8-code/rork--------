@@ -9,6 +9,7 @@ import ShiftGuard from '@/components/ShiftGuard';
 import CleaningReminder from '@/components/CleaningReminder';
 import { Client } from '@/types';
 import { isToday } from '@/utils/date';
+import { formatMoney } from '@/utils/money';
 
 export default function DashboardScreen() {
   const router = useRouter();
@@ -246,7 +247,7 @@ export default function DashboardScreen() {
           <View style={[styles.statIcon, { backgroundColor: Colors.successLight }]}>
             <Wallet size={20} color={Colors.success} />
           </View>
-          <Text style={styles.statValue}>{todayStats.cashToday} ₽</Text>
+          <Text style={styles.statValue}>{formatMoney(todayStats.cashToday)} ₽</Text>
           <Text style={styles.statLabel}>Наличные сегодня</Text>
         </TouchableOpacity>
 
@@ -258,7 +259,7 @@ export default function DashboardScreen() {
           <View style={[styles.statIcon, { backgroundColor: Colors.infoLight }]}>
             <Wallet size={20} color={Colors.info} />
           </View>
-          <Text style={styles.statValue}>{todayStats.cardToday} ₽</Text>
+          <Text style={styles.statValue}>{formatMoney(todayStats.cardToday)} ₽</Text>
           <Text style={styles.statLabel}>Безнал сегодня</Text>
         </TouchableOpacity>
 
@@ -282,7 +283,7 @@ export default function DashboardScreen() {
           <View style={[styles.statIcon, { backgroundColor: Colors.dangerLight }]}>
             <Wallet size={20} color={Colors.danger} />
           </View>
-          <Text style={[styles.statValue, { color: Colors.danger }]}>{todayStats.totalDebt} ₽</Text>
+          <Text style={[styles.statValue, { color: Colors.danger }]}>{formatMoney(todayStats.totalDebt)} ₽</Text>
           <Text style={styles.statLabel}>Общий долг</Text>
         </TouchableOpacity>
 
@@ -294,7 +295,7 @@ export default function DashboardScreen() {
           <View style={[styles.statIcon, { backgroundColor: Colors.successLight }]}>
             <HandCoins size={20} color={Colors.success} />
           </View>
-          <Text style={[styles.statValue, { color: Colors.success }]}>{debtPaymentsToday} ₽</Text>
+          <Text style={[styles.statValue, { color: Colors.success }]}>{formatMoney(debtPaymentsToday)} ₽</Text>
           <Text style={styles.statLabel}>Оплат по долгам</Text>
         </TouchableOpacity>
       </View>

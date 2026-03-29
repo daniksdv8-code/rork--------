@@ -1120,7 +1120,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       const cdForExit = clientDebts.find(c => c.clientId === session.clientId);
       const currentCdTotalForExit = cdForExit ? cdForExit.totalAmount : 0;
       const actualSessionDebt = roundMoney(Math.min(accrualTotal, currentCdTotalForExit));
-      const paidAmount = Math.min(paymentAtExit.amount, actualSessionDebt);
+      const paidAmount = roundMoney(Math.min(paymentAtExit.amount, actualSessionDebt));
       const afterPay = roundMoney(actualSessionDebt - paidAmount);
 
       const isLombardSession = session.tariffType === 'lombard' || session.serviceType === 'lombard';
@@ -1227,7 +1227,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       const dailyRate = exitMethod === 'cash' ? tariffs.onetimeCash : tariffs.onetimeCard;
       const totalAmount = dailyRate * days;
       const prepaid = session.prepaidAmount ?? 0;
-      const remaining = Math.max(0, totalAmount - prepaid);
+      const remaining = roundMoney(Math.max(0, totalAmount - prepaid));
 
       addTransaction({
         clientId: session.clientId,
@@ -1240,8 +1240,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       });
 
       if (paymentAtExit && paymentAtExit.amount > 0 && remaining > 0) {
-        const paidAmount = Math.min(paymentAtExit.amount, remaining);
-        const afterPay = remaining - paidAmount;
+        const paidAmount = roundMoney(Math.min(paymentAtExit.amount, remaining));
+        const afterPay = roundMoney(remaining - paidAmount);
 
         const payDesc = `Оплата при выезде: ${paidAmount} ₽ (${days} сут. × ${dailyRate} ₽, ${paymentAtExit.method === 'cash' ? 'наличные' : 'безнал'})${prepaid > 0 ? `, предоплата ${prepaid} ₽` : ''}`;
         const exitPayment: Payment = {
@@ -1603,9 +1603,31 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     if (!session) return;
 
     const cancelNow = new Date().toISOString();
+    const isLombardCancel = session.tariffType === 'lombard' || session.serviceType === 'lombard';
+    const isDebtCancel = session.status === 'active_debt';
+
     setSessions(prev => prev.map(s =>
       s.id === sessionId ? { ...s, status: 'completed' as const, exitTime: cancelNow, cancelled: true, updatedAt: cancelNow } : s
     ));
+
+    if (isDebtCancel) {
+      const cancelAccruals = dailyDebtAccruals.filter(a => a.parkingEntryId === sessionId);
+      const cancelAccrualTotal = roundMoney(cancelAccruals.reduce((s, a) => s + a.amount, 0));
+      if (cancelAccrualTotal > 0) {
+        updateClientDebt(session.clientId, -cancelAccrualTotal);
+        console.log(`[Cancel] Reversed ${cancelAccrualTotal} ₽ from clientDebts for cancelled debt entry ${sessionId}`);
+      }
+      setDailyDebtAccruals(prev => prev.filter(a => a.parkingEntryId !== sessionId));
+
+      const cancelEntryDebts = debts.filter(d => d.parkingEntryId === sessionId && d.remainingAmount > 0);
+      if (cancelEntryDebts.length > 0) {
+        const debtIds = new Set(cancelEntryDebts.map(d => d.id));
+        setDebts(prev => prev.map(d =>
+          debtIds.has(d.id) ? { ...d, remainingAmount: 0, status: 'paid' as const, updatedAt: cancelNow } : d
+        ));
+        console.log(`[Cancel] Zeroed ${cancelEntryDebts.length} linked debts for cancelled entry ${sessionId}`);
+      }
+    }
 
     addTransaction({
       clientId: session.clientId,
@@ -1613,15 +1635,15 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       type: 'cancel_entry',
       amount: 0,
       method: null,
-      date: new Date().toISOString(),
-      description: `Отмена заезда (${currentUser?.name ?? 'Неизвестно'})`,
+      date: cancelNow,
+      description: `Отмена заезда (${currentUser?.name ?? 'Неизвестно'})${isLombardCancel ? ' [ломбард]' : ''}`,
     });
 
     const cancelCar = cars.find(c => c.id === session.carId);
-    logAction('cancel_checkin', 'Отмена заезда', `${cancelCar?.plateNumber ?? session.carId}`, sessionId, 'session');
+    logAction('cancel_checkin', 'Отмена заезда', `${cancelCar?.plateNumber ?? session.carId}${isDebtCancel ? ', долги аннулированы' : ''}`, sessionId, 'session');
     schedulePush();
-    console.log(`[Cancel] Check-in cancelled: ${sessionId}`);
-  }, [sessions, currentUser, addTransaction, schedulePush, cars, logAction]);
+    console.log(`[Cancel] Check-in cancelled: ${sessionId}, debtReversed=${isDebtCancel}`);
+  }, [sessions, currentUser, addTransaction, schedulePush, cars, logAction, dailyDebtAccruals, debts, updateClientDebt]);
 
   const cancelCheckOut = useCallback((sessionId: string) => {
     const session = sessions.find(s => s.id === sessionId && (s.status === 'completed' || s.status === 'released' || s.status === 'released_debt') && !s.cancelled);
@@ -1822,11 +1844,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     if (!debt) return;
 
     const now = new Date().toISOString();
-    const actualAmount = Math.min(amount, debt.remainingAmount);
-    const newRemaining = debt.remainingAmount - actualAmount;
+    const actualAmount = roundMoney(Math.min(amount, debt.remainingAmount));
+    const newRemaining = roundMoney(debt.remainingAmount - actualAmount);
 
     setDebts(prev => prev.map(d =>
-      d.id === debtId ? { ...d, remainingAmount: newRemaining, updatedAt: now } : d
+      d.id === debtId ? { ...d, remainingAmount: newRemaining, status: newRemaining <= 0 ? 'paid' as const : d.status, updatedAt: now } : d
     ));
 
     addTransaction({
@@ -1902,7 +1924,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
           const payForThis = roundMoney(Math.min(remaining, d.remainingAmount));
           remaining = roundMoney(remaining - payForThis);
           updatedDebtIds.push(d.id);
-          return { ...d, remainingAmount: roundMoney(d.remainingAmount - payForThis), updatedAt: now };
+          const newRem = roundMoney(d.remainingAmount - payForThis);
+          return { ...d, remainingAmount: newRem, status: newRem <= 0 ? 'paid' as const : d.status, updatedAt: now };
         }));
       }
 
