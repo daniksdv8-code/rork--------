@@ -292,17 +292,17 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
           skipLogVersionRef.current = -1;
           localDirtyRef.current = true;
           schedulePushImmediate();
+        } else if (localDirtyRef.current) {
+          console.log(`[Sync] Server v${version} available but localDirty=true — skipping apply to preserve local changes, pushing local data first`);
+          lastSyncedVersionRef.current = version;
+          skipLogVersionRef.current = -1;
+          schedulePushImmediate();
         } else {
-          console.log(`[Sync] Applying server data v${version} (was v${lastSyncedVersionRef.current}), localDirty=${localDirtyRef.current}`);
+          console.log(`[Sync] Applying server data v${version} (was v${lastSyncedVersionRef.current})`);
           applyServerData(data as Record<string, any>, 'poll');
           lastSyncedVersionRef.current = version;
           skipLogVersionRef.current = -1;
           void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(data)).catch(() => {});
-
-          if (localDirtyRef.current) {
-            console.log(`[Sync] Server data applied, now pushing pending local changes`);
-            schedulePushImmediate();
-          }
         }
       }
 
