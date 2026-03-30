@@ -362,14 +362,17 @@ export default function FinanceScreen() {
       });
     });
 
-    salaryPayments.filter((p: SalaryPayment) => filterDate(p.paidAt) && p.netPaid > 0 && (!(p as any).source || (p as any).source === 'admin')).forEach((p: SalaryPayment) => {
+    salaryPayments.filter((p: SalaryPayment) => filterDate(p.paidAt) && (!(p as any).source || (p as any).source === 'admin')).forEach((p: SalaryPayment) => {
+      const desc = p.netPaid > 0
+        ? `Зарплата: ${p.employeeName} — ${p.netPaid} ₽ к выдаче (начислено ${p.grossAmount} ₽${p.debtDeducted > 0 ? `, зачтено долга ${p.debtDeducted} ₽` : ''})`
+        : `Зарплата (зачёт долга): ${p.employeeName} — начислено ${p.grossAmount} ₽, полностью зачтено в погашение долга ${p.debtDeducted} ₽`;
       ops.push({
         id: p.id + '_sal_pay',
         date: p.paidAt,
         type: 'salary_payment',
-        amount: p.netPaid,
+        amount: p.netPaid > 0 ? p.netPaid : p.grossAmount,
         method: p.method === 'cash' ? 'наличные' : 'безнал',
-        description: `Зарплата: ${p.employeeName} — ${p.netPaid} ₽ к выдаче (начислено ${p.grossAmount} ₽${p.debtDeducted > 0 ? `, зачтено долга ${p.debtDeducted} ₽` : ''})`,
+        description: desc,
         operator: p.paidByName,
       });
     });

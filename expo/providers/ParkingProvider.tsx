@@ -4103,6 +4103,43 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
           relatedEntityType: 'salary_payment',
         });
       }
+    } else if (debtDeducted > 0) {
+      const salarySourceLabel = effectiveSource === 'manager_shift'
+        ? `касса менеджера`
+        : `финансы админа (${method === 'cash' ? 'наличные' : 'безнал'})`;
+
+      addTransaction({
+        clientId: '',
+        carId: '',
+        type: 'admin_expense',
+        amount: 0,
+        method,
+        date: now,
+        description: `Выплата ЗП (зачёт долга): ${employeeName} — начислено ${grossAmount} ₽, полностью зачтено в погашение долга ${debtDeducted} ₽`,
+      });
+
+      const zeroPayBalSource = effectiveSource === 'manager_shift'
+        ? (() => {
+            const ms = shifts.find(s => s.id === shiftIdForOp);
+            return ms ? getShiftCashBalance(ms) : 0;
+          })()
+        : (() => {
+            const afb = getAdminFinanceBalance();
+            return method === 'cash' ? afb.cash : afb.card;
+          })();
+
+      addCashOperation({
+        type: 'salary_payment',
+        amount: 0,
+        category: 'Выплата зарплаты (зачёт долга)',
+        description: `Выплата ЗП (зачёт долга, ${salarySourceLabel}): ${employeeName} — начислено ${grossAmount} ₽, зачтено долга ${debtDeducted} ₽, к выдаче 0 ₽`,
+        method,
+        shiftId: shiftIdForOp,
+        balanceBefore: zeroPayBalSource,
+        balanceAfter: zeroPayBalSource,
+        relatedEntityId: salPayment.id,
+        relatedEntityType: 'salary_payment',
+      });
     }
 
     if (debtDeducted > 0) {
