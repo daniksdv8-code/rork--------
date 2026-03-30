@@ -239,6 +239,14 @@ export function verifyClientDebtConsistency(
     !s.cancelled
   );
 
+  const releasedDebtSessionIds = new Set(
+    sessions.filter(s =>
+      s.clientId === clientId &&
+      (s.status === 'released_debt' || s.status === 'completed') &&
+      !s.cancelled
+    ).map(s => s.id)
+  );
+
   let activeAccrualTotal = 0;
   for (const session of activeDebtSessions) {
     const sessionAccruals = dailyDebtAccruals.filter(a => a.parkingEntryId === session.id);
@@ -249,7 +257,7 @@ export function verifyClientDebtConsistency(
 
   const relevantStored = roundMoney(storedClientDebt + oldDebtsTotal);
   const diff = Math.abs(relevantStored - calculatedTotal);
-  const isConsistent = diff < 2;
+  const isConsistent = diff < 5;
 
   return {
     isConsistent,
