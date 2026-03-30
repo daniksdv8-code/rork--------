@@ -67,14 +67,16 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   const localChangeCounterRef = useRef<number>(0);
   const debtsDirtyUntilRef = useRef<number>(0);
   const shiftsDirtyUntilRef = useRef<number>(0);
-  const COLLECTION_DIRTY_MS = 15000;
+  const salaryDirtyUntilRef = useRef<number>(0);
+  const cashOpsDirtyUntilRef = useRef<number>(0);
+  const COLLECTION_DIRTY_MS = 30000;
   const restoreEpochRef = useRef<number>(-1);
   const restoreInProgressRef = useRef<boolean>(false);
   const restoreServerOkRef = useRef<boolean>(false);
   const restoreFinishedAtRef = useRef<number>(0);
   const lastPushCompletedRef = useRef<number>(0);
   const RESTORE_GRACE_MS = 300000;
-  const POST_PUSH_GRACE_MS = 6000;
+  const POST_PUSH_GRACE_MS = 10000;
 
   const latestDataRef = useRef({
     clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories, dailyDebtAccruals, clientDebts, cashOperations, teamViolations, salaryAdvances, salaryPayments, cleanupChecklistTemplate,
@@ -166,10 +168,20 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     if (!isDebtsDirty) {
       setClientDebts(deleted.size > 0 ? (d.clientDebts ?? []).filter((cd: any) => !deleted.has(cd.clientId)) : (d.clientDebts ?? []));
     }
-    setCashOperations(d.cashOperations ?? []);
+    const isCashOpsDirty = cashOpsDirtyUntilRef.current > Date.now();
+    if (isCashOpsDirty) {
+      console.log(`[Sync] SKIPPING cashOperations overwrite — local cashOps dirty for ${cashOpsDirtyUntilRef.current - Date.now()}ms more (source=${source ?? '?'})`);
+    } else {
+      setCashOperations(d.cashOperations ?? []);
+    }
     setTeamViolations(d.teamViolations ?? []);
-    setSalaryAdvances(d.salaryAdvances ?? localData.salaryAdvances ?? []);
-    setSalaryPayments(d.salaryPayments ?? localData.salaryPayments ?? []);
+    const isSalaryDirty = salaryDirtyUntilRef.current > Date.now();
+    if (isSalaryDirty) {
+      console.log(`[Sync] SKIPPING salaryAdvances/salaryPayments overwrite — local salary dirty for ${salaryDirtyUntilRef.current - Date.now()}ms more (source=${source ?? '?'})`);
+    } else {
+      setSalaryAdvances(d.salaryAdvances ?? localData.salaryAdvances ?? []);
+      setSalaryPayments(d.salaryPayments ?? localData.salaryPayments ?? []);
+    }
     setCleanupChecklistTemplate(d.cleanupChecklistTemplate ?? localData.cleanupChecklistTemplate ?? []);
     console.log(`[Sync] Applied server data (${source ?? '?'}): clients=${serverClientCount}, sessions=${(d.sessions||[]).length}, shifts=${(d.shifts||[]).length}, users=${(serverUsers||[]).length}`);
   }, []);
@@ -696,11 +708,6 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     let clientDeltas: Record<string, number> = {};
 
     for (const session of debtSessions) {
-      const alreadyAccrued = currentAccruals.some(
-        a => a.parkingEntryId === session.id && a.accrualDate === todayStr
-      );
-      if (alreadyAccrued) continue;
-
       const isLombardSession = session.tariffType === 'lombard' || session.serviceType === 'lombard';
       let dailyRate: number;
       if (isLombardSession) {
@@ -710,18 +717,37 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       } else {
         dailyRate = currentTariffs.onetimeCash;
       }
-      const accrual: DailyDebtAccrual = {
-        id: generateId(),
-        parkingEntryId: session.id,
-        clientId: session.clientId,
-        carId: session.carId,
-        accrualDate: todayStr,
-        amount: dailyRate,
-        tariffRate: dailyRate,
-        createdAt: now.toISOString(),
-      };
-      newAccruals.push(accrual);
-      clientDeltas[session.clientId] = (clientDeltas[session.clientId] ?? 0) + dailyRate;
+
+      const entryDate = new Date(session.entryTime);
+      entryDate.setHours(0, 0, 0, 0);
+      const maxBackfillDate = new Date(now);
+      maxBackfillDate.setDate(maxBackfillDate.getDate() - 90);
+      const startDate = entryDate > maxBackfillDate ? entryDate : maxBackfillDate;
+      const checkDate = new Date(startDate);
+      const todayEnd = new Date(now);
+      todayEnd.setHours(23, 59, 59, 999);
+
+      while (checkDate <= todayEnd) {
+        const dayStr = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, '0')}-${String(checkDate.getDate()).padStart(2, '0')}`;
+        const alreadyAccrued = currentAccruals.some(
+          a => a.parkingEntryId === session.id && a.accrualDate === dayStr
+        ) || newAccruals.some(a => a.parkingEntryId === session.id && a.accrualDate === dayStr);
+        if (!alreadyAccrued) {
+          const accrual: DailyDebtAccrual = {
+            id: generateId(),
+            parkingEntryId: session.id,
+            clientId: session.clientId,
+            carId: session.carId,
+            accrualDate: dayStr,
+            amount: dailyRate,
+            tariffRate: dailyRate,
+            createdAt: now.toISOString(),
+          };
+          newAccruals.push(accrual);
+          clientDeltas[session.clientId] = (clientDeltas[session.clientId] ?? 0) + dailyRate;
+        }
+        checkDate.setDate(checkDate.getDate() + 1);
+      }
     }
 
     if (newAccruals.length === 0) {
@@ -757,7 +783,9 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       return updated;
     });
 
-    for (const accrual of newAccruals) {
+    const todayAccruals = newAccruals.filter(a => a.accrualDate === todayStr);
+    const backfilledCount = newAccruals.length - todayAccruals.length;
+    for (const accrual of todayAccruals) {
       addTransaction({
         clientId: accrual.clientId,
         carId: accrual.carId,
@@ -768,8 +796,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         description: `Ежедневное начисление долга: ${accrual.amount} ₽ (тариф ${accrual.tariffRate} ₽/сут.)`,
       });
     }
+    if (backfilledCount > 0) {
+      console.log(`[DebtAccrual] Backfilled ${backfilledCount} missing accruals for past days`);
+    }
 
-    logAction('debt_accrual', 'Ежедневное начисление долга', `Начислено ${newAccruals.length} записей, клиентов: ${Object.keys(clientDeltas).length}`);
+    logAction('debt_accrual', 'Ежедневное начисление долга', `Начислено ${newAccruals.length} записей${backfilledCount > 0 ? ` (${backfilledCount} за прошлые дни)` : ''}, клиентов: ${Object.keys(clientDeltas).length}`);
     schedulePush();
     console.log(`[DebtAccrual] Created ${newAccruals.length} accruals for ${todayStr}`);
   }, [addTransaction, logAction, schedulePush]);
@@ -1885,7 +1916,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     if (!debt) return;
 
     debtsDirtyUntilRef.current = Date.now() + COLLECTION_DIRTY_MS;
-    console.log(`[payDebt] Marked debts dirty for ${COLLECTION_DIRTY_MS}ms`);
+    cashOpsDirtyUntilRef.current = Date.now() + COLLECTION_DIRTY_MS;
+    console.log(`[payDebt] Marked debts+cashOps dirty for ${COLLECTION_DIRTY_MS}ms`);
 
     const now = new Date().toISOString();
     const actualAmount = roundMoney(Math.min(amount, debt.remainingAmount));
@@ -1932,7 +1964,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   const payClientDebt = useCallback((clientId: string, amount: number, method: PaymentMethod, _calculatedTotal?: number) => {
     amount = roundMoney(amount);
     debtsDirtyUntilRef.current = Date.now() + COLLECTION_DIRTY_MS;
-    console.log(`[payClientDebt] Marked debts dirty for ${COLLECTION_DIRTY_MS}ms`);
+    cashOpsDirtyUntilRef.current = Date.now() + COLLECTION_DIRTY_MS;
+    console.log(`[payClientDebt] Marked debts+cashOps dirty for ${COLLECTION_DIRTY_MS}ms`);
     const now = new Date().toISOString();
 
     const clientOldDebts = debts.filter(d => d.clientId === clientId && d.remainingAmount > 0)
@@ -2125,15 +2158,15 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       return { success: false, error: 'Операцию может выполнить только администратор' };
     }
     const activeShift = shifts.find(s => s.status === 'open');
-    if (!activeShift) {
-      console.log(`[Withdrawal] BLOCKED: no open shift`);
+    if (!activeShift && currentUser?.role !== 'admin') {
+      console.log(`[Withdrawal] BLOCKED: no open shift for non-admin`);
       return { success: false, error: 'Нет открытой смены. Откройте смену, чтобы снять наличные.' };
     }
     const now = new Date().toISOString();
-    const balanceBefore = getShiftCashBalance(activeShift);
+    const balanceBefore = activeShift ? getShiftCashBalance(activeShift) : getUnshiftedCashBalance();
     const balanceAfter = roundMoney(balanceBefore - amount);
     const isUserAdmin = currentUser?.role === 'admin';
-    console.log(`[Withdrawal] Calculating balance: shiftBalance=${balanceBefore}, effective=${balanceBefore}`);
+    console.log(`[Withdrawal] Calculating balance: ${activeShift ? 'shiftBalance' : 'unshiftedBalance'}=${balanceBefore}, effective=${balanceBefore}`);
 
     if (balanceAfter < 0 && !isUserAdmin) {
       console.log(`[Withdrawal] BLOCKED for manager: balance=${balanceBefore}, withdraw=${amount}`);
@@ -2643,7 +2676,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       }
 
       const now = new Date().toISOString();
-      const balanceBefore = targetShift ? getShiftCashBalance(targetShift) : 0;
+      const balanceBefore = targetShift ? getShiftCashBalance(targetShift) : (isUserAdmin ? getUnshiftedCashBalance() : 0);
 
       if (!isUserAdmin && targetShift && balanceBefore < amount) {
         console.log(`[Expense] Insufficient funds: balance=${balanceBefore}, expense=${amount}`);
@@ -3972,6 +4005,9 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     }
     amount = roundMoney(amount);
     if (amount <= 0) return { success: false, error: 'Сумма должна быть больше 0' };
+    salaryDirtyUntilRef.current = Date.now() + COLLECTION_DIRTY_MS;
+    cashOpsDirtyUntilRef.current = Date.now() + COLLECTION_DIRTY_MS;
+    console.log(`[SalaryAdvance] Marked salary+cashOps dirty for ${COLLECTION_DIRTY_MS}ms`);
     const effectiveMethod: PaymentMethod = method ?? 'cash';
     const effectiveSource = source ?? 'admin';
     const now = new Date().toISOString();
@@ -4102,6 +4138,9 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     }
     grossAmount = roundMoney(grossAmount);
     if (grossAmount <= 0) return { success: false, error: 'Сумма должна быть больше 0' };
+    salaryDirtyUntilRef.current = Date.now() + COLLECTION_DIRTY_MS;
+    cashOpsDirtyUntilRef.current = Date.now() + COLLECTION_DIRTY_MS;
+    console.log(`[SalaryPayment] Marked salary+cashOps dirty for ${COLLECTION_DIRTY_MS}ms`);
     const effectiveSource = source ?? 'admin';
     const now = new Date().toISOString();
 
