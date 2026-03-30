@@ -2006,6 +2006,122 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     schedulePush();
   }, [debts, addTransaction, schedulePush, shifts, updateShiftExpected, logAction, addCashOperation, getShiftCashBalance]);
 
+  const activeSessions = useMemo(() =>
+    sessions.filter(s => (s.status === 'active' || s.status === 'active_debt') && !s.cancelled && !isClientDeleted(s.clientId)),
+  [sessions, isClientDeleted]);
+
+  const overstayedSessionDebts = useMemo(() => {
+    const result: Record<string, number> = {};
+    const sessionIdsWithDebt = new Set(
+      debts.filter(d => d.parkingEntryId && d.remainingAmount > 0).map(d => d.parkingEntryId!)
+    );
+    for (const session of activeSessions) {
+      if (session.status === 'active_debt') continue;
+      if (session.serviceType === 'lombard' || session.tariffType === 'lombard') continue;
+      if (sessionIdsWithDebt.has(session.id)) continue;
+
+      if (session.serviceType === 'onetime') {
+        const days = calculateDays(session.entryTime);
+        const dailyRate = tariffs.onetimeCash;
+        const totalOwed = roundMoney(dailyRate * days);
+        const prepaid = session.prepaidAmount ?? 0;
+        const owing = roundMoney(Math.max(0, totalOwed - prepaid));
+        if (owing > 0) {
+          result[session.clientId] = roundMoney((result[session.clientId] ?? 0) + owing);
+        }
+      } else if (session.serviceType === 'monthly') {
+        const sub = subscriptions.find(s => s.carId === session.carId && s.clientId === session.clientId);
+        if (!sub || isExpired(sub.paidUntil)) {
+          const monthlyAmount = getMonthlyAmount(tariffs.monthlyCash);
+          result[session.clientId] = roundMoney((result[session.clientId] ?? 0) + monthlyAmount);
+        }
+      }
+    }
+    console.log(`[Debtors] Overstayed session debts calculated for ${Object.keys(result).length} clients`);
+    return result;
+  }, [activeSessions, tariffs, subscriptions, debts]);
+
+  const overstayedSessionDetails = useMemo(() => {
+    const result: Record<string, Array<{ sessionId: string; carId: string; clientId: string; days: number; rate: number; amount: number; prepaid: number; serviceType: ServiceType }>> = {};
+    const sessionIdsWithDebt = new Set(
+      debts.filter(d => d.parkingEntryId && d.remainingAmount > 0).map(d => d.parkingEntryId!)
+    );
+    for (const session of activeSessions) {
+      if (session.status === 'active_debt') continue;
+      if (session.serviceType === 'lombard' || session.tariffType === 'lombard') continue;
+      if (sessionIdsWithDebt.has(session.id)) continue;
+
+      if (session.serviceType === 'onetime') {
+        const days = calculateDays(session.entryTime);
+        const dailyRate = tariffs.onetimeCash;
+        const totalOwed = roundMoney(dailyRate * days);
+        const prepaid = session.prepaidAmount ?? 0;
+        const owing = roundMoney(Math.max(0, totalOwed - prepaid));
+        if (owing > 0) {
+          if (!result[session.clientId]) result[session.clientId] = [];
+          result[session.clientId].push({ sessionId: session.id, carId: session.carId, clientId: session.clientId, days, rate: dailyRate, amount: owing, prepaid, serviceType: session.serviceType });
+        }
+      } else if (session.serviceType === 'monthly') {
+        const sub = subscriptions.find(s => s.carId === session.carId && s.clientId === session.clientId);
+        if (!sub || isExpired(sub.paidUntil)) {
+          const monthlyAmount = getMonthlyAmount(tariffs.monthlyCash);
+          if (!result[session.clientId]) result[session.clientId] = [];
+          result[session.clientId].push({ sessionId: session.id, carId: session.carId, clientId: session.clientId, days: 0, rate: tariffs.monthlyCash, amount: monthlyAmount, prepaid: 0, serviceType: session.serviceType });
+        }
+      }
+    }
+    return result;
+  }, [activeSessions, tariffs, subscriptions, debts]);
+
+  const materializeOverstayDebts = useCallback((clientId: string): number => {
+    const details = overstayedSessionDetails[clientId];
+    if (!details || details.length === 0) return 0;
+    debtsDirtyUntilRef.current = Date.now() + COLLECTION_DIRTY_MS;
+    const now = new Date().toISOString();
+    let totalMaterialized = 0;
+    const newDebts: Debt[] = [];
+    for (const d of details) {
+      const desc = d.serviceType === 'onetime'
+        ? `Парковка без оплаты: ${d.days} сут. × ${d.rate} ₽${d.prepaid > 0 ? ` − предоплата ${d.prepaid} ₽` : ''} = ${d.amount} ₽`
+        : `Просроченная месячная аренда: ${d.amount} ₽`;
+      const newDebt: Debt = {
+        id: generateId(),
+        clientId: d.clientId,
+        carId: d.carId,
+        totalAmount: d.amount,
+        remainingAmount: d.amount,
+        createdAt: now,
+        updatedAt: now,
+        description: desc,
+        parkingEntryId: d.sessionId,
+        status: 'active',
+      };
+      newDebts.push(newDebt);
+      totalMaterialized = roundMoney(totalMaterialized + d.amount);
+      console.log(`[MaterializeOverstay] Created Debt for session ${d.sessionId}: ${d.amount} ₽ (${d.days} days × ${d.rate})`);
+    }
+    if (newDebts.length > 0) {
+      setDebts(prev => {
+        const next = [...prev, ...newDebts];
+        latestDataRef.current = { ...latestDataRef.current, debts: next };
+        return next;
+      });
+      for (const nd of newDebts) {
+        addTransaction({
+          clientId: nd.clientId,
+          carId: nd.carId,
+          type: 'debt',
+          amount: nd.totalAmount,
+          method: null,
+          date: now,
+          description: nd.description,
+        });
+      }
+      logAction('debt_accrual', 'Фиксация долга за просрочку', `Клиент ${clientId}: ${newDebts.length} записей, всего ${totalMaterialized} ₽`);
+    }
+    return totalMaterialized;
+  }, [overstayedSessionDetails, addTransaction, logAction]);
+
   const payClientDebt = useCallback((clientId: string, amount: number, method: PaymentMethod, _calculatedTotal?: number) => {
     amount = roundMoney(amount);
     debtsDirtyUntilRef.current = Date.now() + COLLECTION_DIRTY_MS;
@@ -2475,122 +2591,6 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     schedulePush();
     console.log(`[DeleteCashOp] Deleted operation ${operationId}: ${op.type}, ${op.amount} ₽, cascaded to related entities`);
   }, [cashOperations, shifts, updateShiftExpected, logAction, schedulePush]);
-
-  const activeSessions = useMemo(() =>
-    sessions.filter(s => (s.status === 'active' || s.status === 'active_debt') && !s.cancelled && !isClientDeleted(s.clientId)),
-  [sessions, isClientDeleted]);
-
-  const overstayedSessionDebts = useMemo(() => {
-    const result: Record<string, number> = {};
-    const sessionIdsWithDebt = new Set(
-      debts.filter(d => d.parkingEntryId && d.remainingAmount > 0).map(d => d.parkingEntryId!)
-    );
-    for (const session of activeSessions) {
-      if (session.status === 'active_debt') continue;
-      if (session.serviceType === 'lombard' || session.tariffType === 'lombard') continue;
-      if (sessionIdsWithDebt.has(session.id)) continue;
-
-      if (session.serviceType === 'onetime') {
-        const days = calculateDays(session.entryTime);
-        const dailyRate = tariffs.onetimeCash;
-        const totalOwed = roundMoney(dailyRate * days);
-        const prepaid = session.prepaidAmount ?? 0;
-        const owing = roundMoney(Math.max(0, totalOwed - prepaid));
-        if (owing > 0) {
-          result[session.clientId] = roundMoney((result[session.clientId] ?? 0) + owing);
-        }
-      } else if (session.serviceType === 'monthly') {
-        const sub = subscriptions.find(s => s.carId === session.carId && s.clientId === session.clientId);
-        if (!sub || isExpired(sub.paidUntil)) {
-          const monthlyAmount = getMonthlyAmount(tariffs.monthlyCash);
-          result[session.clientId] = roundMoney((result[session.clientId] ?? 0) + monthlyAmount);
-        }
-      }
-    }
-    console.log(`[Debtors] Overstayed session debts calculated for ${Object.keys(result).length} clients`);
-    return result;
-  }, [activeSessions, tariffs, subscriptions, debts]);
-
-  const overstayedSessionDetails = useMemo(() => {
-    const result: Record<string, Array<{ sessionId: string; carId: string; clientId: string; days: number; rate: number; amount: number; prepaid: number; serviceType: ServiceType }>> = {};
-    const sessionIdsWithDebt = new Set(
-      debts.filter(d => d.parkingEntryId && d.remainingAmount > 0).map(d => d.parkingEntryId!)
-    );
-    for (const session of activeSessions) {
-      if (session.status === 'active_debt') continue;
-      if (session.serviceType === 'lombard' || session.tariffType === 'lombard') continue;
-      if (sessionIdsWithDebt.has(session.id)) continue;
-
-      if (session.serviceType === 'onetime') {
-        const days = calculateDays(session.entryTime);
-        const dailyRate = tariffs.onetimeCash;
-        const totalOwed = roundMoney(dailyRate * days);
-        const prepaid = session.prepaidAmount ?? 0;
-        const owing = roundMoney(Math.max(0, totalOwed - prepaid));
-        if (owing > 0) {
-          if (!result[session.clientId]) result[session.clientId] = [];
-          result[session.clientId].push({ sessionId: session.id, carId: session.carId, clientId: session.clientId, days, rate: dailyRate, amount: owing, prepaid, serviceType: session.serviceType });
-        }
-      } else if (session.serviceType === 'monthly') {
-        const sub = subscriptions.find(s => s.carId === session.carId && s.clientId === session.clientId);
-        if (!sub || isExpired(sub.paidUntil)) {
-          const monthlyAmount = getMonthlyAmount(tariffs.monthlyCash);
-          if (!result[session.clientId]) result[session.clientId] = [];
-          result[session.clientId].push({ sessionId: session.id, carId: session.carId, clientId: session.clientId, days: 0, rate: tariffs.monthlyCash, amount: monthlyAmount, prepaid: 0, serviceType: session.serviceType });
-        }
-      }
-    }
-    return result;
-  }, [activeSessions, tariffs, subscriptions, debts]);
-
-  const materializeOverstayDebts = useCallback((clientId: string): number => {
-    const details = overstayedSessionDetails[clientId];
-    if (!details || details.length === 0) return 0;
-    debtsDirtyUntilRef.current = Date.now() + COLLECTION_DIRTY_MS;
-    const now = new Date().toISOString();
-    let totalMaterialized = 0;
-    const newDebts: Debt[] = [];
-    for (const d of details) {
-      const desc = d.serviceType === 'onetime'
-        ? `Парковка без оплаты: ${d.days} сут. × ${d.rate} ₽${d.prepaid > 0 ? ` − предоплата ${d.prepaid} ₽` : ''} = ${d.amount} ₽`
-        : `Просроченная месячная аренда: ${d.amount} ₽`;
-      const newDebt: Debt = {
-        id: generateId(),
-        clientId: d.clientId,
-        carId: d.carId,
-        totalAmount: d.amount,
-        remainingAmount: d.amount,
-        createdAt: now,
-        updatedAt: now,
-        description: desc,
-        parkingEntryId: d.sessionId,
-        status: 'active',
-      };
-      newDebts.push(newDebt);
-      totalMaterialized = roundMoney(totalMaterialized + d.amount);
-      console.log(`[MaterializeOverstay] Created Debt for session ${d.sessionId}: ${d.amount} ₽ (${d.days} days × ${d.rate})`);
-    }
-    if (newDebts.length > 0) {
-      setDebts(prev => {
-        const next = [...prev, ...newDebts];
-        latestDataRef.current = { ...latestDataRef.current, debts: next };
-        return next;
-      });
-      for (const nd of newDebts) {
-        addTransaction({
-          clientId: nd.clientId,
-          carId: nd.carId,
-          type: 'debt',
-          amount: nd.totalAmount,
-          method: null,
-          date: now,
-          description: nd.description,
-        });
-      }
-      logAction('debt_accrual', 'Фиксация долга за просрочку', `Клиент ${clientId}: ${newDebts.length} записей, всего ${totalMaterialized} ₽`);
-    }
-    return totalMaterialized;
-  }, [overstayedSessionDetails, addTransaction, logAction]);
 
   const activeDebts = useMemo(() => debts.filter(d => d.remainingAmount > 0), [debts]);
 
