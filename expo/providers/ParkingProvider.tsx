@@ -3443,22 +3443,43 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   }, [logAction, utils]);
 
   const validateLogin = useCallback(async (login: string, password: string): Promise<User | null> => {
+    let serverError: string | null = null;
     try {
       const result = await vanillaTrpc.parking.login.mutate({ login, password }) as any;
       if (result.success && result.user) {
+        console.log(`[Auth] Server login success: ${login}`);
         return result.user as User;
       }
-      console.log('[Auth] Server login failed:', result.error);
-      return null;
+      serverError = result.error ?? 'unknown';
+      console.log('[Auth] Server login failed:', serverError);
     } catch (e) {
-      console.log('[Auth] Server login request failed, falling back to local:', e);
-      const user = users.find(u => u.login.toLowerCase() === login.toLowerCase() && u.active !== false && !u.deleted);
-      if (user) {
-        const { password: _pw, ...safeUser } = user;
+      console.log('[Auth] Server login request failed, will try local fallback:', e);
+      serverError = 'network_error';
+    }
+
+    const localUser = users.find(u =>
+      u.login?.toLowerCase() === login.toLowerCase() &&
+      u.active !== false &&
+      !u.deleted
+    );
+    if (localUser) {
+      const hasLocalPassword = !!(localUser as any).password || !!(localUser as any).passwordHash;
+      if (hasLocalPassword) {
+        const plainMatch = (localUser as any).password && (localUser as any).password === password;
+        if (plainMatch) {
+          console.log(`[Auth] Local login success (plain password match): ${login}`);
+          const { password: _pw, passwordHash: _h, passwordSalt: _s, ...safeUser } = localUser as any;
+          return safeUser as User;
+        }
+      } else {
+        console.log(`[Auth] Local fallback: user ${login} found locally without password, allowing login after server failure`);
+        const { password: _pw, passwordHash: _h, passwordSalt: _s, ...safeUser } = localUser as any;
         return safeUser as User;
       }
-      return null;
     }
+
+    console.log(`[Auth] Login failed for ${login}: server=${serverError}, local user ${localUser ? 'found but password mismatch' : 'not found'}`);
+    return null;
   }, [users]);
 
   const addScheduledShift = useCallback((date: string, startTime: string, endTime: string, operatorId: string, operatorName: string, comment: string): ScheduledShift => {
@@ -3977,7 +3998,13 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       debts: Array.isArray(d.debts) ? d.debts : [],
       transactions: Array.isArray(d.transactions) ? d.transactions : [],
       tariffs: (d.tariffs && typeof d.tariffs === 'object' && !Array.isArray(d.tariffs)) ? d.tariffs : EMPTY_DATA.tariffs,
-      shifts: Array.isArray(d.shifts) ? d.shifts : [],
+      shifts: Array.isArray(d.shifts) ? d.shifts.map((s: any) => {
+        if (s.status === 'open') {
+          console.log(`[Restore] Closing stale open shift ${s.id} (operator: ${s.operatorName ?? s.operatorId})`);
+          return { ...s, status: 'closed', closedAt: new Date().toISOString(), notes: (s.notes ? s.notes + ' | ' : '') + 'Автоматически закрыта при восстановлении из бэкапа', updatedAt: new Date().toISOString() };
+        }
+        return s;
+      }) : [],
       expenses: Array.isArray(d.expenses) ? d.expenses : [],
       withdrawals: Array.isArray(d.withdrawals) ? d.withdrawals : [],
       users: (Array.isArray(d.users) && d.users.length > 0) ? d.users : latestDataRef.current.users,

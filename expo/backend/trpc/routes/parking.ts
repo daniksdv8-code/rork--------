@@ -391,18 +391,28 @@ function mergeUsersServerWins(serverUsers: any[], incomingUsers: any[]): any[] {
     if (item?.id) {
       const existing = map.get(item.id);
       if (!existing) {
-        if (item.passwordHash) {
+        if (!item.passwordHash && !item.password) {
+          if (item.login) {
+            console.log(`[MergeUsers] New user ${item.login} has no password, setting default password = login`);
+            const { hash, salt } = hashPassword(item.login);
+            map.set(item.id, { ...item, passwordHash: hash, passwordSalt: salt, password: undefined });
+          } else {
+            map.set(item.id, item);
+          }
+        } else {
           map.set(item.id, item);
         }
       } else {
+        const merged = { ...item };
+        merged.passwordHash = existing.passwordHash;
+        merged.passwordSalt = existing.passwordSalt;
+        if (item.password) delete merged.password;
         if (item.updatedAt && existing.updatedAt) {
           if (new Date(item.updatedAt).getTime() > new Date(existing.updatedAt).getTime()) {
-            const merged = { ...item };
-            merged.passwordHash = existing.passwordHash;
-            merged.passwordSalt = existing.passwordSalt;
-            if (item.password) delete merged.password;
             map.set(item.id, merged);
           }
+        } else {
+          map.set(item.id, merged);
         }
       }
     }
@@ -772,8 +782,13 @@ export const parkingRouter = createTRPCRouter({
         return { ...u, passwordHash: hash, passwordSalt: salt, password: undefined };
       }
       const existing = existingUsers.find((eu: any) => eu.id === u.id);
-      if (existing) {
+      if (existing && existing.passwordHash && existing.passwordSalt) {
         return { ...u, passwordHash: existing.passwordHash, passwordSalt: existing.passwordSalt, password: undefined };
+      }
+      if (u.login) {
+        console.log(`[ResetData] User ${u.login} has no password info and no existing match, setting default password = login`);
+        const { hash, salt } = hashPassword(u.login);
+        return { ...u, passwordHash: hash, passwordSalt: salt, password: undefined, passwordResetNeeded: true };
       }
       return u;
     });
@@ -910,6 +925,11 @@ export const parkingRouter = createTRPCRouter({
           if (u.passwordHash) return u;
           if (u.password && u.password !== "***") {
             const { hash, salt } = hashPassword(u.password);
+            return { ...u, passwordHash: hash, passwordSalt: salt, password: undefined };
+          }
+          if (u.login) {
+            console.log(`[PushData] New user ${u.login} has no password, setting default password = login`);
+            const { hash, salt } = hashPassword(u.login);
             return { ...u, passwordHash: hash, passwordSalt: salt, password: undefined };
           }
           return u;

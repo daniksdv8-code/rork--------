@@ -39,8 +39,9 @@ export default function LoginScreen() {
           const activeManagerShift = getActiveManagerShift();
           if (activeManagerShift && activeManagerShift.operatorId !== user.id) {
             Alert.alert(
-              'Доступ ограничен',
-              `Сейчас уже идёт смена другого менеджера (${activeManagerShift.operatorName}). Дождитесь закрытия текущей смены.`
+              'Смена другого менеджера',
+              `Сейчас идёт смена менеджера «${activeManagerShift.operatorName}».\n\nЧтобы войти, попросите администратора закрыть текущую смену через раздел «Касса».`,
+              [{ text: 'Понятно' }]
             );
             setIsSubmitting(false);
             return;
@@ -49,10 +50,13 @@ export default function LoginScreen() {
         await setSession(user);
         router.replace('/(tabs)/(dashboard)');
       } else {
-        Alert.alert('Ошибка', 'Неверный логин или пароль, либо аккаунт заблокирован');
+        Alert.alert(
+          'Ошибка входа',
+          'Неверный логин или пароль, либо аккаунт заблокирован.\n\nЕсли вы недавно восстанавливали данные из бэкапа, пароль менеджера мог сброситься на логин. Попробуйте ввести логин в качестве пароля или обратитесь к администратору.'
+        );
       }
     } catch {
-      Alert.alert('Ошибка', 'Что-то пошло не так');
+      Alert.alert('Ошибка', 'Не удалось выполнить вход. Проверьте подключение к сети.');
     } finally {
       setIsSubmitting(false);
     }
