@@ -5,6 +5,7 @@ import {
 } from '@/types';
 import { roundMoney } from '@/utils/money';
 import { logAnomaly } from '@/utils/anomaly-logger';
+import { calculateShiftCashBalance, calculateStoredDebtTotal } from '@/utils/financeCalculations';
 
 export interface IntegrityIssue {
   severity: 'error' | 'warning';
@@ -275,32 +276,7 @@ export function verifyShiftCashBalance(
   expenses: Expense[],
   withdrawals: CashWithdrawal[],
 ): { isConsistent: boolean; calculatedBalance: number; expectedCash: number; diff: number } {
-  const openTime = new Date(shift.openedAt).getTime();
-  const closeTime = shift.closedAt ? new Date(shift.closedAt).getTime() : Date.now();
-
-  const cashIncome = transactions.filter(t =>
-    (t.type === 'payment' || t.type === 'debt_payment') &&
-    t.method === 'cash' && t.amount > 0 &&
-    new Date(t.date).getTime() >= openTime &&
-    new Date(t.date).getTime() <= closeTime
-  ).reduce((s, t) => s + t.amount, 0);
-
-  const cancelled = transactions.filter(t =>
-    t.type === 'cancel_payment' && t.method === 'cash' &&
-    new Date(t.date).getTime() >= openTime &&
-    new Date(t.date).getTime() <= closeTime
-  ).reduce((s, t) => s + t.amount, 0);
-
-  const refunded = transactions.filter(t =>
-    t.type === 'refund' && t.method === 'cash' &&
-    new Date(t.date).getTime() >= openTime &&
-    new Date(t.date).getTime() <= closeTime
-  ).reduce((s, t) => s + t.amount, 0);
-
-  const expenseTotal = expenses.filter(e => e.shiftId === shift.id).reduce((s, e) => s + e.amount, 0);
-  const withdrawalTotal = withdrawals.filter(w => w.shiftId === shift.id).reduce((s, w) => s + w.amount, 0);
-
-  const calculatedBalance = roundMoney(shift.carryOver + cashIncome - cancelled - refunded - expenseTotal - withdrawalTotal);
+  const calculatedBalance = calculateShiftCashBalance(shift, { transactions, expenses, withdrawals });
   const diff = roundMoney(Math.abs(calculatedBalance - shift.expectedCash));
   const isConsistent = diff < 1;
 

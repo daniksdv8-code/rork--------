@@ -9,6 +9,7 @@ import { useParking } from '@/providers/ParkingProvider';
 import { formatDate, formatDateTime } from '@/utils/date';
 import { formatMoney } from '@/utils/money';
 import { CashShift } from '@/types';
+import { calculateStoredDebtTotal } from '@/utils/financeCalculations';
 
 const fm = (n: number) => formatMoney(n);
 
@@ -99,9 +100,8 @@ export default function ReportsScreen() {
     const adjustment = Math.round(adjustmentGross - adjustmentCancelled);
     const totalRefunds = Math.round(cashRefunded + cardRefunded);
 
-    const oldDebtTotal = Math.round(debts.filter(d => d.remainingAmount > 0).reduce((s, d) => s + d.remainingAmount, 0));
-    const clientDebtTotal = Math.round(clientDebts.reduce((s, cd) => s + cd.totalAmount, 0));
-    const totalDebtAmount = Math.round(oldDebtTotal + clientDebtTotal);
+    const storedDebt = calculateStoredDebtTotal(debts, clientDebts);
+    const totalDebtAmount = storedDebt.total;
     const debtorsCount = debtors.length;
     const expenseCount = filteredExpenses.length;
 

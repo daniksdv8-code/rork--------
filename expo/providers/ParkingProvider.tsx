@@ -20,6 +20,19 @@ import { migrateBackupData, detectBackupVersion } from '@/utils/backup-migration
 import { useSelfDiagnosis } from '@/hooks/useSelfDiagnosis';
 import { FullDiagnosticData } from '@/utils/integrity';
 import { logAnomaly, getAnomalySummary } from '@/utils/anomaly-logger';
+import {
+  calculateClientDebt as _calcClientDebt,
+  calculateClientDebtBreakdown,
+  calculateCashBalance as _calcCashBalance,
+  calculateShiftCashBalance,
+  calculateOverstayedSessionDebts,
+  calculateOverstayedSessionDetails,
+  calculateTotalDebtAllClients,
+  getActiveSessionsForDebt,
+  type ClientDebtState,
+  type AdminCashBalanceState,
+  type OverstayedSessionDetail,
+} from '@/utils/financeCalculations';
 
 const STORAGE_KEY = 'park_data';
 const MAX_TRANSACTIONS = 10000;
@@ -861,27 +874,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   }, [isLoaded, isServerSynced, runDebtAccrual]);
 
   const getShiftCashBalance = useCallback((shift: CashShift): number => {
-    const openTime = new Date(shift.openedAt).getTime();
-    const closeTime = shift.closedAt ? new Date(shift.closedAt).getTime() : Date.now();
-    const isInShift = (t: { date: string; shiftId?: string | null }) => {
-      if (t.shiftId === shift.id) return true;
-      if (t.shiftId && t.shiftId !== shift.id) return false;
-      const tTime = new Date(t.date).getTime();
-      return tTime >= openTime && tTime <= closeTime;
-    };
-    const cashIncome = transactions.filter(t =>
-      (t.type === 'payment' || t.type === 'debt_payment') &&
-      t.method === 'cash' && t.amount > 0 && isInShift(t)
-    ).reduce((s, t) => s + t.amount, 0);
-    const cancelled = transactions.filter(t =>
-      t.type === 'cancel_payment' && t.method === 'cash' && isInShift(t)
-    ).reduce((s, t) => s + t.amount, 0);
-    const refunded = transactions.filter(t =>
-      t.type === 'refund' && t.method === 'cash' && isInShift(t)
-    ).reduce((s, t) => s + t.amount, 0);
-    const expenseTotal = expenses.filter(e => e.shiftId === shift.id).reduce((s, e) => s + e.amount, 0);
-    const withdrawalTotal = withdrawals.filter(w => w.shiftId === shift.id).reduce((s, w) => s + w.amount, 0);
-    return roundMoney(shift.carryOver + cashIncome - cancelled - refunded - expenseTotal - withdrawalTotal);
+    return calculateShiftCashBalance(shift, { transactions, expenses, withdrawals });
   }, [transactions, expenses, withdrawals]);
 
   const addCashOperation = useCallback((params: {
@@ -2056,74 +2049,13 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   [sessions, isClientDeleted]);
 
   const overstayedSessionDebts = useMemo(() => {
-    const result: Record<string, number> = {};
-    const sessionIdsWithDebt = new Set(
-      debts.filter(d => d.parkingEntryId && d.remainingAmount > 0).map(d => d.parkingEntryId!)
-    );
-    const sessionIdsWithPaidDebt = new Set(
-      debts.filter(d => d.parkingEntryId && d.status === 'paid' && d.remainingAmount <= 0).map(d => d.parkingEntryId!)
-    );
-    for (const session of activeSessions) {
-      if (session.status === 'active_debt') continue;
-      if (session.serviceType === 'lombard' || session.tariffType === 'lombard') continue;
-      if (sessionIdsWithDebt.has(session.id)) continue;
-      if (sessionIdsWithPaidDebt.has(session.id)) continue;
-
-      if (session.serviceType === 'onetime') {
-        const days = calculateDays(session.entryTime);
-        const dailyRate = tariffs.onetimeCash;
-        const totalOwed = roundMoney(dailyRate * days);
-        const prepaid = session.prepaidAmount ?? 0;
-        const owing = roundMoney(Math.max(0, totalOwed - prepaid));
-        if (owing > 0) {
-          result[session.clientId] = roundMoney((result[session.clientId] ?? 0) + owing);
-        }
-      } else if (session.serviceType === 'monthly') {
-        const sub = subscriptions.find(s => s.carId === session.carId && s.clientId === session.clientId);
-        if (!sub || isExpired(sub.paidUntil)) {
-          const monthlyAmount = getMonthlyAmount(tariffs.monthlyCash);
-          result[session.clientId] = roundMoney((result[session.clientId] ?? 0) + monthlyAmount);
-        }
-      }
-    }
+    const result = calculateOverstayedSessionDebts(activeSessions, debts, subscriptions, tariffs);
     console.log(`[Debtors] Overstayed session debts calculated for ${Object.keys(result).length} clients`);
     return result;
   }, [activeSessions, tariffs, subscriptions, debts]);
 
   const overstayedSessionDetails = useMemo(() => {
-    const result: Record<string, Array<{ sessionId: string; carId: string; clientId: string; days: number; rate: number; amount: number; prepaid: number; serviceType: ServiceType }>> = {};
-    const sessionIdsWithDebt = new Set(
-      debts.filter(d => d.parkingEntryId && d.remainingAmount > 0).map(d => d.parkingEntryId!)
-    );
-    const sessionIdsWithPaidDebt = new Set(
-      debts.filter(d => d.parkingEntryId && d.status === 'paid' && d.remainingAmount <= 0).map(d => d.parkingEntryId!)
-    );
-    for (const session of activeSessions) {
-      if (session.status === 'active_debt') continue;
-      if (session.serviceType === 'lombard' || session.tariffType === 'lombard') continue;
-      if (sessionIdsWithDebt.has(session.id)) continue;
-      if (sessionIdsWithPaidDebt.has(session.id)) continue;
-
-      if (session.serviceType === 'onetime') {
-        const days = calculateDays(session.entryTime);
-        const dailyRate = tariffs.onetimeCash;
-        const totalOwed = roundMoney(dailyRate * days);
-        const prepaid = session.prepaidAmount ?? 0;
-        const owing = roundMoney(Math.max(0, totalOwed - prepaid));
-        if (owing > 0) {
-          if (!result[session.clientId]) result[session.clientId] = [];
-          result[session.clientId].push({ sessionId: session.id, carId: session.carId, clientId: session.clientId, days, rate: dailyRate, amount: owing, prepaid, serviceType: session.serviceType });
-        }
-      } else if (session.serviceType === 'monthly') {
-        const sub = subscriptions.find(s => s.carId === session.carId && s.clientId === session.clientId);
-        if (!sub || isExpired(sub.paidUntil)) {
-          const monthlyAmount = getMonthlyAmount(tariffs.monthlyCash);
-          if (!result[session.clientId]) result[session.clientId] = [];
-          result[session.clientId].push({ sessionId: session.id, carId: session.carId, clientId: session.clientId, days: 0, rate: tariffs.monthlyCash, amount: monthlyAmount, prepaid: 0, serviceType: session.serviceType });
-        }
-      }
-    }
-    return result;
+    return calculateOverstayedSessionDetails(activeSessions, debts, subscriptions, tariffs);
   }, [activeSessions, tariffs, subscriptions, debts]);
 
   const materializeOverstayDebts = useCallback((clientId: string): number => {
@@ -2668,13 +2600,13 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     return activeDebts.filter(d => d.clientId === clientId);
   }, [activeDebts]);
 
+  const debtState: ClientDebtState = useMemo(() => ({
+    debts, clientDebts, sessions, subscriptions, tariffs, dailyDebtAccruals,
+  }), [debts, clientDebts, sessions, subscriptions, tariffs, dailyDebtAccruals]);
+
   const getClientTotalDebt = useCallback((clientId: string): number => {
-    const oldDebtsTotal = activeDebts.filter(d => d.clientId === clientId).reduce((sum, d) => sum + d.remainingAmount, 0);
-    const cd = clientDebts.find(c => c.clientId === clientId);
-    const clientDebtTotal = cd ? cd.totalAmount : 0;
-    const overstayTotal = overstayedSessionDebts[clientId] ?? 0;
-    return roundMoney(oldDebtsTotal + clientDebtTotal + overstayTotal);
-  }, [activeDebts, clientDebts, overstayedSessionDebts]);
+    return _calcClientDebt(debtState, clientId, activeSessions, overstayedSessionDebts);
+  }, [debtState, activeSessions, overstayedSessionDebts]);
 
   const payWithDebtPriority = useCallback((clientId: string, totalPayment: number, method: PaymentMethod, targetCarId?: string, serviceType?: ServiceType, months?: number, paidUntilDate?: string): { debtPaid: number; advancePaid: number; remainingDebt: number } => {
     const clientTotalDebt = getClientTotalDebt(clientId);
@@ -2828,15 +2760,12 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     return allClientIds.map(id => {
       const client = activeClients.find(c => c.id === id);
       const clientDebtsList = activeDebts.filter(d => d.clientId === id);
-      const oldTotal = clientDebtsList.reduce((sum, d) => sum + d.remainingAmount, 0);
-      const cd = clientDebts.find(c => c.clientId === id);
-      const newTotal = cd ? cd.totalAmount : 0;
-      const overstayTotal = overstayedSessionDebts[id] ?? 0;
-      const totalDebt = roundMoney(oldTotal + newTotal + overstayTotal);
+      const breakdown = calculateClientDebtBreakdown(debtState, id, activeSessions, overstayedSessionDebts);
       const clientCars = activeCars.filter(c => c.clientId === id);
-      return { client, debts: clientDebtsList, totalDebt, cars: clientCars, clientDebt: cd ?? null, overstayDebt: overstayTotal };
+      const cd = clientDebts.find(c => c.clientId === id);
+      return { client, debts: clientDebtsList, totalDebt: breakdown.total, cars: clientCars, clientDebt: cd ?? null, overstayDebt: breakdown.overstayTotal };
     }).filter(d => d.client && d.totalDebt > 0);
-  }, [activeDebts, activeClients, activeCars, clientDebts, overstayedSessionDebts]);
+  }, [activeDebts, activeClients, activeCars, clientDebts, overstayedSessionDebts, debtState, activeSessions]);
 
   const todayStats = useMemo(() => {
     const todayTx = transactions.filter(t => isToday(t.date));
@@ -2857,10 +2786,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     const netCash = roundMoney(cashToday - cashCancelled - cashRefunded);
     const netCard = roundMoney(cardToday - cardCancelled - cardRefunded);
     const netAdjustment = roundMoney(adjustmentToday - adjustmentCancelled);
-    const oldDebtTotal = roundMoney(activeDebts.reduce((s, d) => s + d.remainingAmount, 0));
-    const clientDebtTotal = roundMoney(clientDebts.reduce((s, cd) => s + cd.totalAmount, 0));
-    const overstayTotal = roundMoney(Object.values(overstayedSessionDebts).reduce((s, v) => s + v, 0));
-    const totalDebt = roundMoney(oldDebtTotal + clientDebtTotal + overstayTotal);
+    const debtTotals = calculateTotalDebtAllClients(debtState, activeSessions);
+    const totalDebt = debtTotals.total;
     const totalRefunds = roundMoney(cashRefunded + cardRefunded);
 
     return {
@@ -2873,7 +2800,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       totalDebt,
       totalRefunds,
     };
-  }, [transactions, activeDebts, activeSessions, debtors, clientDebts, overstayedSessionDebts]);
+  }, [transactions, activeSessions, debtors, debtState]);
 
   const openShift = useCallback((operatorId: string, operatorName: string, carryOver: number = 0, role?: 'admin' | 'manager'): CashShift => {
     const operatorRole = role ?? (currentUser?.role === 'admin' ? 'admin' : 'manager');
@@ -4340,45 +4267,13 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     console.log('[Reset] All data has been reset. Admin accounts preserved.');
   }, [users, currentUser, schedulePush, utils]);
 
+  const adminCashState: AdminCashBalanceState = useMemo(() => ({
+    transactions, withdrawals, adminExpenses, salaryAdvances, salaryPayments,
+  }), [transactions, withdrawals, adminExpenses, salaryAdvances, salaryPayments]);
+
   const getAdminFinanceBalance = useCallback((): { cash: number; card: number; total: number } => {
-    const allCardIncome = roundMoney(
-      transactions.filter(t => (t.type === 'payment' || t.type === 'debt_payment') && t.amount > 0 && t.method === 'card')
-        .reduce((s, t) => s + t.amount, 0)
-      - transactions.filter(t => t.type === 'cancel_payment' && t.method === 'card').reduce((s, t) => s + t.amount, 0)
-      - transactions.filter(t => t.type === 'refund' && t.method === 'card').reduce((s, t) => s + t.amount, 0)
-    );
-    const cashFromManagers = roundMoney(withdrawals.reduce((s, w) => s + w.amount, 0));
-
-    const adminSourcedAdvances = salaryAdvances.filter(a => !a.source || a.source === 'admin');
-    const salaryAdvanceCash = roundMoney(
-      adminSourcedAdvances.filter(a => !a.method || a.method === 'cash').reduce((s, a) => s + a.amount, 0)
-    );
-    const salaryAdvanceCard = roundMoney(
-      adminSourcedAdvances.filter(a => a.method === 'card').reduce((s, a) => s + a.amount, 0)
-    );
-
-    const adminSourcedPayments = salaryPayments.filter(p => !p.source || p.source === 'admin');
-    const salaryPayCash = roundMoney(
-      adminSourcedPayments.filter(p => p.netPaid > 0 && p.method === 'cash').reduce((s, p) => s + p.netPaid, 0)
-    );
-    const salaryPayCard = roundMoney(
-      adminSourcedPayments.filter(p => p.netPaid > 0 && p.method === 'card').reduce((s, p) => s + p.netPaid, 0)
-    );
-
-    const cashBalance = roundMoney(
-      cashFromManagers
-      - adminExpenses.filter(e => e.method === 'cash').reduce((s, e) => s + e.amount, 0)
-      - salaryAdvanceCash
-      - salaryPayCash
-    );
-    const cardBalance = roundMoney(
-      allCardIncome
-      - adminExpenses.filter(e => e.method === 'card').reduce((s, e) => s + e.amount, 0)
-      - salaryAdvanceCard
-      - salaryPayCard
-    );
-    return { cash: cashBalance, card: cardBalance, total: roundMoney(cashBalance + cardBalance) };
-  }, [transactions, withdrawals, adminExpenses, salaryAdvances, salaryPayments]);
+    return _calcCashBalance(adminCashState);
+  }, [adminCashState]);
 
   const issueSalaryAdvance = useCallback((employeeId: string, employeeName: string, amount: number, comment: string, forceNegative?: boolean, method?: PaymentMethod, source?: 'admin' | 'manager_shift'): { success: boolean; error?: string; wouldGoNegative?: boolean; currentBalance?: number } => {
     if (currentUser?.role !== 'admin') {

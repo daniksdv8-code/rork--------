@@ -7,6 +7,7 @@ import { useParking } from '@/providers/ParkingProvider';
 import { formatDate } from '@/utils/date';
 import { roundMoney } from '@/utils/money';
 import { Client, Car } from '@/types';
+import { calculateStoredDebtTotal } from '@/utils/financeCalculations';
 
 interface DebtRow {
   id: string;
@@ -105,9 +106,7 @@ export default function DebtsListScreen() {
   }, [debts, clients, cars, sessions, dailyDebtAccruals, tariffs]);
 
   const totalDebt = useMemo(() => {
-    const oldTotal = debts.filter(d => d.remainingAmount > 0).reduce((s, d) => s + d.remainingAmount, 0);
-    const cdTotal = clientDebts.reduce((s, cd) => s + cd.totalAmount, 0);
-    return roundMoney(oldTotal + cdTotal);
+    return calculateStoredDebtTotal(debts, clientDebts).total;
   }, [debts, clientDebts]);
 
   const filtered = useMemo(() => {
