@@ -6,7 +6,7 @@ import Colors from '@/constants/colors';
 import { useParking } from '@/providers/ParkingProvider';
 import ShiftGuard from '@/components/ShiftGuard';
 import { formatDate } from '@/utils/date';
-import { roundMoney } from '@/utils/money';
+import { roundMoney, formatMoney } from '@/utils/money';
 import { ParkingSession, Car, Debt, ClientDebt, DailyDebtAccrual } from '@/types';
 
 interface DebtorItem {
@@ -93,7 +93,7 @@ export default function DebtorsScreen() {
         <View style={styles.cardHeader}>
           <View style={styles.debtBadge}>
             <AlertTriangle size={14} color={Colors.danger} />
-            <Text style={styles.debtAmount}>{item.totalDebt} ₽</Text>
+            <Text style={styles.debtAmount}>{formatMoney(item.totalDebt)} ₽</Text>
           </View>
         </View>
         <Text style={styles.clientName}>{item.client.name}</Text>
@@ -118,7 +118,7 @@ export default function DebtorsScreen() {
                 </Text>
               </View>
             </View>
-            <Text style={styles.debtRowAmount}>{detail.amount} ₽</Text>
+            <Text style={styles.debtRowAmount}>{formatMoney(detail.amount)} ₽</Text>
           </View>
         ))}
 
@@ -128,7 +128,7 @@ export default function DebtorsScreen() {
               <Text style={styles.debtDesc}>{debt.description}</Text>
               <Text style={styles.debtDate}>{formatDate(debt.createdAt)}</Text>
             </View>
-            <Text style={styles.debtRowAmount}>{debt.remainingAmount} ₽</Text>
+            <Text style={styles.debtRowAmount}>{formatMoney(debt.remainingAmount)} ₽</Text>
           </View>
         ))}
 
@@ -143,7 +143,7 @@ export default function DebtorsScreen() {
                 }
               </Text>
             </View>
-            <Text style={styles.debtRowAmount}>{unaccountedClientDebt} ₽</Text>
+            <Text style={styles.debtRowAmount}>{formatMoney(unaccountedClientDebt)} ₽</Text>
           </View>
         )}
 
@@ -153,7 +153,7 @@ export default function DebtorsScreen() {
               <Text style={styles.debtDesc}>Задолженность</Text>
               <Text style={styles.debtDate}>Детали недоступны</Text>
             </View>
-            <Text style={styles.debtRowAmount}>{item.totalDebt} ₽</Text>
+            <Text style={styles.debtRowAmount}>{formatMoney(item.totalDebt)} ₽</Text>
           </View>
         )}
 
@@ -205,7 +205,7 @@ export default function DebtorsScreen() {
     <View style={styles.container}>
       <View style={styles.totalBar}>
         <Text style={styles.totalLabel}>Общий долг:</Text>
-        <Text style={styles.totalValue}>{roundMoney(debtors.reduce((s, d) => s + d.totalDebt, 0))} ₽</Text>
+        <Text style={styles.totalValue}>{formatMoney(debtors.reduce((s, d) => s + d.totalDebt, 0))} ₽</Text>
       </View>
       <FlatList
         data={debtors}

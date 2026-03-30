@@ -254,7 +254,7 @@ export default function CashRegisterScreen() {
       new Date(t.date).getTime() >= openTime &&
       new Date(t.date).getTime() <= closeTime
     ).reduce((s, t) => s + t.amount, 0);
-    return income - cancelled - refunded;
+    return Math.round(income - cancelled - refunded);
   }, [transactions]);
 
   const shiftCardIncome = useCallback((shift: CashShift) => {
@@ -278,7 +278,7 @@ export default function CashRegisterScreen() {
       new Date(t.date).getTime() >= openTime &&
       new Date(t.date).getTime() <= closeTime
     ).reduce((s, t) => s + t.amount, 0);
-    return income - cancelled - refunded;
+    return Math.round(income - cancelled - refunded);
   }, [transactions]);
 
   const shiftExpenses = useCallback((shiftId: string) => {
@@ -816,7 +816,7 @@ export default function CashRegisterScreen() {
                 const shiftExps = shiftExpenses(shift.id);
                 const shiftWds = shiftWithdrawals(shift.id);
 
-                const calcBalance = shift.carryOver + cashIn - expTotal - wTotal;
+                const calcBalance = Math.round(shift.carryOver + cashIn - expTotal - wTotal);
                 const variance = shift.cashVariance ?? ((shift.actualCash ?? 0) - calcBalance);
                 const varType = shift.cashVarianceType ?? (variance < 0 ? 'short' : variance > 0 ? 'over' : 'none');
                 const hasVariance = shift.status === 'closed' && varType !== 'none';

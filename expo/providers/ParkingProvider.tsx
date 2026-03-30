@@ -1768,7 +1768,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
   const payMonthly = useCallback((clientId: string, carId: string, method: PaymentMethod, months: number = 1, customAmount?: number, paidUntilDate?: string) => {
     const dailyRate = method === 'cash' ? tariffs.monthlyCash : tariffs.monthlyCard;
-    const amount = customAmount ?? (getMonthlyAmount(dailyRate) * months);
+    const amount = customAmount ?? roundMoney(getMonthlyAmount(dailyRate) * months);
     const now = new Date().toISOString();
     const activeShift = shifts.find(s => s.status === 'open');
 

@@ -402,7 +402,7 @@ export default function SalaryAdvancesScreen() {
               <View style={{ flex: 1, marginLeft: 12 }}>
                 <Text style={styles.summaryLabel}>Всего долгов под ЗП</Text>
                 <Text style={styles.summaryValue}>
-                  {debtsWithBalance.reduce((s, e) => s + e.remaining, 0)} ₽
+                  {Math.round(debtsWithBalance.reduce((s, e) => s + e.remaining, 0))} ₽
                 </Text>
               </View>
               <Text style={styles.summaryCount}>{debtsWithBalance.length} чел.</Text>

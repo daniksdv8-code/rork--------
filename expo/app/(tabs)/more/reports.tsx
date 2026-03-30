@@ -149,7 +149,7 @@ export default function ReportsScreen() {
       new Date(t.date).getTime() >= openTime &&
       new Date(t.date).getTime() <= closeTime
     ).reduce((s, t) => s + t.amount, 0);
-    return income - cancelled - refunded;
+    return Math.round(income - cancelled - refunded);
   }, [transactions]);
 
   const shiftCardIncome = useCallback((shift: CashShift) => {
@@ -172,7 +172,7 @@ export default function ReportsScreen() {
       new Date(t.date).getTime() >= openTime &&
       new Date(t.date).getTime() <= closeTime
     ).reduce((s, t) => s + t.amount, 0);
-    return income - cancelled - refunded;
+    return Math.round(income - cancelled - refunded);
   }, [transactions]);
 
   const shiftExpenseTotal = useCallback((shift: CashShift) => {
@@ -385,7 +385,7 @@ export default function ReportsScreen() {
               const cardIn = shiftCardIncome(shift);
               const expTotal = shiftExpenseTotal(shift);
               const wTotal = shiftWithdrawalTotal(shift);
-              const calcBalance = shift.carryOver + cashIn - expTotal - wTotal;
+              const calcBalance = Math.round(shift.carryOver + cashIn - expTotal - wTotal);
               const isClosed = shift.status === 'closed';
 
               return (
