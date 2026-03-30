@@ -14,12 +14,8 @@ interface ShiftGuardProps {
 export default function ShiftGuard({ children, allowView = false }: ShiftGuardProps) {
   const router = useRouter();
   const { needsShiftCheck } = useParking();
-  const { isAdmin } = useAuth();
+  const { isAdmin: _isAdmin } = useAuth();
   const shiftRequired = needsShiftCheck();
-
-  if (isAdmin) {
-    return <>{children}</>;
-  }
 
   if (!shiftRequired) {
     return <>{children}</>;

@@ -120,7 +120,7 @@ export default function DashboardScreen() {
 
       <CleaningReminder />
 
-      {(!currentUser || (currentUser.role !== 'admin' && shiftRequired)) && (
+      {(!currentUser || shiftRequired) && (
         <TouchableOpacity
           style={styles.shiftBanner}
           onPress={() => router.push('/(tabs)/more/cashregister' as any)}

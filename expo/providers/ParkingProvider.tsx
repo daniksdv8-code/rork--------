@@ -65,13 +65,16 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   const localDirtyRef = useRef<boolean>(false);
   const pushRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const localChangeCounterRef = useRef<number>(0);
+  const debtsDirtyUntilRef = useRef<number>(0);
+  const shiftsDirtyUntilRef = useRef<number>(0);
+  const COLLECTION_DIRTY_MS = 15000;
   const restoreEpochRef = useRef<number>(-1);
   const restoreInProgressRef = useRef<boolean>(false);
   const restoreServerOkRef = useRef<boolean>(false);
   const restoreFinishedAtRef = useRef<number>(0);
   const lastPushCompletedRef = useRef<number>(0);
   const RESTORE_GRACE_MS = 300000;
-  const POST_PUSH_GRACE_MS = 3000;
+  const POST_PUSH_GRACE_MS = 6000;
 
   const latestDataRef = useRef({
     clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories, dailyDebtAccruals, clientDebts, cashOperations, teamViolations, salaryAdvances, salaryPayments, cleanupChecklistTemplate,
@@ -134,10 +137,20 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     setSessions(deleted.size > 0 ? (d.sessions || []).filter((s: any) => !deleted.has(s.clientId)) : (d.sessions || []));
     setSubscriptions(deleted.size > 0 ? (d.subscriptions || []).filter((s: any) => !deleted.has(s.clientId)) : (d.subscriptions || []));
     setPayments(d.payments || []);
-    setDebts(deleted.size > 0 ? (d.debts || []).filter((dd: any) => !deleted.has(dd.clientId)) : (d.debts || []));
+    const isDebtsDirty = debtsDirtyUntilRef.current > Date.now();
+    if (isDebtsDirty) {
+      console.log(`[Sync] SKIPPING debts/clientDebts overwrite — local debts dirty for ${debtsDirtyUntilRef.current - Date.now()}ms more (source=${source ?? '?'})`);
+    } else {
+      setDebts(deleted.size > 0 ? (d.debts || []).filter((dd: any) => !deleted.has(dd.clientId)) : (d.debts || []));
+    }
     setTransactions((d.transactions || []).slice(0, MAX_TRANSACTIONS));
     if (d.tariffs) setTariffs(d.tariffs);
-    setShifts(d.shifts ?? []);
+    const isShiftsDirty = shiftsDirtyUntilRef.current > Date.now();
+    if (isShiftsDirty) {
+      console.log(`[Sync] SKIPPING shifts overwrite — local shifts dirty for ${shiftsDirtyUntilRef.current - Date.now()}ms more (source=${source ?? '?'})`);
+    } else {
+      setShifts(d.shifts ?? []);
+    }
     setExpenses(d.expenses ?? []);
     setWithdrawals(d.withdrawals ?? []);
     const serverUsers = d.users;
@@ -150,7 +163,9 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     setAdminCashOperations(d.adminCashOperations ?? []);
     setExpenseCategories((d.expenseCategories ?? []).filter((c: any) => !c.deleted));
     setDailyDebtAccruals(d.dailyDebtAccruals ?? []);
-    setClientDebts(deleted.size > 0 ? (d.clientDebts ?? []).filter((cd: any) => !deleted.has(cd.clientId)) : (d.clientDebts ?? []));
+    if (!isDebtsDirty) {
+      setClientDebts(deleted.size > 0 ? (d.clientDebts ?? []).filter((cd: any) => !deleted.has(cd.clientId)) : (d.clientDebts ?? []));
+    }
     setCashOperations(d.cashOperations ?? []);
     setTeamViolations(d.teamViolations ?? []);
     setSalaryAdvances(d.salaryAdvances ?? localData.salaryAdvances ?? []);
@@ -493,7 +508,6 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
   const needsShiftCheck = useCallback((): boolean => {
     if (!currentUser) return true;
-    if (currentUser.role === 'admin') return false;
     return !isShiftOpen();
   }, [currentUser, isShiftOpen]);
 
@@ -1623,6 +1637,10 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     const session = sessions.find(s => s.id === sessionId && (s.status === 'active' || s.status === 'active_debt'));
     if (!session) return;
 
+    if (session.status === 'active_debt') {
+      debtsDirtyUntilRef.current = Date.now() + COLLECTION_DIRTY_MS;
+    }
+
     const cancelNow = new Date().toISOString();
     const isLombardCancel = session.tariffType === 'lombard' || session.serviceType === 'lombard';
     const isDebtCancel = session.status === 'active_debt';
@@ -1669,6 +1687,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   const cancelCheckOut = useCallback((sessionId: string) => {
     const session = sessions.find(s => s.id === sessionId && (s.status === 'completed' || s.status === 'released' || s.status === 'released_debt') && !s.cancelled);
     if (!session || !session.exitTime) return;
+    debtsDirtyUntilRef.current = Date.now() + COLLECTION_DIRTY_MS;
 
     const exitTime = new Date(session.exitTime).getTime();
     const relatedDebts = debts.filter(d =>
@@ -1865,6 +1884,9 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     const debt = debts.find(d => d.id === debtId);
     if (!debt) return;
 
+    debtsDirtyUntilRef.current = Date.now() + COLLECTION_DIRTY_MS;
+    console.log(`[payDebt] Marked debts dirty for ${COLLECTION_DIRTY_MS}ms`);
+
     const now = new Date().toISOString();
     const actualAmount = roundMoney(Math.min(amount, debt.remainingAmount));
     const newRemaining = roundMoney(debt.remainingAmount - actualAmount);
@@ -1909,6 +1931,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
   const payClientDebt = useCallback((clientId: string, amount: number, method: PaymentMethod, _calculatedTotal?: number) => {
     amount = roundMoney(amount);
+    debtsDirtyUntilRef.current = Date.now() + COLLECTION_DIRTY_MS;
+    console.log(`[payClientDebt] Marked debts dirty for ${COLLECTION_DIRTY_MS}ms`);
     const now = new Date().toISOString();
 
     const clientOldDebts = debts.filter(d => d.clientId === clientId && d.remainingAmount > 0)
@@ -2101,13 +2125,15 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       return { success: false, error: 'Операцию может выполнить только администратор' };
     }
     const activeShift = shifts.find(s => s.status === 'open');
+    if (!activeShift) {
+      console.log(`[Withdrawal] BLOCKED: no open shift`);
+      return { success: false, error: 'Нет открытой смены. Откройте смену, чтобы снять наличные.' };
+    }
     const now = new Date().toISOString();
-    const shiftBalance = activeShift ? getShiftCashBalance(activeShift) : 0;
-    const unshiftedBalance = getUnshiftedCashBalance();
-    const balanceBefore = activeShift ? roundMoney(shiftBalance + (unshiftedBalance > 0 ? unshiftedBalance : 0)) : unshiftedBalance;
+    const balanceBefore = getShiftCashBalance(activeShift);
     const balanceAfter = roundMoney(balanceBefore - amount);
     const isUserAdmin = currentUser?.role === 'admin';
-    console.log(`[Withdrawal] Calculating balance: shiftBalance=${shiftBalance}, unshiftedBalance=${unshiftedBalance}, effective=${balanceBefore}`);
+    console.log(`[Withdrawal] Calculating balance: shiftBalance=${balanceBefore}, effective=${balanceBefore}`);
 
     if (balanceAfter < 0 && !isUserAdmin) {
       console.log(`[Withdrawal] BLOCKED for manager: balance=${balanceBefore}, withdraw=${amount}`);
@@ -2185,6 +2211,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   const addManualDebt = useCallback((clientId: string, amount: number, date: string, comment: string) => {
     amount = roundMoney(amount);
     if (amount <= 0) return;
+    debtsDirtyUntilRef.current = Date.now() + COLLECTION_DIRTY_MS;
     const now = new Date().toISOString();
     const debtDate = date || now;
 
@@ -2224,6 +2251,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   const deleteManualDebt = useCallback((debtId: string) => {
     const debt = debts.find(d => d.id === debtId);
     if (!debt) return;
+    debtsDirtyUntilRef.current = Date.now() + COLLECTION_DIRTY_MS;
     const now = new Date().toISOString();
 
     setDebts(prev => {
@@ -2468,6 +2496,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       console.log(`[Shift] Already have open ${operatorRole} shift ${existingOpen.id}, returning existing`);
       return existingOpen;
     }
+    shiftsDirtyUntilRef.current = Date.now() + COLLECTION_DIRTY_MS;
+    console.log(`[Shift] Marked shifts dirty for ${COLLECTION_DIRTY_MS}ms`);
     const shiftNow = new Date().toISOString();
     const shift: CashShift = {
       id: generateId(),
@@ -2556,6 +2586,9 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       : cashVarianceType === 'over'
         ? `Излишек +${cashVariance} ₽`
         : 'Нет отклонения';
+    shiftsDirtyUntilRef.current = Date.now() + COLLECTION_DIRTY_MS;
+    console.log(`[Shift] Marked shifts dirty for ${COLLECTION_DIRTY_MS}ms (close)`);
+
     logAction('shift_close', 'Закрытие смены', `${shift.operatorName} (${shift.operatorRole === 'admin' ? 'админ' : 'менеджер'})\nОжидалось: ${calculatedBalance} ₽\nФакт: ${actualCash} ₽\nОтклонение: ${discrepancy} ₽ (${varianceLabel})`, shiftId, 'shift');
     schedulePush();
     console.log(`[Shift] Closed shift ${shiftId}, actual: ${actualCash}, calculated: ${calculatedBalance}, discrepancy: ${discrepancy}`);
