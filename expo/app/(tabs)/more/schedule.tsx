@@ -51,8 +51,8 @@ export default function ScheduleScreen() {
   const [editingShift, setEditingShift] = useState<ScheduledShift | null>(null);
 
   const [formOperatorId, setFormOperatorId] = useState<string>('');
-  const [formStartTime, setFormStartTime] = useState<string>('00:00');
-  const [formEndTime, setFormEndTime] = useState<string>('00:00');
+  const [formStartTime, setFormStartTime] = useState<string>('08:00');
+  const [formEndTime, setFormEndTime] = useState<string>('08:00');
   const [formComment, setFormComment] = useState<string>('');
   const [formDeepCleaning, setFormDeepCleaning] = useState<boolean>(false);
 
@@ -122,12 +122,19 @@ export default function ScheduleScreen() {
     if (!selectedDate) return;
     setEditingShift(null);
     setFormOperatorId(isAdmin ? (availableOperators[0]?.id ?? '') : (currentUser?.id ?? ''));
-    setFormStartTime('00:00');
-    setFormEndTime('00:00');
+
+    const existingShifts = shiftsByDate.get(selectedDate) ?? [];
+    if (existingShifts.length === 1 && existingShifts[0].startTime === '08:00' && existingShifts[0].endTime === '08:00') {
+      setFormStartTime('20:00');
+      setFormEndTime('08:00');
+    } else {
+      setFormStartTime('08:00');
+      setFormEndTime('08:00');
+    }
     setFormComment('');
     setFormDeepCleaning(false);
     setModalVisible(true);
-  }, [selectedDate, availableOperators, isAdmin, currentUser]);
+  }, [selectedDate, availableOperators, isAdmin, currentUser, shiftsByDate]);
 
   const openEditModal = useCallback((shift: ScheduledShift) => {
     if (!canEditShift(shift)) {
@@ -168,13 +175,33 @@ export default function ScheduleScreen() {
         toggleDeepCleaning(editingShift.id, formDeepCleaning);
       }
     } else if (selectedDate) {
-      const newShift = addScheduledShift(selectedDate, formStartTime, formEndTime, formOperatorId, operatorName, formComment);
-      if (formDeepCleaning && newShift) {
-        toggleDeepCleaning(newShift.id, true);
+      const existingShifts = shiftsByDate.get(selectedDate) ?? [];
+      const is24hShift = existingShifts.length === 1
+        && existingShifts[0].startTime === '08:00'
+        && existingShifts[0].endTime === '08:00';
+
+      if (is24hShift) {
+        const firstShift = existingShifts[0];
+        updateScheduledShift(firstShift.id, {
+          startTime: '08:00',
+          endTime: '20:00',
+        });
+        console.log(`[Schedule] Auto-split: first shift ${firstShift.id} updated to 08:00–20:00`);
+
+        const newShift = addScheduledShift(selectedDate, '20:00', '08:00', formOperatorId, operatorName, formComment);
+        if (formDeepCleaning && newShift) {
+          toggleDeepCleaning(newShift.id, true);
+        }
+        console.log(`[Schedule] Auto-split: second shift created 20:00–08:00 for ${operatorName}`);
+      } else {
+        const newShift = addScheduledShift(selectedDate, formStartTime, formEndTime, formOperatorId, operatorName, formComment);
+        if (formDeepCleaning && newShift) {
+          toggleDeepCleaning(newShift.id, true);
+        }
       }
     }
     setModalVisible(false);
-  }, [formOperatorId, formStartTime, formEndTime, formComment, formDeepCleaning, editingShift, selectedDate, availableOperators, activeUsers, addScheduledShift, updateScheduledShift, toggleDeepCleaning]);
+  }, [formOperatorId, formStartTime, formEndTime, formComment, formDeepCleaning, editingShift, selectedDate, availableOperators, activeUsers, addScheduledShift, updateScheduledShift, toggleDeepCleaning, shiftsByDate]);
 
   const handleDelete = useCallback((id: string) => {
     const shift = (scheduledShifts as ScheduledShift[]).find((s: ScheduledShift) => s.id === id);
