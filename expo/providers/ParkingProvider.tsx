@@ -873,6 +873,45 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     return () => clearInterval(interval);
   }, [isLoaded, isServerSynced, runDebtAccrual]);
 
+  const adjustmentRepairDoneRef = useRef<boolean>(false);
+  useEffect(() => {
+    if (!isLoaded || !isServerSynced || adjustmentRepairDoneRef.current) return;
+    adjustmentRepairDoneRef.current = true;
+    const activeSess = sessions.filter(s =>
+      (s.status === 'active' || s.status === 'active_debt') &&
+      !s.cancelled &&
+      s.prepaidAmount != null &&
+      s.prepaidAmount > 0 &&
+      s.prepaidMethod != null
+    );
+    if (activeSess.length === 0) return;
+    let repaired = false;
+    const repairedIds: string[] = [];
+    const updatedSessions = sessions.map(s => {
+      if (!activeSess.includes(s)) return s;
+      const entryPayment = payments.find(p =>
+        p.carId === s.carId &&
+        p.clientId === s.clientId &&
+        !p.cancelled &&
+        p.baseAmount !== undefined &&
+        p.baseAmount > (s.prepaidAmount ?? 0) &&
+        Math.abs(new Date(p.date).getTime() - new Date(s.entryTime).getTime()) < 10000
+      );
+      if (entryPayment?.baseAmount) {
+        repaired = true;
+        repairedIds.push(s.id);
+        return { ...s, prepaidAmount: entryPayment.baseAmount, updatedAt: new Date().toISOString() };
+      }
+      return s;
+    });
+    if (repaired) {
+      setSessions(updatedSessions);
+      schedulePush();
+      console.log(`[Repair] Fixed prepaidAmount for ${repairedIds.length} sessions with adjustment payments: ${repairedIds.join(', ')}`);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoaded, isServerSynced]);
+
   const getShiftCashBalance = useCallback((shift: CashShift): number => {
     return calculateShiftCashBalance(shift, { transactions, expenses, withdrawals });
   }, [transactions, expenses, withdrawals]);
@@ -946,7 +985,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       managerName: currentUser?.name ?? 'Неизвестно',
       shiftId: activeShift?.id ?? null,
       updatedAt: sessionNow,
-      prepaidAmount: paymentAtEntry?.amount ?? debtPrepaidAmount,
+      prepaidAmount: paymentAtEntry ? (paymentAtEntry.baseAmount ?? paymentAtEntry.amount) : debtPrepaidAmount,
       prepaidMethod: paymentAtEntry?.method ?? null,
       tariffType: isLombard ? 'lombard' : 'standard',
       lombardRateApplied: lombardRate,
