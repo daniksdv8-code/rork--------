@@ -3444,6 +3444,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
   const validateLogin = useCallback(async (login: string, password: string): Promise<User | null> => {
     let serverError: string | null = null;
+    let serverErrorCode: string | null = null;
     try {
       const result = await vanillaTrpc.parking.login.mutate({ login, password }) as any;
       if (result.success && result.user) {
@@ -3451,10 +3452,12 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         return result.user as User;
       }
       serverError = result.error ?? 'unknown';
-      console.log('[Auth] Server login failed:', serverError);
+      serverErrorCode = result.errorCode ?? null;
+      console.log('[Auth] Server login failed:', serverError, 'code:', serverErrorCode);
     } catch (e) {
       console.log('[Auth] Server login request failed, will try local fallback:', e);
       serverError = 'network_error';
+      serverErrorCode = 'network';
     }
 
     const localUser = users.find(u =>
@@ -3463,22 +3466,40 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       !u.deleted
     );
     if (localUser) {
-      const hasLocalPassword = !!(localUser as any).password || !!(localUser as any).passwordHash;
-      if (hasLocalPassword) {
-        const plainMatch = (localUser as any).password && (localUser as any).password === password;
+      const localPwd = (localUser as any).password;
+      const localHash = (localUser as any).passwordHash;
+      const hasRealPassword = (!!localPwd && localPwd !== '***') || !!localHash;
+      if (hasRealPassword) {
+        const plainMatch = localPwd && localPwd !== '***' && localPwd === password;
         if (plainMatch) {
           console.log(`[Auth] Local login success (plain password match): ${login}`);
           const { password: _pw, passwordHash: _h, passwordSalt: _s, ...safeUser } = localUser as any;
           return safeUser as User;
         }
+        console.log(`[Auth] Local fallback: user ${login} found but local password mismatch`);
       } else {
-        console.log(`[Auth] Local fallback: user ${login} found locally without password, allowing login after server failure`);
+        console.log(`[Auth] Local fallback: user ${login} found locally without real password (pwd=${localPwd ? '"***"' : 'none'}), allowing login (serverErr=${serverError})`);
         const { password: _pw, passwordHash: _h, passwordSalt: _s, ...safeUser } = localUser as any;
         return safeUser as User;
       }
     }
 
-    console.log(`[Auth] Login failed for ${login}: server=${serverError}, local user ${localUser ? 'found but password mismatch' : 'not found'}`);
+    const userExistsLocally = !!localUser;
+    const userExistsInactive = users.some(u => u.login?.toLowerCase() === login.toLowerCase() && (u.active === false || u.deleted));
+    console.log(`[Auth] Login FAILED for ${login}: server=${serverError}, code=${serverErrorCode}, localExists=${userExistsLocally}, localInactive=${userExistsInactive}`);
+
+    if (userExistsInactive) {
+      return { __loginError: 'account_blocked' } as any;
+    }
+    if (serverErrorCode === 'wrong_password' || (userExistsLocally && serverErrorCode !== 'network')) {
+      return { __loginError: 'wrong_password' } as any;
+    }
+    if (serverErrorCode === 'user_not_found' && !userExistsLocally) {
+      return { __loginError: 'user_not_found' } as any;
+    }
+    if (serverErrorCode === 'network') {
+      return { __loginError: 'network' } as any;
+    }
     return null;
   }, [users]);
 
@@ -3796,7 +3817,10 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       shifts: safeArr(snapshot?.shifts ?? shifts),
       expenses: safeArr(snapshot?.expenses ?? expenses),
       withdrawals: safeArr(snapshot?.withdrawals ?? withdrawals),
-      users: safeArr(snapshot?.users ?? users),
+      users: safeArr(snapshot?.users ?? users).map((u: any) => {
+        const { password: _p, passwordHash: _h, passwordSalt: _s, ...cleanUser } = u;
+        return cleanUser;
+      }),
       deletedClientIds: safeArr(snapshot?.deletedClientIds ?? deletedClientIds),
       scheduledShifts: safeArr(snapshot?.scheduledShifts ?? scheduledShifts),
       actionLogs: safeArr(snapshot?.actionLogs ?? actionLogs),
@@ -4007,7 +4031,13 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       }) : [],
       expenses: Array.isArray(d.expenses) ? d.expenses : [],
       withdrawals: Array.isArray(d.withdrawals) ? d.withdrawals : [],
-      users: (Array.isArray(d.users) && d.users.length > 0) ? d.users : latestDataRef.current.users,
+      users: ((Array.isArray(d.users) && d.users.length > 0) ? d.users : latestDataRef.current.users).map((u: any) => {
+        const { password: _p, ...cleanU } = u;
+        if (_p && _p !== '***') {
+          return { ...cleanU, password: _p };
+        }
+        return cleanU;
+      }),
       deletedClientIds: Array.isArray(d.deletedClientIds) ? d.deletedClientIds : [],
       scheduledShifts: Array.isArray(d.scheduledShifts) ? d.scheduledShifts : [],
       actionLogs: Array.isArray(d.actionLogs) ? d.actionLogs : [],

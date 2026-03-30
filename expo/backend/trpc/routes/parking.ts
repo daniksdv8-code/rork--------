@@ -547,8 +547,15 @@ export const parkingRouter = createTRPCRouter({
           !u.deleted
       );
       if (!user) {
+        const inactiveUser = users.find(
+          (u: any) => u.login?.toLowerCase() === input.login.toLowerCase() && (u.active === false || u.deleted)
+        );
+        if (inactiveUser) {
+          console.log(`[Auth] Login failed for: ${input.login} (account blocked/deleted)`);
+          return { success: false as const, error: "Аккаунт заблокирован или удалён", errorCode: "account_blocked" };
+        }
         console.log(`[Auth] Login failed for: ${input.login} (user not found)`);
-        return { success: false as const, error: "Неверный логин или пароль, либо аккаунт заблокирован" };
+        return { success: false as const, error: "Пользователь не найден", errorCode: "user_not_found" };
       }
 
       let passwordValid = false;
@@ -568,7 +575,7 @@ export const parkingRouter = createTRPCRouter({
 
       if (!passwordValid) {
         console.log(`[Auth] Login failed for: ${input.login} (wrong password)`);
-        return { success: false as const, error: "Неверный логин или пароль, либо аккаунт заблокирован" };
+        return { success: false as const, error: "Неверный пароль", errorCode: "wrong_password" };
       }
 
       const { password: _pw, passwordHash: _h, passwordSalt: _s, ...safeUser } = user;

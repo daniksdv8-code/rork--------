@@ -33,7 +33,32 @@ export default function LoginScreen() {
     }
     setIsSubmitting(true);
     try {
-      const user = await validateLogin(loginValue.trim(), password);
+      const result = await validateLogin(loginValue.trim(), password);
+      if (result && (result as any).__loginError) {
+        const errorCode = (result as any).__loginError as string;
+        switch (errorCode) {
+          case 'account_blocked':
+            Alert.alert('Аккаунт заблокирован', 'Этот аккаунт заблокирован или удалён. Обратитесь к администратору.');
+            break;
+          case 'wrong_password':
+            Alert.alert(
+              'Неверный пароль',
+              'Пароль не подходит.\n\nЕсли вы недавно восстанавливали данные из бэкапа, пароль менеджера мог сброситься на логин. Попробуйте ввести логин в качестве пароля.\n\nИли попросите администратора сбросить пароль через «Ещё → Настройки → Менеджеры».'
+            );
+            break;
+          case 'user_not_found':
+            Alert.alert('Пользователь не найден', `Пользователь с логином «${loginValue.trim()}» не найден.\n\nПроверьте правильность логина или обратитесь к администратору.`);
+            break;
+          case 'network':
+            Alert.alert('Нет связи с сервером', 'Не удалось подключиться к серверу для проверки пароля.\n\nПроверьте подключение к интернету и попробуйте ещё раз.');
+            break;
+          default:
+            Alert.alert('Ошибка входа', 'Неверный логин или пароль.');
+        }
+        setIsSubmitting(false);
+        return;
+      }
+      const user = result;
       if (user) {
         if (user.role === 'manager') {
           const activeManagerShift = getActiveManagerShift();
@@ -52,10 +77,11 @@ export default function LoginScreen() {
       } else {
         Alert.alert(
           'Ошибка входа',
-          'Неверный логин или пароль, либо аккаунт заблокирован.\n\nЕсли вы недавно восстанавливали данные из бэкапа, пароль менеджера мог сброситься на логин. Попробуйте ввести логин в качестве пароля или обратитесь к администратору.'
+          'Не удалось войти. Проверьте логин и пароль.'
         );
       }
-    } catch {
+    } catch (e) {
+      console.log('[Login] handleLogin error:', e);
       Alert.alert('Ошибка', 'Не удалось выполнить вход. Проверьте подключение к сети.');
     } finally {
       setIsSubmitting(false);
