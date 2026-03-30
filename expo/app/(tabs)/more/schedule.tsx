@@ -4,11 +4,11 @@ import {
   TextInput, Alert, Platform, Switch,
 } from 'react-native';
 import { Stack } from 'expo-router';
-import { Plus, ChevronLeft, ChevronRight, Clock, User, Trash2, Edit3, X, Calendar, Sparkles } from 'lucide-react-native';
+import { Plus, ChevronLeft, ChevronRight, Clock, User, Trash2, Edit3, X, Calendar, Sparkles, Shield } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useParking } from '@/providers/ParkingProvider';
 import { useAuth } from '@/providers/AuthProvider';
-import { ScheduledShift } from '@/types';
+import { ScheduledShift, User } from '@/types';
 
 const WEEKDAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 const MONTHS = [
@@ -51,8 +51,8 @@ export default function ScheduleScreen() {
   const [editingShift, setEditingShift] = useState<ScheduledShift | null>(null);
 
   const [formOperatorId, setFormOperatorId] = useState<string>('');
-  const [formStartTime, setFormStartTime] = useState<string>('08:00');
-  const [formEndTime, setFormEndTime] = useState<string>('20:00');
+  const [formStartTime, setFormStartTime] = useState<string>('00:00');
+  const [formEndTime, setFormEndTime] = useState<string>('00:00');
   const [formComment, setFormComment] = useState<string>('');
   const [formDeepCleaning, setFormDeepCleaning] = useState<boolean>(false);
 
@@ -83,7 +83,22 @@ export default function ScheduleScreen() {
     return shiftsByDate.get(selectedDate) ?? [];
   }, [selectedDate, shiftsByDate]);
 
-  const activeUsers = useMemo(() => users.filter(u => u.active !== false && !u.deleted), [users]);
+  const activeUsers = useMemo(() => (users as User[]).filter((u: User) => u.active !== false && !u.deleted), [users]);
+
+  const availableOperators = useMemo(() => {
+    if (isAdmin) return activeUsers;
+    return activeUsers.filter((u: User) => u.role === 'manager');
+  }, [activeUsers, isAdmin]);
+
+  const canEditShift = useCallback((shift: ScheduledShift): boolean => {
+    if (isAdmin) return true;
+    return shift.operatorId === currentUser?.id || shift.createdBy === currentUser?.id;
+  }, [currentUser, isAdmin]);
+
+  const canDeleteShift = useCallback((shift: ScheduledShift): boolean => {
+    if (isAdmin) return true;
+    return shift.operatorId === currentUser?.id || shift.createdBy === currentUser?.id;
+  }, [currentUser, isAdmin]);
 
   const prevMonth = useCallback(() => {
     if (viewMonth === 0) {
@@ -106,15 +121,19 @@ export default function ScheduleScreen() {
   const openAddModal = useCallback(() => {
     if (!selectedDate) return;
     setEditingShift(null);
-    setFormOperatorId(activeUsers[0]?.id ?? '');
-    setFormStartTime('08:00');
-    setFormEndTime('20:00');
+    setFormOperatorId(isAdmin ? (availableOperators[0]?.id ?? '') : (currentUser?.id ?? ''));
+    setFormStartTime('00:00');
+    setFormEndTime('00:00');
     setFormComment('');
     setFormDeepCleaning(false);
     setModalVisible(true);
-  }, [selectedDate, activeUsers]);
+  }, [selectedDate, availableOperators, isAdmin, currentUser]);
 
   const openEditModal = useCallback((shift: ScheduledShift) => {
+    if (!canEditShift(shift)) {
+      Alert.alert('Нет доступа', 'Вы можете редактировать только свои смены.');
+      return;
+    }
     setEditingShift(shift);
     setFormOperatorId(shift.operatorId);
     setFormStartTime(shift.startTime);
@@ -122,7 +141,7 @@ export default function ScheduleScreen() {
     setFormComment(shift.comment);
     setFormDeepCleaning(shift.isDeepCleaning ?? false);
     setModalVisible(true);
-  }, []);
+  }, [canEditShift]);
 
   const handleSave = useCallback(() => {
     if (!formOperatorId) {
@@ -134,7 +153,7 @@ export default function ScheduleScreen() {
       return;
     }
 
-    const operator = activeUsers.find(u => u.id === formOperatorId);
+    const operator = availableOperators.find((u: User) => u.id === formOperatorId) ?? activeUsers.find((u: User) => u.id === formOperatorId);
     const operatorName = operator?.name ?? 'Неизвестно';
 
     if (editingShift) {
@@ -155,14 +174,19 @@ export default function ScheduleScreen() {
       }
     }
     setModalVisible(false);
-  }, [formOperatorId, formStartTime, formEndTime, formComment, formDeepCleaning, editingShift, selectedDate, activeUsers, addScheduledShift, updateScheduledShift, toggleDeepCleaning]);
+  }, [formOperatorId, formStartTime, formEndTime, formComment, formDeepCleaning, editingShift, selectedDate, availableOperators, activeUsers, addScheduledShift, updateScheduledShift, toggleDeepCleaning]);
 
   const handleDelete = useCallback((id: string) => {
+    const shift = (scheduledShifts as ScheduledShift[]).find((s: ScheduledShift) => s.id === id);
+    if (shift && !canDeleteShift(shift)) {
+      Alert.alert('Нет доступа', 'Вы можете удалять только свои смены.');
+      return;
+    }
     Alert.alert('Удалить смену?', 'Эта запись из календаря будет удалена.', [
       { text: 'Отмена', style: 'cancel' },
       { text: 'Удалить', style: 'destructive', onPress: () => deleteScheduledShift(id) },
     ]);
-  }, [deleteScheduledShift]);
+  }, [deleteScheduledShift, scheduledShifts, canDeleteShift]);
 
   const handleToggleDeepCleaning = useCallback((shift: ScheduledShift) => {
     const isOwn = shift.operatorId === currentUser?.id;
@@ -301,6 +325,11 @@ export default function ScheduleScreen() {
                         <View style={styles.shiftRow}>
                           <User size={15} color={isDC ? DEEP_CLEANING_COLOR : Colors.primary} />
                           <Text style={styles.shiftName}>{shift.operatorName}</Text>
+                          {shift.operatorId === currentUser?.id && (
+                            <View style={styles.myBadge}>
+                              <Text style={styles.myBadgeText}>Я</Text>
+                            </View>
+                          )}
                         </View>
                         <View style={styles.shiftRow}>
                           <Clock size={14} color={Colors.textSecondary} />
@@ -310,14 +339,20 @@ export default function ScheduleScreen() {
                           <Text style={styles.shiftComment}>{shift.comment}</Text>
                         ) : null}
                       </View>
-                      <View style={styles.shiftActions}>
-                        <TouchableOpacity onPress={() => openEditModal(shift)} style={styles.actionBtn} activeOpacity={0.7}>
-                          <Edit3 size={16} color={Colors.info} />
-                        </TouchableOpacity>
-                        <TouchableOpacity onPress={() => handleDelete(shift.id)} style={styles.actionBtn} activeOpacity={0.7}>
-                          <Trash2 size={16} color={Colors.danger} />
-                        </TouchableOpacity>
-                      </View>
+                      {(canEditShift(shift) || canDeleteShift(shift)) && (
+                        <View style={styles.shiftActions}>
+                          {canEditShift(shift) && (
+                            <TouchableOpacity onPress={() => openEditModal(shift)} style={styles.actionBtn} activeOpacity={0.7}>
+                              <Edit3 size={16} color={Colors.info} />
+                            </TouchableOpacity>
+                          )}
+                          {canDeleteShift(shift) && (
+                            <TouchableOpacity onPress={() => handleDelete(shift.id)} style={styles.actionBtn} activeOpacity={0.7}>
+                              <Trash2 size={16} color={Colors.danger} />
+                            </TouchableOpacity>
+                          )}
+                        </View>
+                      )}
                     </View>
 
                     <View style={styles.dcToggleRow}>
@@ -358,6 +393,12 @@ export default function ScheduleScreen() {
         {!selectedDate && (
           <View style={styles.hintCard}>
             <Text style={styles.hintText}>Нажмите на дату, чтобы просмотреть или добавить смены</Text>
+            <View style={styles.hintSubRow}>
+              <Shield size={14} color={Colors.textMuted} />
+              <Text style={styles.hintSubText}>
+                {isAdmin ? 'Вы можете редактировать все смены' : 'Вы можете редактировать только свои смены'}
+              </Text>
+            </View>
           </View>
         )}
       </ScrollView>
@@ -376,7 +417,7 @@ export default function ScheduleScreen() {
 
             <Text style={styles.label}>Сотрудник</Text>
             <View style={styles.operatorList}>
-              {activeUsers.map(u => (
+              {availableOperators.map((u: User) => (
                 <TouchableOpacity
                   key={u.id}
                   style={[styles.operatorChip, formOperatorId === u.id && styles.operatorChipActive]}
@@ -400,7 +441,7 @@ export default function ScheduleScreen() {
                   style={styles.input}
                   value={formStartTime}
                   onChangeText={setFormStartTime}
-                  placeholder="08:00"
+                  placeholder="00:00"
                   placeholderTextColor={Colors.textMuted}
                   keyboardType={Platform.OS === 'web' ? 'default' : 'numbers-and-punctuation'}
                 />
@@ -414,7 +455,7 @@ export default function ScheduleScreen() {
                   style={styles.input}
                   value={formEndTime}
                   onChangeText={setFormEndTime}
-                  placeholder="20:00"
+                  placeholder="00:00"
                   placeholderTextColor={Colors.textMuted}
                   keyboardType={Platform.OS === 'web' ? 'default' : 'numbers-and-punctuation'}
                 />
@@ -682,6 +723,17 @@ const styles = StyleSheet.create({
     fontWeight: '600' as const,
     color: Colors.text,
   },
+  myBadge: {
+    backgroundColor: Colors.primary + '20',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  myBadgeText: {
+    fontSize: 10,
+    fontWeight: '700' as const,
+    color: Colors.primary,
+  },
   shiftTime: {
     fontSize: 14,
     color: Colors.textSecondary,
@@ -765,6 +817,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: Colors.textMuted,
     textAlign: 'center' as const,
+  },
+  hintSubRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 10,
+  },
+  hintSubText: {
+    fontSize: 12,
+    color: Colors.textMuted,
   },
   modalOverlay: {
     flex: 1,
