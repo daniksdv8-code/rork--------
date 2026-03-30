@@ -42,7 +42,8 @@ export default function DebtorsListScreen() {
       dailyDebtAccruals.some(a => a.parkingEntryId === s.id)
     ).length : 0;
 
-    const totalDebtSources = item.debts.length + activeAccrualCount;
+    const hasOverstay = (item as any).overstayDebt > 0;
+    const totalDebtSources = item.debts.length + activeAccrualCount + (hasOverstay ? 1 : 0);
 
     return (
       <TouchableOpacity
@@ -60,6 +61,11 @@ export default function DebtorsListScreen() {
               {hasLombardSession && (
                 <View style={styles.lombardTag}>
                   <Text style={styles.lombardTagText}>Ломбард</Text>
+                </View>
+              )}
+              {hasOverstay && (
+                <View style={styles.overstayTag}>
+                  <Text style={styles.overstayTagText}>Просрочка</Text>
                 </View>
               )}
             </View>
@@ -142,6 +148,8 @@ const styles = StyleSheet.create({
   clientText: { fontSize: 15, fontWeight: '600' as const, color: Colors.text },
   lombardTag: { backgroundColor: '#fef3c7', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 1 },
   lombardTagText: { fontSize: 10, fontWeight: '700' as const, color: '#b45309' },
+  overstayTag: { backgroundColor: '#fee2e2', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 1 },
+  overstayTagText: { fontSize: 10, fontWeight: '700' as const, color: '#dc2626' },
   debtAmount: { fontSize: 15, fontWeight: '700' as const, color: Colors.danger },
   carsText: { fontSize: 13, color: Colors.textSecondary, marginBottom: 2 },
   metaText: { fontSize: 12, color: Colors.textMuted },

@@ -15,6 +15,7 @@ interface DebtorItem {
   totalDebt: number;
   cars: Car[];
   clientDebt: ClientDebt | null;
+  overstayDebt?: number;
 }
 
 export default function DebtorsScreen() {
@@ -132,6 +133,19 @@ export default function DebtorsScreen() {
           </View>
         ))}
 
+        {(item.overstayDebt ?? 0) > 0 && (
+          <View style={styles.debtRow}>
+            <View style={styles.debtInfo}>
+              <Text style={styles.debtDesc}>Просрочка по активным заездам</Text>
+              <View style={styles.statusRow}>
+                <Clock size={11} color={Colors.warning} />
+                <Text style={[styles.debtDate, { color: Colors.warning }]}>На парковке (не оплачено)</Text>
+              </View>
+            </View>
+            <Text style={styles.debtRowAmount}>{formatMoney(item.overstayDebt ?? 0)} ₽</Text>
+          </View>
+        )}
+
         {unaccountedClientDebt > 0 && (
           <View style={styles.debtRow}>
             <View style={styles.debtInfo}>
@@ -147,7 +161,7 @@ export default function DebtorsScreen() {
           </View>
         )}
 
-        {accrualDetails.length === 0 && item.debts.length === 0 && unaccountedClientDebt === 0 && item.totalDebt > 0 && (
+        {accrualDetails.length === 0 && item.debts.length === 0 && unaccountedClientDebt === 0 && (item.overstayDebt ?? 0) === 0 && item.totalDebt > 0 && (
           <View style={styles.debtRow}>
             <View style={styles.debtInfo}>
               <Text style={styles.debtDesc}>Задолженность</Text>
