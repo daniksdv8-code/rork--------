@@ -4,7 +4,7 @@ import {
   TextInput, Alert, Platform, Switch,
 } from 'react-native';
 import { Stack } from 'expo-router';
-import { Plus, ChevronLeft, ChevronRight, Clock, User, Trash2, Edit3, X, Calendar, Sparkles, Shield } from 'lucide-react-native';
+import { Plus, ChevronLeft, ChevronRight, Clock, User as UserIcon, Trash2, Edit3, X, Calendar, Sparkles, Shield } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useParking } from '@/providers/ParkingProvider';
 import { useAuth } from '@/providers/AuthProvider';
@@ -40,7 +40,7 @@ const DEEP_CLEANING_COLOR = '#10B981';
 const DEEP_CLEANING_BG = '#ECFDF5';
 
 export default function ScheduleScreen() {
-  const { scheduledShifts, users, addScheduledShift, updateScheduledShift, deleteScheduledShift, toggleDeepCleaning } = useParking();
+  const { scheduledShifts, users, addScheduledShift, updateScheduledShift, deleteScheduledShift, toggleDeepCleaning } = useParking() as any;
   const { currentUser, isAdmin } = useAuth();
 
   const today = new Date();
@@ -350,7 +350,7 @@ export default function ScheduleScreen() {
                     <View style={styles.shiftTop}>
                       <View style={styles.shiftInfo}>
                         <View style={styles.shiftRow}>
-                          <User size={15} color={isDC ? DEEP_CLEANING_COLOR : Colors.primary} />
+                          <UserIcon size={15} color={isDC ? DEEP_CLEANING_COLOR : Colors.primary} />
                           <Text style={styles.shiftName}>{shift.operatorName}</Text>
                           {shift.operatorId === currentUser?.id && (
                             <View style={styles.myBadge}>
