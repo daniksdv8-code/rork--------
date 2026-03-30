@@ -69,7 +69,9 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   const restoreInProgressRef = useRef<boolean>(false);
   const restoreServerOkRef = useRef<boolean>(false);
   const restoreFinishedAtRef = useRef<number>(0);
+  const lastPushCompletedRef = useRef<number>(0);
   const RESTORE_GRACE_MS = 300000;
+  const POST_PUSH_GRACE_MS = 3000;
 
   const latestDataRef = useRef({
     clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories, dailyDebtAccruals, clientDebts, cashOperations, teamViolations, salaryAdvances, salaryPayments, cleanupChecklistTemplate,
@@ -298,11 +300,18 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
           skipLogVersionRef.current = -1;
           schedulePushImmediate();
         } else {
-          console.log(`[Sync] Applying server data v${version} (was v${lastSyncedVersionRef.current})`);
-          applyServerData(data as Record<string, any>, 'poll');
-          lastSyncedVersionRef.current = version;
-          skipLogVersionRef.current = -1;
-          void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(data)).catch(() => {});
+          const postPushGrace = lastPushCompletedRef.current > 0 && (Date.now() - lastPushCompletedRef.current) < POST_PUSH_GRACE_MS;
+          if (postPushGrace) {
+            console.log(`[Sync] Server v${version} available but within post-push grace period (${Date.now() - lastPushCompletedRef.current}ms) — skipping to prevent stale data overwrite`);
+            lastSyncedVersionRef.current = version;
+            skipLogVersionRef.current = -1;
+          } else {
+            console.log(`[Sync] Applying server data v${version} (was v${lastSyncedVersionRef.current})`);
+            applyServerData(data as Record<string, any>, 'poll');
+            lastSyncedVersionRef.current = version;
+            skipLogVersionRef.current = -1;
+            void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(data)).catch(() => {});
+          }
         }
       }
 
@@ -366,6 +375,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
       lastSyncedVersionRef.current = result.version;
       restoreEpochRef.current = result.restoreEpoch ?? restoreEpochRef.current;
+      lastPushCompletedRef.current = Date.now();
 
       const hasNewLocalChanges = localChangeCounterRef.current !== changeCountBefore;
 
@@ -505,7 +515,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       operatorName: currentUser?.name ?? 'Неизвестно',
       shiftId: activeShift?.id ?? null,
     };
-    setTransactions(prev => [newTx, ...prev].slice(0, MAX_TRANSACTIONS));
+    setTransactions(prev => {
+      const next = [newTx, ...prev].slice(0, MAX_TRANSACTIONS);
+      latestDataRef.current = { ...latestDataRef.current, transactions: next };
+      return next;
+    });
     return newTx;
   }, [currentUser, shifts]);
 
@@ -826,7 +840,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       relatedEntityId: params.relatedEntityId,
       relatedEntityType: params.relatedEntityType,
     };
-    setCashOperations(prev => [op, ...prev]);
+    setCashOperations(prev => {
+      const next = [op, ...prev];
+      latestDataRef.current = { ...latestDataRef.current, cashOperations: next };
+      return next;
+    });
     console.log(`[CashOp] ${params.type}: ${params.amount} ₽, balance: ${params.balanceBefore} → ${params.balanceAfter}`);
     return op;
   }, [currentUser]);
@@ -1851,9 +1869,13 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     const actualAmount = roundMoney(Math.min(amount, debt.remainingAmount));
     const newRemaining = roundMoney(debt.remainingAmount - actualAmount);
 
-    setDebts(prev => prev.map(d =>
-      d.id === debtId ? { ...d, remainingAmount: newRemaining, status: newRemaining <= 0 ? 'paid' as const : d.status, updatedAt: now } : d
-    ));
+    setDebts(prev => {
+      const next = prev.map(d =>
+        d.id === debtId ? { ...d, remainingAmount: newRemaining, status: newRemaining <= 0 ? 'paid' as const : d.status, updatedAt: now } : d
+      );
+      latestDataRef.current = { ...latestDataRef.current, debts: next };
+      return next;
+    });
 
     addTransaction({
       clientId: debt.clientId,
@@ -1905,51 +1927,67 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
     const updatedDebtIds: string[] = [];
     if (isFullPayment) {
-      setDebts(prev => prev.map(d => {
-        if (d.clientId !== clientId || d.remainingAmount <= 0) return d;
-        updatedDebtIds.push(d.id);
-        return { ...d, remainingAmount: 0, status: 'paid' as const, updatedAt: now };
-      }));
-      setClientDebts(prev => prev.map(c => {
-        if (c.clientId !== clientId) return c;
-        return {
-          ...c,
-          totalAmount: 0,
-          frozenAmount: 0,
-          activeAmount: 0,
-          lastUpdate: now,
-        };
-      }));
+      setDebts(prev => {
+        const next = prev.map(d => {
+          if (d.clientId !== clientId || d.remainingAmount <= 0) return d;
+          updatedDebtIds.push(d.id);
+          return { ...d, remainingAmount: 0, status: 'paid' as const, updatedAt: now };
+        });
+        latestDataRef.current = { ...latestDataRef.current, debts: next };
+        return next;
+      });
+      setClientDebts(prev => {
+        const next = prev.map(c => {
+          if (c.clientId !== clientId) return c;
+          return {
+            ...c,
+            totalAmount: 0,
+            frozenAmount: 0,
+            activeAmount: 0,
+            lastUpdate: now,
+          };
+        });
+        latestDataRef.current = { ...latestDataRef.current, clientDebts: next };
+        return next;
+      });
     } else {
       if (clientOldDebts.length > 0 && remaining > 0) {
-        setDebts(prev => prev.map(d => {
-          if (d.clientId !== clientId || d.remainingAmount <= 0 || remaining <= 0) return d;
-          const idx = clientOldDebts.findIndex(od => od.id === d.id);
-          if (idx === -1) return d;
-          const payForThis = roundMoney(Math.min(remaining, d.remainingAmount));
-          remaining = roundMoney(remaining - payForThis);
-          updatedDebtIds.push(d.id);
-          const newRem = roundMoney(d.remainingAmount - payForThis);
-          return { ...d, remainingAmount: newRem, status: newRem <= 0 ? 'paid' as const : d.status, updatedAt: now };
-        }));
+        setDebts(prev => {
+          const next = prev.map(d => {
+            if (d.clientId !== clientId || d.remainingAmount <= 0 || remaining <= 0) return d;
+            const idx = clientOldDebts.findIndex(od => od.id === d.id);
+            if (idx === -1) return d;
+            const payForThis = roundMoney(Math.min(remaining, d.remainingAmount));
+            remaining = roundMoney(remaining - payForThis);
+            updatedDebtIds.push(d.id);
+            const newRem = roundMoney(d.remainingAmount - payForThis);
+            return { ...d, remainingAmount: newRem, status: newRem <= 0 ? 'paid' as const : d.status, updatedAt: now };
+          });
+          latestDataRef.current = { ...latestDataRef.current, debts: next };
+          return next;
+        });
       }
 
       if (remaining > 0 && cd && cd.totalAmount > 0) {
         const payForCd = roundMoney(Math.min(remaining, cd.totalAmount));
         remaining = roundMoney(remaining - payForCd);
-        setClientDebts(prev => prev.map(c => {
-          if (c.clientId !== clientId) return c;
-          const newTotal = roundMoney(Math.max(0, c.totalAmount - payForCd));
-          const frozenReduction = roundMoney(Math.min(payForCd, c.frozenAmount));
-          const activeReduction = roundMoney(payForCd - frozenReduction);
-          return {
-            ...c,
-            totalAmount: newTotal,
-            frozenAmount: roundMoney(Math.max(0, c.frozenAmount - frozenReduction)),
-            activeAmount: roundMoney(Math.max(0, c.activeAmount - activeReduction)),
-            lastUpdate: now,
-          };
-        }));
+        setClientDebts(prev => {
+          const next = prev.map(c => {
+            if (c.clientId !== clientId) return c;
+            const newTotal = roundMoney(Math.max(0, c.totalAmount - payForCd));
+            const frozenReduction = roundMoney(Math.min(payForCd, c.frozenAmount));
+            const activeReduction = roundMoney(payForCd - frozenReduction);
+            return {
+              ...c,
+              totalAmount: newTotal,
+              frozenAmount: roundMoney(Math.max(0, c.frozenAmount - frozenReduction)),
+              activeAmount: roundMoney(Math.max(0, c.activeAmount - activeReduction)),
+              lastUpdate: now,
+            };
+          });
+          latestDataRef.current = { ...latestDataRef.current, clientDebts: next };
+          return next;
+        });
       }
     }
 
@@ -2007,6 +2045,37 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     console.log(`[PayClientDebt] FIFO paid ${actualAmount} for client ${clientId}, old debts touched: ${updatedDebtIds.length}, remaining: ${newRemainingTotal}`);
   }, [debts, clientDebts, currentUser, shifts, addTransaction, updateShiftExpected, logAction, schedulePush, addCashOperation, getShiftCashBalance, cars]);
 
+  const getUnshiftedCashBalance = useCallback((): number => {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayStartTime = todayStart.getTime();
+
+    const todayTx = transactions.filter(t => new Date(t.date).getTime() >= todayStartTime);
+
+    const cashIncome = todayTx.filter(t =>
+      (t.type === 'payment' || t.type === 'debt_payment') && t.method === 'cash' && t.amount > 0
+    ).reduce((s, t) => s + t.amount, 0);
+
+    const cashCancelled = todayTx.filter(t =>
+      t.type === 'cancel_payment' && t.method === 'cash'
+    ).reduce((s, t) => s + t.amount, 0);
+
+    const cashRefunded = todayTx.filter(t =>
+      t.type === 'refund' && t.method === 'cash'
+    ).reduce((s, t) => s + t.amount, 0);
+
+    const todayWithdrawals = withdrawals.filter(w =>
+      new Date(w.date).getTime() >= todayStartTime
+    ).reduce((s, w) => s + w.amount, 0);
+
+    const todayExpenses = expenses.filter(e =>
+      new Date(e.date).getTime() >= todayStartTime
+    ).reduce((s, e) => s + e.amount, 0);
+
+    console.log(`[UnshiftedBalance] cashIn=${cashIncome}, cancelled=${cashCancelled}, refunded=${cashRefunded}, withdrawals=${todayWithdrawals}, expenses=${todayExpenses}`);
+    return roundMoney(cashIncome - cashCancelled - cashRefunded - todayWithdrawals - todayExpenses);
+  }, [transactions, withdrawals, expenses]);
+
   const getCashBalance = useCallback((): number => {
     const isUserAdmin = currentUser?.role === 'admin';
     let targetShift: CashShift | undefined;
@@ -2017,8 +2086,14 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       targetShift = shifts.find(s => s.status === 'open' && s.operatorRole !== 'admin')
         ?? shifts.find(s => s.status === 'open');
     }
-    return targetShift ? getShiftCashBalance(targetShift) : 0;
-  }, [currentUser, shifts, getShiftCashBalance]);
+    if (targetShift) return getShiftCashBalance(targetShift);
+    if (isUserAdmin) {
+      const unshifted = getUnshiftedCashBalance();
+      console.log(`[getCashBalance] No open shift, admin mode, using unshifted balance: ${unshifted}`);
+      return unshifted;
+    }
+    return 0;
+  }, [currentUser, shifts, getShiftCashBalance, getUnshiftedCashBalance]);
 
   const withdrawCash = useCallback((amount: number, notes: string, forceNegative?: boolean): { success: boolean; error?: string; withdrawal?: CashWithdrawal; wouldGoNegative?: boolean; currentBalance?: number } => {
     if (currentUser?.role !== 'admin') {
@@ -2027,9 +2102,12 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     }
     const activeShift = shifts.find(s => s.status === 'open');
     const now = new Date().toISOString();
-    const balanceBefore = activeShift ? getShiftCashBalance(activeShift) : 0;
+    const shiftBalance = activeShift ? getShiftCashBalance(activeShift) : 0;
+    const unshiftedBalance = getUnshiftedCashBalance();
+    const balanceBefore = activeShift ? roundMoney(shiftBalance + (unshiftedBalance > 0 ? unshiftedBalance : 0)) : unshiftedBalance;
     const balanceAfter = roundMoney(balanceBefore - amount);
     const isUserAdmin = currentUser?.role === 'admin';
+    console.log(`[Withdrawal] Calculating balance: shiftBalance=${shiftBalance}, unshiftedBalance=${unshiftedBalance}, effective=${balanceBefore}`);
 
     if (balanceAfter < 0 && !isUserAdmin) {
       console.log(`[Withdrawal] BLOCKED for manager: balance=${balanceBefore}, withdraw=${amount}`);
@@ -2050,7 +2128,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       shiftId: activeShift?.id ?? null,
       notes,
     };
-    setWithdrawals(prev => [withdrawal, ...prev]);
+    setWithdrawals(prev => {
+      const next = [withdrawal, ...prev];
+      latestDataRef.current = { ...latestDataRef.current, withdrawals: next };
+      return next;
+    });
     if (activeShift) {
       updateShiftExpected(activeShift.id, -amount);
     }
@@ -2098,7 +2180,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     schedulePush();
     console.log(`[Withdrawal] ${amount} ₽ withdrawn by ${currentUser?.name}, balance: ${balanceBefore} → ${balanceAfter}${balanceAfter < 0 ? ' [NEGATIVE ALLOWED]' : ''}`);
     return { success: true, withdrawal };
-  }, [shifts, currentUser, schedulePush, updateShiftExpected, addTransaction, addCashOperation, getShiftCashBalance, logAction]);
+  }, [shifts, currentUser, schedulePush, updateShiftExpected, addTransaction, addCashOperation, getShiftCashBalance, getUnshiftedCashBalance, logAction]);
 
   const addManualDebt = useCallback((clientId: string, amount: number, date: string, comment: string) => {
     amount = roundMoney(amount);
@@ -2117,7 +2199,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       description: comment || `Ручное добавление долга: ${amount} ₽`,
       status: 'active',
     };
-    setDebts(prev => [...prev, newDebt]);
+    setDebts(prev => {
+      const next = [...prev, newDebt];
+      latestDataRef.current = { ...latestDataRef.current, debts: next };
+      return next;
+    });
 
     addTransaction({
       clientId,
@@ -2140,9 +2226,13 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     if (!debt) return;
     const now = new Date().toISOString();
 
-    setDebts(prev => prev.map(d =>
-      d.id === debtId ? { ...d, remainingAmount: 0, status: 'paid' as const, updatedAt: now } : d
-    ));
+    setDebts(prev => {
+      const next = prev.map(d =>
+        d.id === debtId ? { ...d, remainingAmount: 0, status: 'paid' as const, updatedAt: now } : d
+      );
+      latestDataRef.current = { ...latestDataRef.current, debts: next };
+      return next;
+    });
 
     addTransaction({
       clientId: debt.clientId,
@@ -4200,19 +4290,26 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     clientDebts?: FullDiagnosticData['clientDebts'];
     salaryAdvances?: FullDiagnosticData['salaryAdvances'];
   }) => {
+    if (localDirtyRef.current) {
+      console.log('[SelfHeal] SKIPPED: localDirty=true, local changes in progress');
+      return;
+    }
     let changed = false;
     if (healed.debts) {
       setDebts(healed.debts);
+      latestDataRef.current = { ...latestDataRef.current, debts: healed.debts };
       changed = true;
       console.log('[SelfHeal] Applied healed debts');
     }
     if (healed.clientDebts) {
       setClientDebts(healed.clientDebts);
+      latestDataRef.current = { ...latestDataRef.current, clientDebts: healed.clientDebts };
       changed = true;
       console.log('[SelfHeal] Applied healed clientDebts');
     }
     if (healed.salaryAdvances) {
       setSalaryAdvances(healed.salaryAdvances);
+      latestDataRef.current = { ...latestDataRef.current, salaryAdvances: healed.salaryAdvances };
       changed = true;
       console.log('[SelfHeal] Applied healed salaryAdvances');
     }
