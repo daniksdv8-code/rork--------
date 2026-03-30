@@ -100,14 +100,7 @@ export default function FinanceScreen() {
   );
   const adminFinBal = useMemo(() => getAdminFinanceBalance(), [getAdminFinanceBalance]);
 
-  const salaryStats = useMemo(() => {
-    const adminAdvances = salaryAdvances.filter((a: SalaryAdvance) => !(a as any).source || (a as any).source === 'admin');
-    const totalAdvances = adminAdvances.reduce((s: number, a: SalaryAdvance) => s + a.amount, 0);
-    const totalRemaining = adminAdvances.filter((a: SalaryAdvance) => a.remainingAmount > 0).reduce((s: number, a: SalaryAdvance) => s + a.remainingAmount, 0);
-    const adminPayments = salaryPayments.filter((p: SalaryPayment) => !(p as any).source || (p as any).source === 'admin');
-    const totalSalaryPaid = adminPayments.reduce((s: number, p: SalaryPayment) => s + p.netPaid, 0);
-    return { totalAdvances, totalRemaining, totalSalaryPaid };
-  }, [salaryAdvances, salaryPayments]);
+
 
   const handleWithdraw = useCallback((forceNegative?: boolean) => {
     const amount = Math.round(Number(withdrawAmount) || 0);
@@ -370,7 +363,7 @@ export default function FinanceScreen() {
         id: p.id + '_sal_pay',
         date: p.paidAt,
         type: 'salary_payment',
-        amount: p.netPaid > 0 ? p.netPaid : p.grossAmount,
+        amount: p.netPaid,
         method: p.method === 'cash' ? 'наличные' : 'безнал',
         description: desc,
         operator: p.paidByName,
@@ -397,6 +390,7 @@ export default function FinanceScreen() {
   }, []);
 
   const isExpenseOp = useCallback((opType: string, amount?: number): boolean => {
+    if (opType === 'salary_payment' && (amount ?? 0) <= 0) return false;
     return opType === 'admin_expense' || opType === 'salary_advance' || opType === 'salary_payment' || (opType === 'card_income' && (amount ?? 0) < 0);
   }, []);
 
@@ -512,18 +506,18 @@ export default function FinanceScreen() {
                   <Text style={styles.registerBreakdownLabel}>Расходы админа</Text>
                   <Text style={[styles.registerBreakdownValue, { color: Colors.danger }]}>-{fmtAmount(adminReg.totalAdminExpenses)}</Text>
                 </View>
-                {salaryStats.totalAdvances > 0 && (
+                {adminReg.totalSalaryAdvances > 0 && (
                   <View style={styles.registerBreakdownItem}>
                     <ArrowUpCircle size={14} color="#7C3AED" />
                     <Text style={styles.registerBreakdownLabel}>Долги под ЗП</Text>
-                    <Text style={[styles.registerBreakdownValue, { color: '#7C3AED' }]}>-{fmtAmount(salaryStats.totalAdvances)}</Text>
+                    <Text style={[styles.registerBreakdownValue, { color: '#7C3AED' }]}>-{fmtAmount(adminReg.totalSalaryAdvances)}</Text>
                   </View>
                 )}
-                {salaryStats.totalSalaryPaid > 0 && (
+                {adminReg.totalSalaryPaid > 0 && (
                   <View style={styles.registerBreakdownItem}>
                     <ArrowUpCircle size={14} color="#7C3AED" />
                     <Text style={styles.registerBreakdownLabel}>Выплаты ЗП</Text>
-                    <Text style={[styles.registerBreakdownValue, { color: '#7C3AED' }]}>-{fmtAmount(salaryStats.totalSalaryPaid)}</Text>
+                    <Text style={[styles.registerBreakdownValue, { color: '#7C3AED' }]}>-{fmtAmount(adminReg.totalSalaryPaid)}</Text>
                   </View>
                 )}
               </View>

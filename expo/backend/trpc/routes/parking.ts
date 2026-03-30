@@ -90,7 +90,7 @@ function initDefaultAdmin() {
     payments: [],
     debts: [],
     transactions: [],
-    tariffs: { monthlyCash: 150, monthlyCard: 160, onetimeCash: 150, onetimeCard: 200 },
+    tariffs: { monthlyCash: 150, monthlyCard: 160, onetimeCash: 150, onetimeCard: 200, lombardRate: 150 },
     shifts: [],
     expenses: [],
     withdrawals: [],
@@ -116,6 +116,9 @@ function initDefaultAdmin() {
     clientDebts: [],
     cashOperations: [],
     teamViolations: [],
+    salaryAdvances: [],
+    salaryPayments: [],
+    cleanupChecklistTemplate: [],
   };
   version = 1;
   restoreEpoch = 0;
@@ -482,6 +485,7 @@ const dataSchema = z.object({
   teamViolations: z.array(z.any()).optional(),
   salaryAdvances: z.array(z.any()).optional(),
   salaryPayments: z.array(z.any()).optional(),
+  cleanupChecklistTemplate: z.array(z.any()).optional(),
 });
 
 export const parkingRouter = createTRPCRouter({
@@ -799,6 +803,7 @@ export const parkingRouter = createTRPCRouter({
       teamViolations: (input as any).teamViolations ?? [],
       salaryAdvances: (input as any).salaryAdvances ?? [],
       salaryPayments: (input as any).salaryPayments ?? [],
+      cleanupChecklistTemplate: (input as any).cleanupChecklistTemplate ?? [],
     };
     version++;
     restoreEpoch++;
@@ -968,6 +973,8 @@ export const parkingRouter = createTRPCRouter({
         ? unionById((existingData as any).salaryPayments ?? [], (input as any).salaryPayments ?? [])
         : ((input as any).salaryPayments ?? []);
 
+      const cleanupTemplateMerged = (input as any).cleanupChecklistTemplate ?? (existingData as any)?.cleanupChecklistTemplate ?? [];
+
       store = {
         clients,
         cars,
@@ -993,6 +1000,7 @@ export const parkingRouter = createTRPCRouter({
         teamViolations: teamViolationsMerged,
         salaryAdvances: salaryAdvancesMerged,
         salaryPayments: salaryPaymentsMerged,
+        cleanupChecklistTemplate: cleanupTemplateMerged,
       };
       version++;
       saveToDisk();
