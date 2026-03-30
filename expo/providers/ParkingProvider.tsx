@@ -4344,10 +4344,10 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     } else {
       const adminOp: AdminCashOperation = {
         id: generateId(),
-        type: 'admin_expense',
+        type: 'salary_advance',
         amount,
         method: effectiveMethod,
-        description: `Долг под ЗП: ${employeeName} — ${amount} ₽${comment ? ` (${comment})` : ''}`,
+        description: `Долг под ЗП (${methodLabel(effectiveMethod)}): ${employeeName} — ${amount} ₽${comment ? ` (${comment})` : ''}`,
         operatorId: currentUser?.id ?? 'unknown',
         operatorName: currentUser?.name ?? 'Неизвестно',
         date: now,
@@ -4516,10 +4516,10 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
         const adminOp: AdminCashOperation = {
           id: generateId(),
-          type: 'admin_expense',
+          type: 'salary_payment',
           amount: netPaid,
           method,
-          description: `Выплата ЗП (${sourceLabel}): ${employeeName} — ${netPaid} ₽ (начислено ${grossAmount} ₽${debtDeducted > 0 ? `, зачтено долга ${debtDeducted} ₽` : ''})`,
+          description: `Выплата ЗП (${methodLabel(method)}): ${employeeName} — ${netPaid} ₽ (начислено ${grossAmount} ₽${debtDeducted > 0 ? `, зачтено долга ${debtDeducted} ₽` : ''})`,
           operatorId: currentUser?.id ?? 'unknown',
           operatorName: currentUser?.name ?? 'Неизвестно',
           date: now,

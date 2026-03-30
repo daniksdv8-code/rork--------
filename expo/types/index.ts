@@ -220,7 +220,7 @@ export interface AdminExpense {
 
 export interface AdminCashOperation {
   id: string;
-  type: 'card_income' | 'cash_withdrawal_from_manager' | 'admin_expense';
+  type: 'card_income' | 'cash_withdrawal_from_manager' | 'admin_expense' | 'salary_advance' | 'salary_payment';
   amount: number;
   method: PaymentMethod;
   description: string;
