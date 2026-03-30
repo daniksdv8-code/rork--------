@@ -400,7 +400,7 @@ export default function FinanceScreen() {
   const filteredAdminOps = useMemo(() => {
     if (expenseCategoryFilter === 'all') return allAdminOps;
     return allAdminOps.filter(op => {
-      if (!isExpenseOp(op.type, op.amount)) return true;
+      if (!isExpenseOp(op.type, op.amount)) return false;
       return classifyExpenseCategory(op) === expenseCategoryFilter;
     });
   }, [allAdminOps, expenseCategoryFilter, classifyExpenseCategory, isExpenseOp]);
@@ -661,37 +661,53 @@ export default function FinanceScreen() {
 
         {tab === 'admin_register' && (
           <View>
-            <View style={styles.regSummaryCard}>
-              <View style={styles.regSummaryRow}>
-                <Text style={styles.regSummaryLabel}>Баланс</Text>
-                <Text style={[styles.regSummaryValue, { color: Colors.primary }]}>{fmtAmount(adminReg.balance)} ₽</Text>
-              </View>
-              <View style={styles.regSummaryDivider} />
-              <View style={styles.regSummaryRow}>
-                <Text style={styles.regSummaryLabel}>Безнал (приход)</Text>
-                <Text style={[styles.regSummaryValue, { color: Colors.success }]}>+{fmtAmount(adminReg.cardIncome)} ₽</Text>
-              </View>
-              <View style={styles.regSummaryRow}>
-                <Text style={styles.regSummaryLabel}>Наличные со снятий</Text>
-                <Text style={[styles.regSummaryValue, { color: Colors.info }]}>+{fmtAmount(adminReg.cashFromManager)} ₽</Text>
-              </View>
-              <View style={styles.regSummaryRow}>
-                <Text style={styles.regSummaryLabel}>Расходы админа</Text>
-                <Text style={[styles.regSummaryValue, { color: Colors.danger }]}>-{fmtAmount(adminReg.totalAdminExpenses)} ₽</Text>
-              </View>
-              {adminReg.totalSalaryAdvances > 0 && (
+            {expenseCategoryFilter === 'all' ? (
+              <View style={styles.regSummaryCard}>
                 <View style={styles.regSummaryRow}>
-                  <Text style={styles.regSummaryLabel}>Долги под ЗП</Text>
-                  <Text style={[styles.regSummaryValue, { color: '#7C3AED' }]}>-{fmtAmount(adminReg.totalSalaryAdvances)} ₽</Text>
+                  <Text style={styles.regSummaryLabel}>Баланс</Text>
+                  <Text style={[styles.regSummaryValue, { color: Colors.primary }]}>{fmtAmount(adminReg.balance)} ₽</Text>
                 </View>
-              )}
-              {adminReg.totalSalaryPaid > 0 && (
+                <View style={styles.regSummaryDivider} />
                 <View style={styles.regSummaryRow}>
-                  <Text style={styles.regSummaryLabel}>Выплаты ЗП</Text>
-                  <Text style={[styles.regSummaryValue, { color: '#7C3AED' }]}>-{fmtAmount(adminReg.totalSalaryPaid)} ₽</Text>
+                  <Text style={styles.regSummaryLabel}>Безнал (приход)</Text>
+                  <Text style={[styles.regSummaryValue, { color: Colors.success }]}>+{fmtAmount(adminReg.cardIncome)} ₽</Text>
                 </View>
-              )}
-            </View>
+                <View style={styles.regSummaryRow}>
+                  <Text style={styles.regSummaryLabel}>Наличные со снятий</Text>
+                  <Text style={[styles.regSummaryValue, { color: Colors.info }]}>+{fmtAmount(adminReg.cashFromManager)} ₽</Text>
+                </View>
+                <View style={styles.regSummaryRow}>
+                  <Text style={styles.regSummaryLabel}>Расходы админа</Text>
+                  <Text style={[styles.regSummaryValue, { color: Colors.danger }]}>-{fmtAmount(adminReg.totalAdminExpenses)} ₽</Text>
+                </View>
+                {adminReg.totalSalaryAdvances > 0 && (
+                  <View style={styles.regSummaryRow}>
+                    <Text style={styles.regSummaryLabel}>Долги под ЗП</Text>
+                    <Text style={[styles.regSummaryValue, { color: '#7C3AED' }]}>-{fmtAmount(adminReg.totalSalaryAdvances)} ₽</Text>
+                  </View>
+                )}
+                {adminReg.totalSalaryPaid > 0 && (
+                  <View style={styles.regSummaryRow}>
+                    <Text style={styles.regSummaryLabel}>Выплаты ЗП</Text>
+                    <Text style={[styles.regSummaryValue, { color: '#7C3AED' }]}>-{fmtAmount(adminReg.totalSalaryPaid)} ₽</Text>
+                  </View>
+                )}
+              </View>
+            ) : (
+              <View style={styles.regSummaryCard}>
+                <View style={styles.regSummaryRow}>
+                  <Text style={styles.regSummaryLabel}>
+                    {EXPENSE_CATEGORY_FILTERS.find(f => f.key === expenseCategoryFilter)?.label ?? 'Расходы'}
+                  </Text>
+                  <Text style={[styles.regSummaryValue, { color: Colors.danger }]}>{fmtAmount(expenseFilterStats.sum)} ₽</Text>
+                </View>
+                <View style={styles.regSummaryDivider} />
+                <View style={styles.regSummaryRow}>
+                  <Text style={styles.regSummaryLabel}>Операций</Text>
+                  <Text style={styles.regSummaryValue}>{expenseFilterStats.count}</Text>
+                </View>
+              </View>
+            )}
 
             <View style={styles.filterSection}>
               <View style={styles.filterHeader}>
@@ -942,7 +958,7 @@ export default function FinanceScreen() {
                     returnKeyType="done"
                     onSubmitEditing={Keyboard.dismiss}
                   />
-                  <TouchableOpacity style={styles.modalSubmitBtn} onPress={handleWithdraw} activeOpacity={0.7}>
+                  <TouchableOpacity style={styles.modalSubmitBtn} onPress={() => handleWithdraw()} activeOpacity={0.7}>
                     <Text style={styles.modalSubmitText}>Снять из кассы</Text>
                   </TouchableOpacity>
                 </View>
