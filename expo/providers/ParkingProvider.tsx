@@ -138,39 +138,42 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     setCars(deleted.size > 0 ? (d.cars || []).filter((c: any) => !deleted.has(c.clientId)) : (d.cars || []));
     setSessions(deleted.size > 0 ? (d.sessions || []).filter((s: any) => !deleted.has(s.clientId)) : (d.sessions || []));
     setSubscriptions(deleted.size > 0 ? (d.subscriptions || []).filter((s: any) => !deleted.has(s.clientId)) : (d.subscriptions || []));
-    const isPaymentsDirty = debtsDirtyUntilRef.current > Date.now() || cashOpsDirtyUntilRef.current > Date.now();
+    const now = Date.now();
+    const isDebtsDirty = debtsDirtyUntilRef.current > now;
+    const isCashOpsDirty = cashOpsDirtyUntilRef.current > now;
+    const isShiftsDirty = shiftsDirtyUntilRef.current > now;
+    const isSalaryDirty = salaryDirtyUntilRef.current > now;
+    const isPaymentsDirty = isDebtsDirty || isCashOpsDirty;
+    const isTxDirty = isDebtsDirty || isCashOpsDirty || isSalaryDirty;
+    const isExpensesDirty = isCashOpsDirty || isSalaryDirty;
+
     if (isPaymentsDirty) {
       console.log(`[Sync] SKIPPING payments overwrite — financial ops dirty (source=${source ?? '?'})`);
     } else {
       setPayments(d.payments || []);
     }
-    const isDebtsDirty = debtsDirtyUntilRef.current > Date.now();
     if (isDebtsDirty) {
-      console.log(`[Sync] SKIPPING debts/clientDebts overwrite — local debts dirty for ${debtsDirtyUntilRef.current - Date.now()}ms more (source=${source ?? '?'})`);
+      console.log(`[Sync] SKIPPING debts/clientDebts overwrite — local debts dirty for ${debtsDirtyUntilRef.current - now}ms more (source=${source ?? '?'})`);
     } else {
       setDebts(deleted.size > 0 ? (d.debts || []).filter((dd: any) => !deleted.has(dd.clientId)) : (d.debts || []));
     }
-    const isTxDirty = debtsDirtyUntilRef.current > Date.now() || cashOpsDirtyUntilRef.current > Date.now() || salaryDirtyUntilRef.current > Date.now();
     if (isTxDirty) {
       console.log(`[Sync] SKIPPING transactions overwrite — financial ops dirty (source=${source ?? '?'})`);
     } else {
       setTransactions((d.transactions || []).slice(0, MAX_TRANSACTIONS));
     }
     if (d.tariffs) setTariffs(d.tariffs);
-    const isShiftsDirty = shiftsDirtyUntilRef.current > Date.now();
     if (isShiftsDirty) {
-      console.log(`[Sync] SKIPPING shifts overwrite — local shifts dirty for ${shiftsDirtyUntilRef.current - Date.now()}ms more (source=${source ?? '?'})`);
+      console.log(`[Sync] SKIPPING shifts overwrite — local shifts dirty for ${shiftsDirtyUntilRef.current - now}ms more (source=${source ?? '?'})`);
     } else {
       setShifts(d.shifts ?? []);
     }
-    const isExpensesDirty = cashOpsDirtyUntilRef.current > Date.now() || salaryDirtyUntilRef.current > Date.now();
     if (isExpensesDirty) {
       console.log(`[Sync] SKIPPING expenses overwrite — financial ops dirty (source=${source ?? '?'})`);
     } else {
       setExpenses(d.expenses ?? []);
     }
-    const isWithdrawalsDirty = cashOpsDirtyUntilRef.current > Date.now();
-    if (isWithdrawalsDirty) {
+    if (isCashOpsDirty) {
       console.log(`[Sync] SKIPPING withdrawals overwrite — cashOps dirty (source=${source ?? '?'})`);
     } else {
       setWithdrawals(d.withdrawals ?? []);
@@ -190,20 +193,20 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       setAdminCashOperations(d.adminCashOperations ?? []);
     }
     setExpenseCategories((d.expenseCategories ?? []).filter((c: any) => !c.deleted));
-    setDailyDebtAccruals(d.dailyDebtAccruals ?? []);
+    if (!isDebtsDirty) {
+      setDailyDebtAccruals(d.dailyDebtAccruals ?? []);
+    }
     if (!isDebtsDirty) {
       setClientDebts(deleted.size > 0 ? (d.clientDebts ?? []).filter((cd: any) => !deleted.has(cd.clientId)) : (d.clientDebts ?? []));
     }
-    const isCashOpsDirty = cashOpsDirtyUntilRef.current > Date.now();
     if (isCashOpsDirty) {
-      console.log(`[Sync] SKIPPING cashOperations overwrite — local cashOps dirty for ${cashOpsDirtyUntilRef.current - Date.now()}ms more (source=${source ?? '?'})`);
+      console.log(`[Sync] SKIPPING cashOperations overwrite — local cashOps dirty for ${cashOpsDirtyUntilRef.current - now}ms more (source=${source ?? '?'})`);
     } else {
       setCashOperations(d.cashOperations ?? []);
     }
     setTeamViolations(d.teamViolations ?? []);
-    const isSalaryDirty = salaryDirtyUntilRef.current > Date.now();
     if (isSalaryDirty) {
-      console.log(`[Sync] SKIPPING salaryAdvances/salaryPayments overwrite — local salary dirty for ${salaryDirtyUntilRef.current - Date.now()}ms more (source=${source ?? '?'})`);
+      console.log(`[Sync] SKIPPING salaryAdvances/salaryPayments overwrite — local salary dirty for ${salaryDirtyUntilRef.current - now}ms more (source=${source ?? '?'})`);
     } else {
       setSalaryAdvances(d.salaryAdvances ?? localData.salaryAdvances ?? []);
       setSalaryPayments(d.salaryPayments ?? localData.salaryPayments ?? []);
@@ -860,21 +863,21 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   const getShiftCashBalance = useCallback((shift: CashShift): number => {
     const openTime = new Date(shift.openedAt).getTime();
     const closeTime = shift.closedAt ? new Date(shift.closedAt).getTime() : Date.now();
+    const isInShift = (t: { date: string; shiftId?: string | null }) => {
+      if (t.shiftId === shift.id) return true;
+      if (t.shiftId && t.shiftId !== shift.id) return false;
+      const tTime = new Date(t.date).getTime();
+      return tTime >= openTime && tTime <= closeTime;
+    };
     const cashIncome = transactions.filter(t =>
       (t.type === 'payment' || t.type === 'debt_payment') &&
-      t.method === 'cash' && t.amount > 0 &&
-      new Date(t.date).getTime() >= openTime &&
-      new Date(t.date).getTime() <= closeTime
+      t.method === 'cash' && t.amount > 0 && isInShift(t)
     ).reduce((s, t) => s + t.amount, 0);
     const cancelled = transactions.filter(t =>
-      t.type === 'cancel_payment' && t.method === 'cash' &&
-      new Date(t.date).getTime() >= openTime &&
-      new Date(t.date).getTime() <= closeTime
+      t.type === 'cancel_payment' && t.method === 'cash' && isInShift(t)
     ).reduce((s, t) => s + t.amount, 0);
     const refunded = transactions.filter(t =>
-      t.type === 'refund' && t.method === 'cash' &&
-      new Date(t.date).getTime() >= openTime &&
-      new Date(t.date).getTime() <= closeTime
+      t.type === 'refund' && t.method === 'cash' && isInShift(t)
     ).reduce((s, t) => s + t.amount, 0);
     const expenseTotal = expenses.filter(e => e.shiftId === shift.id).reduce((s, e) => s + e.amount, 0);
     const withdrawalTotal = withdrawals.filter(w => w.shiftId === shift.id).reduce((s, w) => s + w.amount, 0);
@@ -2149,7 +2152,13 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     todayStart.setHours(0, 0, 0, 0);
     const todayStartTime = todayStart.getTime();
 
-    const todayTx = transactions.filter(t => new Date(t.date).getTime() >= todayStartTime);
+    const openShiftIds = new Set(shifts.filter(s => s.status === 'open').map(s => s.id));
+
+    const todayTx = transactions.filter(t => {
+      if (new Date(t.date).getTime() < todayStartTime) return false;
+      if (t.shiftId && openShiftIds.has(t.shiftId)) return false;
+      return true;
+    });
 
     const cashIncome = todayTx.filter(t =>
       (t.type === 'payment' || t.type === 'debt_payment') && t.method === 'cash' && t.amount > 0
@@ -2164,11 +2173,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     ).reduce((s, t) => s + t.amount, 0);
 
     const todayWithdrawals = withdrawals.filter(w =>
-      new Date(w.date).getTime() >= todayStartTime
+      new Date(w.date).getTime() >= todayStartTime && (!w.shiftId || !openShiftIds.has(w.shiftId))
     ).reduce((s, w) => s + w.amount, 0);
 
     const todayExpenses = expenses.filter(e =>
-      new Date(e.date).getTime() >= todayStartTime
+      new Date(e.date).getTime() >= todayStartTime && (!e.shiftId || !openShiftIds.has(e.shiftId))
     ).reduce((s, e) => s + e.amount, 0);
 
     const todaySalaryAdvanceCash = salaryAdvances.filter(a =>
@@ -2181,7 +2190,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
     console.log(`[UnshiftedBalance] cashIn=${cashIncome}, cancelled=${cashCancelled}, refunded=${cashRefunded}, withdrawals=${todayWithdrawals}, expenses=${todayExpenses}, salAdvCash=${todaySalaryAdvanceCash}, salPayCash=${todaySalaryPayCash}`);
     return roundMoney(cashIncome - cashCancelled - cashRefunded - todayWithdrawals - todayExpenses - todaySalaryAdvanceCash - todaySalaryPayCash);
-  }, [transactions, withdrawals, expenses, salaryAdvances, salaryPayments]);
+  }, [transactions, withdrawals, expenses, salaryAdvances, salaryPayments, shifts]);
 
   const getCashBalance = useCallback((): number => {
     const isUserAdmin = currentUser?.role === 'admin';
@@ -2193,7 +2202,17 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       targetShift = shifts.find(s => s.status === 'open' && s.operatorRole !== 'admin')
         ?? shifts.find(s => s.status === 'open');
     }
-    if (targetShift) return getShiftCashBalance(targetShift);
+    if (targetShift) {
+      const shiftBal = getShiftCashBalance(targetShift);
+      if (isUserAdmin) {
+        const unshifted = getUnshiftedCashBalance();
+        if (unshifted > 0) {
+          console.log(`[getCashBalance] Admin with shift: shiftBal=${shiftBal}, unshifted=${unshifted}, combined=${shiftBal + unshifted}`);
+          return roundMoney(shiftBal + unshifted);
+        }
+      }
+      return shiftBal;
+    }
     if (isUserAdmin) {
       const unshifted = getUnshiftedCashBalance();
       console.log(`[getCashBalance] No open shift, admin mode, using unshifted balance: ${unshifted}`);
@@ -4452,6 +4471,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   }) => {
     if (localDirtyRef.current) {
       console.log('[SelfHeal] SKIPPED: localDirty=true, local changes in progress');
+      return;
+    }
+    const now = Date.now();
+    if (debtsDirtyUntilRef.current > now || cashOpsDirtyUntilRef.current > now || salaryDirtyUntilRef.current > now) {
+      console.log('[SelfHeal] SKIPPED: collection dirty flags active, user financial op in progress');
       return;
     }
     let changed = false;
