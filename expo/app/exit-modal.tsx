@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Alert, TextInput } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { Clock, Wallet, Check, AlertTriangle, Calendar, CreditCard, Banknote, RotateCcw } from 'lucide-react-native';
+import { Clock, Wallet, Check, AlertTriangle, Calendar, CreditCard, Banknote, RotateCcw, FileEdit } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useParking } from '@/providers/ParkingProvider';
 import { useAuth } from '@/providers/AuthProvider';
@@ -56,8 +56,8 @@ export default function ExitModal() {
 
   const getDailyRate = useCallback((m: PaymentMethod): number => {
     if (isLombard) return lombardRate;
-    if (isMonthly) return m === 'cash' ? tariffs.monthlyCash : tariffs.monthlyCard;
-    return m === 'cash' ? tariffs.onetimeCash : tariffs.onetimeCard;
+    if (isMonthly) return m === 'card' ? tariffs.monthlyCard : tariffs.monthlyCash;
+    return m === 'card' ? tariffs.onetimeCard : tariffs.onetimeCash;
   }, [isLombard, isMonthly, lombardRate, tariffs]);
 
   const dailyRate = getDailyRate(method);
@@ -443,6 +443,13 @@ export default function ExitModal() {
               <CreditCard size={18} color={method === 'card' ? Colors.white : Colors.textSecondary} />
               <Text style={[styles.methodBtnText, method === 'card' && styles.methodBtnTextActive]}>Безнал</Text>
             </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.methodBtn, method === 'adjustment' && styles.methodBtnActive]}
+              onPress={() => setMethod('adjustment')}
+            >
+              <FileEdit size={18} color={method === 'adjustment' ? Colors.white : Colors.textSecondary} />
+              <Text style={[styles.methodBtnText, method === 'adjustment' && styles.methodBtnTextActive]}>Коррект.</Text>
+            </TouchableOpacity>
           </View>
 
           {debtAccrualTotal > 0 && (
@@ -625,12 +632,21 @@ export default function ExitModal() {
                     Безнал
                   </Text>
                 </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.methodBtn, method === 'adjustment' && styles.methodBtnActive]}
+                  onPress={() => setMethod('adjustment')}
+                >
+                  <FileEdit size={18} color={method === 'adjustment' ? Colors.white : Colors.textSecondary} />
+                  <Text style={[styles.methodBtnText, method === 'adjustment' && styles.methodBtnTextActive]}>
+                    Коррект.
+                  </Text>
+                </TouchableOpacity>
               </View>
 
               <View style={styles.calcCard}>
                 <View style={styles.calcRow}>
                   <Text style={styles.calcLabel}>Тариф:</Text>
-                  <Text style={styles.calcValue}>{dailyRate} ₽/сутки ({method === 'cash' ? 'нал.' : 'безнал.'})</Text>
+                  <Text style={styles.calcValue}>{dailyRate} ₽/сутки ({method === 'cash' ? 'нал.' : method === 'card' ? 'безнал.' : 'коррект.'})</Text>
                 </View>
                 <View style={styles.calcRow}>
                   <Text style={styles.calcLabel}>Суток:</Text>
@@ -765,12 +781,21 @@ export default function ExitModal() {
                     Безнал
                   </Text>
                 </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.methodBtn, method === 'adjustment' && styles.methodBtnActive]}
+                  onPress={() => setMethod('adjustment')}
+                >
+                  <FileEdit size={18} color={method === 'adjustment' ? Colors.white : Colors.textSecondary} />
+                  <Text style={[styles.methodBtnText, method === 'adjustment' && styles.methodBtnTextActive]}>
+                    Коррект.
+                  </Text>
+                </TouchableOpacity>
               </View>
 
               <View style={styles.calcCard}>
                 <View style={styles.calcRow}>
                   <Text style={styles.calcLabel}>Тариф:</Text>
-                  <Text style={styles.calcValue}>{monthlyDailyRate} ₽/день ({method === 'cash' ? 'нал.' : 'безнал.'})</Text>
+                  <Text style={styles.calcValue}>{monthlyDailyRate} ₽/день ({method === 'cash' ? 'нал.' : method === 'card' ? 'безнал.' : 'коррект.'})</Text>
                 </View>
                 <View style={styles.calcRow}>
                   <Text style={styles.calcLabel}>За месяц:</Text>

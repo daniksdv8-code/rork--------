@@ -218,7 +218,7 @@ export default function HistoryScreen() {
             <Text style={styles.txDate}>{formatDateTime(item.date)}</Text>
             {item.method && (
               <Text style={styles.txMethod}>
-                {item.method === 'cash' ? 'Наличные' : 'Безнал'}
+                {item.method === 'cash' ? 'Наличные' : item.method === 'card' ? 'Безнал' : item.method === 'adjustment' ? 'Корректировка' : item.method}
               </Text>
             )}
             <Text style={styles.txOperator}>{item.operatorName}</Text>

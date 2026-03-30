@@ -11,7 +11,7 @@ import {
 } from '@/types';
 import { EMPTY_DATA } from '@/mocks/initialData';
 import { generateId } from '@/utils/id';
-import { roundMoney, normalizeMoneyData } from '@/utils/money';
+import { roundMoney, normalizeMoneyData, methodLabel, methodLabelShort, isRealMoney } from '@/utils/money';
 import { calculateDays, addMonths, isExpired, isToday, daysUntil, getMonthlyAmount } from '@/utils/date';
 import { formatPlateNumber } from '@/utils/plate';
 import { useAuth } from './AuthProvider';
@@ -971,8 +971,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
     if (paymentAtEntry && paymentAtEntry.amount > 0) {
       const payDesc = serviceType === 'onetime'
-        ? `Оплата при постановке: ${paymentAtEntry.amount} ₽ (${paymentAtEntry.days ?? 1} сут., ${paymentAtEntry.method === 'cash' ? 'наличные' : 'безнал'})`
-        : `Оплата месяца при постановке: ${paymentAtEntry.amount} ₽ (${paymentAtEntry.method === 'cash' ? 'наличные' : 'безнал'})`;
+        ? `Оплата при постановке: ${paymentAtEntry.amount} ₽ (${paymentAtEntry.days ?? 1} сут., ${methodLabel(paymentAtEntry.method)})`
+        : `Оплата месяца при постановке: ${paymentAtEntry.amount} ₽ (${methodLabel(paymentAtEntry.method)})`;
 
       const hasAdjustment = paymentAtEntry.baseAmount !== undefined && paymentAtEntry.baseAmount !== paymentAtEntry.amount;
       const adjustDesc = hasAdjustment
@@ -1236,7 +1236,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       ));
 
       if (paidAmount > 0) {
-        const payDesc = `Оплата при выезде (долг): ${paidAmount} ₽ (${paymentAtExit.method === 'cash' ? 'наличные' : 'безнал'})`;
+        const payDesc = `Оплата при выезде (долг): ${paidAmount} ₽ (${methodLabel(paymentAtExit.method)})`;
         const exitPayment: Payment = {
           id: generateId(),
           clientId: session.clientId,
@@ -1348,7 +1348,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         const paidAmount = roundMoney(Math.min(paymentAtExit.amount, remaining));
         const afterPay = roundMoney(remaining - paidAmount);
 
-        const payDesc = `Оплата при выезде: ${paidAmount} ₽ (${days} сут. × ${dailyRate} ₽, ${paymentAtExit.method === 'cash' ? 'наличные' : 'безнал'})${prepaid > 0 ? `, предоплата ${prepaid} ₽` : ''}`;
+        const payDesc = `Оплата при выезде: ${paidAmount} ₽ (${days} сут. × ${dailyRate} ₽, ${methodLabel(paymentAtExit.method)})${prepaid > 0 ? `, предоплата ${prepaid} ₽` : ''}`;
         const exitPayment: Payment = {
           id: generateId(),
           clientId: session.clientId,
@@ -1496,7 +1496,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
       if (!hasActiveSub) {
         if (paymentAtExit && paymentAtExit.amount > 0) {
-          const payDesc = `Оплата месяца при выезде: ${paymentAtExit.amount} ₽ (${paymentAtExit.method === 'cash' ? 'наличные' : 'безнал'})`;
+          const payDesc = `Оплата месяца при выезде: ${paymentAtExit.amount} ₽ (${methodLabel(paymentAtExit.method)})`;
           const exitPayment: Payment = {
             id: generateId(),
             clientId: session.clientId,
@@ -1657,7 +1657,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         amount: refundAmount,
         method: refundMethod,
         date: now,
-        description: `Возврат за досрочный выезд: ${refundAmount} ₽ (оплачено ${paidAmount} ₽, использовано ${daysUsed} дн. × ${dailyRate} ₽ = ${usedAmount} ₽, ${refundMethod === 'cash' ? 'наличные' : 'безнал'})`,
+        description: `Возврат за досрочный выезд: ${refundAmount} ₽ (оплачено ${paidAmount} ₽, использовано ${daysUsed} дн. × ${dailyRate} ₽ = ${usedAmount} ₽, ${methodLabel(refundMethod)})`,
       });
 
       setPayments(prev => prev.map(p =>
@@ -1683,7 +1683,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         type: 'refund',
         amount: refundAmount,
         category: 'Возврат за досрочный выезд',
-        description: `Возврат ${refundAmount} ₽ (${daysUsed} дн. × ${dailyRate} ₽, ${refundMethod === 'cash' ? 'наличные' : 'безнал'})`,
+        description: `Возврат ${refundAmount} ₽ (${daysUsed} дн. × ${dailyRate} ₽, ${methodLabel(refundMethod)})`,
         method: refundMethod,
         shiftId: activeShift?.id ?? null,
         balanceBefore: refundBalBefore,
@@ -1698,7 +1698,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     }
 
     const carObj = cars.find(c => c.id === session.carId);
-    logAction('refund', 'Досрочный выезд с возвратом', `${carObj?.plateNumber ?? session.carId}, ${daysUsed} дн., возврат ${refundAmount} ₽ (${refundMethod === 'cash' ? 'нал' : 'безнал'}), оплата скорректирована: ${paidAmount} → ${usedAmount} ₽`, sessionId, 'session');
+    logAction('refund', 'Досрочный выезд с возвратом', `${carObj?.plateNumber ?? session.carId}, ${daysUsed} дн., возврат ${refundAmount} ₽ (${methodLabelShort(refundMethod)}), оплата скорректирована: ${paidAmount} → ${usedAmount} ₽`, sessionId, 'session');
     schedulePush();
     console.log(`[EarlyExit] Refund: ${refundAmount} ₽, days used: ${daysUsed}, original paid: ${paidAmount}, adjusted to: ${usedAmount}, daily: ${dailyRate}`);
     return { refundAmount, daysUsed, dailyRate, paidAmount };
@@ -1880,7 +1880,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   const payMonthly = useCallback((clientId: string, carId: string, method: PaymentMethod, months: number = 1, customAmount?: number, paidUntilDate?: string) => {
     cashOpsDirtyUntilRef.current = Date.now() + COLLECTION_DIRTY_MS;
     console.log(`[PayMonthly] Marked cashOps dirty for ${COLLECTION_DIRTY_MS}ms`);
-    const dailyRate = method === 'cash' ? tariffs.monthlyCash : tariffs.monthlyCard;
+    const dailyRate = method === 'card' ? tariffs.monthlyCard : tariffs.monthlyCash;
     const amount = customAmount ?? roundMoney(getMonthlyAmount(dailyRate) * months);
     const now = new Date().toISOString();
     const activeShift = shifts.find(s => s.status === 'open');
@@ -1905,8 +1905,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     });
 
     const description = paidUntilDate
-      ? `Месяц по календарю (${method === 'cash' ? 'наличные' : 'безнал'})`
-      : `Месяц × ${months} (${method === 'cash' ? 'наличные' : 'безнал'})`;
+      ? `Месяц по календарю (${methodLabel(method)})`
+      : `Месяц × ${months} (${methodLabel(method)})`;
 
     const newPayment: Payment = {
       id: generateId(),
@@ -1942,7 +1942,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       type: 'income',
       amount,
       category: 'Оплата месяца',
-      description: `Оплата месяца: ${amount} ₽ (${method === 'cash' ? 'наличные' : 'безнал'})`,
+      description: `Оплата месяца: ${amount} ₽ (${methodLabel(method)})`,
       method,
       shiftId: activeShift?.id ?? null,
       balanceBefore: pmBalBefore,
@@ -1951,7 +1951,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
     const pmCar = cars.find(c => c.id === carId);
     const pmClient = clients.find(c => c.id === clientId);
-    logAction('payment', 'Оплата месяца', `${pmClient?.name ?? clientId}, ${pmCar?.plateNumber ?? carId}, ${amount} ₽ (${method === 'cash' ? 'нал' : 'безнал'})`, newPayment.id, 'payment');
+    logAction('payment', 'Оплата месяца', `${pmClient?.name ?? clientId}, ${pmCar?.plateNumber ?? carId}, ${amount} ₽ (${methodLabelShort(method)})`, newPayment.id, 'payment');
     schedulePush();
   }, [tariffs, currentUser, addTransaction, schedulePush, shifts, updateShiftExpected, cars, clients, logAction, addCashOperation, getShiftCashBalance]);
 
@@ -2002,7 +2002,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       balanceAfter: method === 'cash' ? roundMoney(debtBalBefore + actualAmount) : debtBalBefore,
     });
 
-    logAction('debt_payment', 'Погашение долга', `${actualAmount} ₽ (${method === 'cash' ? 'нал' : 'безнал'}), остаток: ${newRemaining > 0 ? newRemaining + ' ₽' : 'полностью'}`, debtId, 'debt');
+    logAction('debt_payment', 'Погашение долга', `${actualAmount} ₽ (${methodLabelShort(method)}), остаток: ${newRemaining > 0 ? newRemaining + ' ₽' : 'полностью'}`, debtId, 'debt');
     schedulePush();
   }, [debts, addTransaction, schedulePush, shifts, updateShiftExpected, logAction, addCashOperation, getShiftCashBalance]);
 
@@ -2149,7 +2149,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       balanceAfter: method === 'cash' ? roundMoney(cdBalBefore + actualAmount) : cdBalBefore,
     });
 
-    logAction('debt_payment', 'Погашение долга клиента', `${actualAmount} ₽ (${method === 'cash' ? 'нал' : 'безнал'}), остаток: ${newRemainingTotal > 0 ? newRemainingTotal + ' ₽' : 'полностью'}`, clientId, 'client_debt');
+    logAction('debt_payment', 'Погашение долга клиента', `${actualAmount} ₽ (${methodLabelShort(method)}), остаток: ${newRemainingTotal > 0 ? newRemainingTotal + ' ₽' : 'полностью'}`, clientId, 'client_debt');
     schedulePush();
     console.log(`[PayClientDebt] FIFO paid ${actualAmount} for client ${clientId}, old debts touched: ${updatedDebtIds.length}, remaining: ${newRemainingTotal}`);
   }, [debts, clientDebts, currentUser, shifts, addTransaction, updateShiftExpected, logAction, schedulePush, addCashOperation, getShiftCashBalance, cars, overstayedSessionDebts, materializeOverstayDebts]);
@@ -2241,10 +2241,23 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     cashOpsDirtyUntilRef.current = Date.now() + COLLECTION_DIRTY_MS;
     console.log(`[Withdrawal] Marked cashOps dirty for ${COLLECTION_DIRTY_MS}ms`);
     const now = new Date().toISOString();
-    const balanceBefore = activeShift ? getShiftCashBalance(activeShift) : getUnshiftedCashBalance();
-    const balanceAfter = roundMoney(balanceBefore - amount);
     const isUserAdmin = currentUser?.role === 'admin';
-    console.log(`[Withdrawal] Calculating balance: ${activeShift ? 'shiftBalance' : 'unshiftedBalance'}=${balanceBefore}, effective=${balanceBefore}`);
+    let balanceBefore: number;
+    if (isUserAdmin) {
+      if (activeShift) {
+        const shiftBal = getShiftCashBalance(activeShift);
+        const unshifted = getUnshiftedCashBalance();
+        balanceBefore = roundMoney(shiftBal + (unshifted > 0 ? unshifted : 0));
+        console.log(`[Withdrawal] Admin balance: shiftBal=${shiftBal}, unshifted=${unshifted}, combined=${balanceBefore}`);
+      } else {
+        balanceBefore = getUnshiftedCashBalance();
+        console.log(`[Withdrawal] Admin no shift, unshifted balance: ${balanceBefore}`);
+      }
+    } else {
+      balanceBefore = activeShift ? getShiftCashBalance(activeShift) : 0;
+      console.log(`[Withdrawal] Manager balance: ${balanceBefore}`);
+    }
+    const balanceAfter = roundMoney(balanceBefore - amount);
 
     if (balanceAfter < 0 && !isUserAdmin) {
       console.log(`[Withdrawal] BLOCKED for manager: balance=${balanceBefore}, withdraw=${amount}`);
@@ -2617,7 +2630,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       } else {
         const advNow = new Date().toISOString();
         const advShift = shifts.find(s => s.status === 'open');
-        const advDesc = `Аванс после погашения долга: ${advanceAmount} ₽ (${method === 'cash' ? 'наличные' : 'безнал'})`;
+        const advDesc = `Аванс после погашения долга: ${advanceAmount} ₽ (${methodLabel(method)})`;
         const advPay: Payment = {
           id: generateId(),
           clientId,
@@ -2764,13 +2777,16 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
     const cashToday = roundMoney(todayPaymentTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0));
     const cardToday = roundMoney(todayPaymentTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0));
+    const adjustmentToday = roundMoney(todayPaymentTx.filter(t => t.method === 'adjustment').reduce((s, t) => s + t.amount, 0));
     const cashCancelled = roundMoney(todayCancelTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0));
     const cardCancelled = roundMoney(todayCancelTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0));
+    const adjustmentCancelled = roundMoney(todayCancelTx.filter(t => t.method === 'adjustment').reduce((s, t) => s + t.amount, 0));
     const cashRefunded = roundMoney(todayRefundTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0));
     const cardRefunded = roundMoney(todayRefundTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0));
 
     const netCash = roundMoney(cashToday - cashCancelled - cashRefunded);
     const netCard = roundMoney(cardToday - cardCancelled - cardRefunded);
+    const netAdjustment = roundMoney(adjustmentToday - adjustmentCancelled);
     const oldDebtTotal = roundMoney(activeDebts.reduce((s, d) => s + d.remainingAmount, 0));
     const clientDebtTotal = roundMoney(clientDebts.reduce((s, cd) => s + cd.totalAmount, 0));
     const overstayTotal = roundMoney(Object.values(overstayedSessionDebts).reduce((s, v) => s + v, 0));
@@ -2781,7 +2797,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       carsOnParking: activeSessions.length,
       cashToday: netCash,
       cardToday: netCard,
-      totalRevenue: roundMoney(netCash + netCard),
+      adjustmentToday: netAdjustment,
+      totalRevenue: roundMoney(netCash + netCard + netAdjustment),
       debtorsCount: debtors.length,
       totalDebt,
       totalRefunds,
@@ -3020,10 +3037,10 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       amount,
       method,
       date: now,
-      description: `Расход админа: ${amount} ₽ — ${category}: ${description} (${method === 'cash' ? 'нал' : 'безнал'})`,
+      description: `Расход админа: ${amount} ₽ — ${category}: ${description} (${methodLabelShort(method)})`,
     });
 
-    logAction('admin_expense_add', 'Расход администратора', `${amount} ₽ — ${category}: ${description} (${method === 'cash' ? 'нал' : 'безнал'})`, expense.id, 'admin_expense');
+    logAction('admin_expense_add', 'Расход администратора', `${amount} ₽ — ${category}: ${description} (${methodLabelShort(method)})`, expense.id, 'admin_expense');
     schedulePush();
     console.log(`[AdminExpense] Added: ${amount} ₽ - ${category}: ${description}`);
     return expense;
@@ -4273,11 +4290,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       const adminFinBal = getAdminFinanceBalance();
       balanceBefore = effectiveMethod === 'cash' ? adminFinBal.cash : adminFinBal.card;
       balanceAfter = roundMoney(balanceBefore - amount);
-      sourceLabel = `финансы админа (${effectiveMethod === 'cash' ? 'наличные' : 'безнал'})`;
+      sourceLabel = `финансы админа (${methodLabel(effectiveMethod)})`;
 
       if (balanceAfter < 0 && !forceNegative) {
         console.log(`[SalaryAdvance] Would go negative: adminBalance(${effectiveMethod})=${balanceBefore}, amount=${amount}`);
-        return { success: false, wouldGoNegative: true, currentBalance: balanceBefore, error: `Недостаточно средств! Остаток (${effectiveMethod === 'cash' ? 'нал' : 'безнал'}): ${balanceBefore} ₽, после выдачи: ${balanceAfter} ₽` };
+        return { success: false, wouldGoNegative: true, currentBalance: balanceBefore, error: `Недостаточно средств! Остаток (${methodLabelShort(effectiveMethod)}): ${balanceBefore} ₽, после выдачи: ${balanceAfter} ₽` };
       }
     }
 
@@ -4409,7 +4426,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         }
       }
     } else {
-      sourceLabel = `финансы админа (${method === 'cash' ? 'наличные' : 'безнал'})`;
+      sourceLabel = `финансы админа (${methodLabel(method)})`;
 
       if (netPaid > 0) {
         const adminFinBal = getAdminFinanceBalance();
@@ -4417,7 +4434,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         const balanceAfter = roundMoney(balanceBefore - netPaid);
         if (balanceAfter < 0 && !forceNegative) {
           console.log(`[SalaryPayment] Would go negative: adminBalance(${method})=${balanceBefore}, netPaid=${netPaid}`);
-          return { success: false, wouldGoNegative: true, currentBalance: balanceBefore, netPaid, error: `Недостаточно средств! Остаток (${method === 'cash' ? 'нал' : 'безнал'}): ${balanceBefore} ₽, к выдаче: ${netPaid} ₽, будет: ${balanceAfter} ₽` };
+          return { success: false, wouldGoNegative: true, currentBalance: balanceBefore, netPaid, error: `Недостаточно средств! Остаток (${methodLabelShort(method)}): ${balanceBefore} ₽, к выдаче: ${netPaid} ₽, будет: ${balanceAfter} ₽` };
         }
       }
     }
@@ -4536,7 +4553,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     } else if (debtDeducted > 0) {
       const salarySourceLabel = effectiveSource === 'manager_shift'
         ? `касса менеджера`
-        : `финансы админа (${method === 'cash' ? 'наличные' : 'безнал'})`;
+        : `финансы админа (${methodLabel(method)})`;
 
       addTransaction({
         clientId: '',
@@ -4577,7 +4594,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     }
 
     const payLabel = netPaid > 0
-      ? `${employeeName}: начислено ${grossAmount} ₽${debtDeducted > 0 ? `, зачтено долга ${debtDeducted} ₽` : ''}, к выдаче ${netPaid} ₽ (${method === 'cash' ? 'нал' : 'безнал'}) — ${sourceLabel}`
+      ? `${employeeName}: начислено ${grossAmount} ₽${debtDeducted > 0 ? `, зачтено долга ${debtDeducted} ₽` : ''}, к выдаче ${netPaid} ₽ (${methodLabelShort(method)}) — ${sourceLabel}`
       : `${employeeName}: начислено ${grossAmount} ₽, полностью зачтено в погашение долга ${debtDeducted} ₽`;
     logAction('salary_payment', 'Выплата зарплаты', payLabel, salPayment.id, 'salary_payment');
     schedulePush();

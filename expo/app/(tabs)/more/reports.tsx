@@ -73,8 +73,10 @@ export default function ReportsScreen() {
 
     const cashGross = Math.round(paymentTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0));
     const cardGross = Math.round(paymentTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0));
+    const adjustmentGross = Math.round(paymentTx.filter(t => t.method === 'adjustment').reduce((s, t) => s + t.amount, 0));
     const cashCancelled = Math.round(cancelTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0));
     const cardCancelled = Math.round(cancelTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0));
+    const adjustmentCancelled = Math.round(cancelTx.filter(t => t.method === 'adjustment').reduce((s, t) => s + t.amount, 0));
     const cashRefunded = Math.round(refundTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0));
     const cardRefunded = Math.round(refundTx.filter(t => t.method === 'card').reduce((s, t) => s + t.amount, 0));
 
@@ -94,6 +96,7 @@ export default function ReportsScreen() {
 
     const cash = Math.round(cashGross - cashCancelled - cashRefunded);
     const card = Math.round(cardGross - cardCancelled - cardRefunded);
+    const adjustment = Math.round(adjustmentGross - adjustmentCancelled);
     const totalRefunds = Math.round(cashRefunded + cardRefunded);
 
     const oldDebtTotal = Math.round(debts.filter(d => d.remainingAmount > 0).reduce((s, d) => s + d.remainingAmount, 0));
@@ -102,7 +105,7 @@ export default function ReportsScreen() {
     const debtorsCount = debtors.length;
     const expenseCount = filteredExpenses.length;
 
-    return { cash, card, total: Math.round(cash + card), totalDebtAmount, debtorsCount, totalRefunds, totalExpensesAmount, expenseCount, expenseCategories };
+    return { cash, card, adjustment, total: Math.round(cash + card + adjustment), totalDebtAmount, debtorsCount, totalRefunds, totalExpensesAmount, expenseCount, expenseCategories };
   }, [transactions, debts, clientDebts, debtors, revenuePeriod, expenses]);
 
   const vehicleData = useMemo(() => {
@@ -288,6 +291,13 @@ export default function ReportsScreen() {
               <Text style={[styles.breakdownValue, { color: Colors.info }]}>{fm(revenueData.card)} ₽</Text>
             </View>
           </View>
+
+          {revenueData.adjustment > 0 && (
+            <View style={[styles.breakdownCard, { borderLeftColor: Colors.warning, marginHorizontal: 0 }]}>
+              <Text style={styles.breakdownLabel}>Корректировки</Text>
+              <Text style={[styles.breakdownValue, { color: Colors.warning }]}>{fm(revenueData.adjustment)} ₽</Text>
+            </View>
+          )}
 
           {revenueData.totalRefunds > 0 && (
             <View style={[styles.breakdownCard, { borderLeftColor: Colors.warning, marginHorizontal: 0 }]}>

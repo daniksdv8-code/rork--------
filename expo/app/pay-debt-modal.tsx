@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { Check, Banknote, CreditCard, Info } from 'lucide-react-native';
+import { Check, Banknote, CreditCard, Info, FileEdit } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useParking } from '@/providers/ParkingProvider';
 import { useAuth } from '@/providers/AuthProvider';
@@ -128,6 +128,14 @@ export default function PayDebtModal() {
         >
           <CreditCard size={18} color={method === 'card' ? Colors.white : Colors.textSecondary} />
           <Text style={[styles.methodBtnText, method === 'card' && styles.methodBtnTextActive]}>Безнал</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.methodBtn, method === 'adjustment' && styles.methodBtnActive]}
+          onPress={() => handleMethodChange('adjustment')}
+          testID="method-adjustment"
+        >
+          <FileEdit size={18} color={method === 'adjustment' ? Colors.white : Colors.textSecondary} />
+          <Text style={[styles.methodBtnText, method === 'adjustment' && styles.methodBtnTextActive]}>Коррект.</Text>
         </TouchableOpacity>
       </View>
 

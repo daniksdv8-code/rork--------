@@ -1,4 +1,4 @@
-export type PaymentMethod = 'cash' | 'card';
+export type PaymentMethod = 'cash' | 'card' | 'adjustment';
 export type ServiceType = 'monthly' | 'onetime' | 'lombard';
 export type TariffType = 'standard' | 'lombard';
 export type SessionStatus = 'draft' | 'active' | 'completed' | 'active_debt' | 'released' | 'released_debt';

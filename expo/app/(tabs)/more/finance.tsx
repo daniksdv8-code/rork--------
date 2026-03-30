@@ -337,7 +337,7 @@ export default function FinanceScreen() {
         date: e.date,
         type: 'admin_expense',
         amount: e.amount,
-        method: e.method === 'cash' ? 'наличные' : 'безнал',
+        method: e.method === 'cash' ? 'наличные' : e.method === 'card' ? 'безнал' : 'корректировка',
         description: `${e.category}: ${e.description}`,
         operator: e.operatorName,
       });
@@ -349,7 +349,7 @@ export default function FinanceScreen() {
         date: a.issuedAt,
         type: 'salary_advance',
         amount: a.amount,
-        method: (a as any).method === 'card' ? 'безнал' : 'наличные',
+        method: (a as any).method === 'card' ? 'безнал' : (a as any).method === 'adjustment' ? 'корректировка' : 'наличные',
         description: `Аванс (долг под ЗП): ${a.employeeName} — ${a.amount} ₽${a.comment ? ` (${a.comment})` : ''}`,
         operator: a.issuedByName,
       });
@@ -364,7 +364,7 @@ export default function FinanceScreen() {
         date: p.paidAt,
         type: 'salary_payment',
         amount: p.netPaid,
-        method: p.method === 'cash' ? 'наличные' : 'безнал',
+        method: p.method === 'cash' ? 'наличные' : p.method === 'card' ? 'безнал' : 'корректировка',
         description: desc,
         operator: p.paidByName,
       });

@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Alert, Linking, TextInput } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { Phone, Car, Calendar, CreditCard, AlertTriangle, Trash2, Plus, Check, X, LogIn, LogOut, XCircle, RotateCcw, Ban, Pencil, Banknote, Wallet, Clock } from 'lucide-react-native';
+import { Phone, Car, Calendar, CreditCard, AlertTriangle, Trash2, Plus, Check, X, LogIn, LogOut, XCircle, RotateCcw, Ban, Pencil, Banknote, Wallet, Clock, FileEdit } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/providers/AuthProvider';
 import { useParking } from '@/providers/ParkingProvider';
@@ -254,7 +254,7 @@ export default function ClientCardScreen() {
     }
     if (checkInServiceType === 'onetime') {
       const d = Math.max(1, parseInt(payDays, 10) || 1);
-      return paymentMethod === 'cash' ? tariffs.onetimeCash * d : tariffs.onetimeCard * d;
+      return paymentMethod === 'card' ? tariffs.onetimeCard * d : tariffs.onetimeCash * d;
     }
     return monthlyCalc.totalPrice;
   }, [checkInCarId, checkInServiceType, checkInTariffType, payDays, paymentMethod, tariffs, monthlyCalc, hasActiveSubscription]);
@@ -863,6 +863,14 @@ export default function ClientCardScreen() {
                   >
                     <CreditCard size={15} color={paymentMethod === 'card' ? Colors.white : Colors.textSecondary} />
                     <Text style={[styles.methodBtnText, paymentMethod === 'card' && styles.methodBtnTextActive]}>Безнал</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.methodBtn, paymentMethod === 'adjustment' && styles.methodBtnActive]}
+                    onPress={() => setPaymentMethod('adjustment')}
+                    activeOpacity={0.7}
+                  >
+                    <FileEdit size={15} color={paymentMethod === 'adjustment' ? Colors.white : Colors.textSecondary} />
+                    <Text style={[styles.methodBtnText, paymentMethod === 'adjustment' && styles.methodBtnTextActive]}>Коррект.</Text>
                   </TouchableOpacity>
                 </View>
 

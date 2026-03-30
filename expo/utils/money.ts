@@ -6,6 +6,24 @@ export function formatMoney(value: number): string {
   return String(Math.round(value));
 }
 
+export function methodLabel(method: string): string {
+  if (method === 'cash') return 'наличные';
+  if (method === 'card') return 'безнал';
+  if (method === 'adjustment') return 'корректировка';
+  return method;
+}
+
+export function methodLabelShort(method: string): string {
+  if (method === 'cash') return 'нал';
+  if (method === 'card') return 'безнал';
+  if (method === 'adjustment') return 'коррект.';
+  return method;
+}
+
+export function isRealMoney(method: string): boolean {
+  return method === 'cash' || method === 'card';
+}
+
 export function normalizeMoneyData(data: Record<string, any>): Record<string, any> {
   if (!data) return data;
   const result = { ...data };

@@ -263,6 +263,20 @@ export default function DashboardScreen() {
           <Text style={styles.statLabel}>Безнал сегодня</Text>
         </TouchableOpacity>
 
+        {(todayStats.adjustmentToday ?? 0) > 0 && (
+          <TouchableOpacity
+            style={styles.statCard}
+            activeOpacity={0.7}
+            onPress={() => router.push('/(tabs)/(dashboard)/cash-today' as any)}
+          >
+            <View style={[styles.statIcon, { backgroundColor: Colors.warningLight }]}>
+              <Wallet size={20} color={Colors.warning} />
+            </View>
+            <Text style={styles.statValue}>{formatMoney(todayStats.adjustmentToday ?? 0)} ₽</Text>
+            <Text style={styles.statLabel}>Корректировки</Text>
+          </TouchableOpacity>
+        )}
+
         <TouchableOpacity
           style={styles.statCard}
           activeOpacity={0.7}
