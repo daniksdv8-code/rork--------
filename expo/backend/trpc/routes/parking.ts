@@ -331,6 +331,37 @@ function mergeSubscriptions(base: any[], incoming: any[]): any[] {
   return Array.from(map.values());
 }
 
+function mergeClientDebts(base: any[], incoming: any[]): any[] {
+  const baseMap = new Map<string, any>();
+  for (const item of base || []) {
+    if (item?.id) baseMap.set(item.id, item);
+  }
+  const incomingMap = new Map<string, any>();
+  for (const item of incoming || []) {
+    if (item?.id) incomingMap.set(item.id, item);
+  }
+  const allIds = new Set([...baseMap.keys(), ...incomingMap.keys()]);
+  const result: any[] = [];
+  for (const id of allIds) {
+    const b = baseMap.get(id);
+    const i = incomingMap.get(id);
+    if (b && i) {
+      const bTime = b.lastUpdate ? new Date(b.lastUpdate).getTime() : 0;
+      const iTime = i.lastUpdate ? new Date(i.lastUpdate).getTime() : 0;
+      if (bTime > 0 && iTime > 0) {
+        result.push(iTime >= bTime ? i : b);
+      } else {
+        result.push(i.totalAmount <= b.totalAmount ? i : b);
+      }
+    } else if (i) {
+      result.push(i);
+    } else if (b) {
+      result.push(b);
+    }
+  }
+  return result;
+}
+
 function mergeDebts(base: any[], incoming: any[]): any[] {
   const baseMap = new Map<string, any>();
   for (const item of base || []) {
@@ -983,7 +1014,7 @@ export const parkingRouter = createTRPCRouter({
         ? unionById((existingData as any).dailyDebtAccruals ?? [], (input as any).dailyDebtAccruals ?? [])
         : ((input as any).dailyDebtAccruals ?? []);
       const clientDebtsMerged = existingData
-        ? mergeArraysById((existingData as any).clientDebts ?? [], (input as any).clientDebts ?? []).filter(
+        ? mergeClientDebts((existingData as any).clientDebts ?? [], (input as any).clientDebts ?? []).filter(
             (cd: any) => !deletedSet.has(cd.clientId)
           )
         : ((input as any).clientDebts ?? []).filter((cd: any) => !deletedSet.has(cd.clientId));

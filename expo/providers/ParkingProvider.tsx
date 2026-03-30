@@ -1976,6 +1976,51 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       return next;
     });
 
+    const cd = clientDebts.find(c => c.clientId === debt.clientId);
+    if (cd && cd.totalAmount > 0) {
+      const cdReduction = roundMoney(Math.min(actualAmount, cd.totalAmount));
+      if (cdReduction > 0) {
+        setClientDebts(prev => {
+          const next = prev.map(c => {
+            if (c.clientId !== debt.clientId) return c;
+            const newTotal = roundMoney(Math.max(0, c.totalAmount - cdReduction));
+            const frozenRed = roundMoney(Math.min(cdReduction, c.frozenAmount));
+            const activeRed = roundMoney(cdReduction - frozenRed);
+            return {
+              ...c,
+              totalAmount: newTotal,
+              frozenAmount: roundMoney(Math.max(0, c.frozenAmount - frozenRed)),
+              activeAmount: roundMoney(Math.max(0, c.activeAmount - activeRed)),
+              lastUpdate: now,
+            };
+          });
+          latestDataRef.current = { ...latestDataRef.current, clientDebts: next };
+          return next;
+        });
+        console.log(`[payDebt] Also reduced clientDebt for ${debt.clientId} by ${cdReduction}`);
+      }
+    }
+
+    const newPayment: Payment = {
+      id: generateId(),
+      clientId: debt.clientId,
+      carId: debt.carId,
+      amount: actualAmount,
+      method,
+      date: now,
+      serviceType: 'onetime',
+      operatorId: currentUser?.id ?? 'unknown',
+      operatorName: currentUser?.name ?? 'Неизвестно',
+      description: `Погашение долга: ${actualAmount} ₽${newRemaining > 0 ? ` (остаток: ${newRemaining} ₽)` : ' (полностью)'}`,
+      shiftId: shifts.find(s => s.status === 'open')?.id ?? null,
+      updatedAt: now,
+    };
+    setPayments(prev => {
+      const next = [...prev, newPayment];
+      latestDataRef.current = { ...latestDataRef.current, payments: next };
+      return next;
+    });
+
     addTransaction({
       clientId: debt.clientId,
       carId: debt.carId,
@@ -2004,7 +2049,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
     logAction('debt_payment', 'Погашение долга', `${actualAmount} ₽ (${methodLabelShort(method)}), остаток: ${newRemaining > 0 ? newRemaining + ' ₽' : 'полностью'}`, debtId, 'debt');
     schedulePush();
-  }, [debts, addTransaction, schedulePush, shifts, updateShiftExpected, logAction, addCashOperation, getShiftCashBalance]);
+  }, [debts, clientDebts, currentUser, addTransaction, schedulePush, shifts, updateShiftExpected, logAction, addCashOperation, getShiftCashBalance]);
 
   const activeSessions = useMemo(() =>
     sessions.filter(s => (s.status === 'active' || s.status === 'active_debt') && !s.cancelled && !isClientDeleted(s.clientId)),
@@ -2015,10 +2060,14 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     const sessionIdsWithDebt = new Set(
       debts.filter(d => d.parkingEntryId && d.remainingAmount > 0).map(d => d.parkingEntryId!)
     );
+    const sessionIdsWithPaidDebt = new Set(
+      debts.filter(d => d.parkingEntryId && d.status === 'paid' && d.remainingAmount <= 0).map(d => d.parkingEntryId!)
+    );
     for (const session of activeSessions) {
       if (session.status === 'active_debt') continue;
       if (session.serviceType === 'lombard' || session.tariffType === 'lombard') continue;
       if (sessionIdsWithDebt.has(session.id)) continue;
+      if (sessionIdsWithPaidDebt.has(session.id)) continue;
 
       if (session.serviceType === 'onetime') {
         const days = calculateDays(session.entryTime);
@@ -2046,10 +2095,14 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     const sessionIdsWithDebt = new Set(
       debts.filter(d => d.parkingEntryId && d.remainingAmount > 0).map(d => d.parkingEntryId!)
     );
+    const sessionIdsWithPaidDebt = new Set(
+      debts.filter(d => d.parkingEntryId && d.status === 'paid' && d.remainingAmount <= 0).map(d => d.parkingEntryId!)
+    );
     for (const session of activeSessions) {
       if (session.status === 'active_debt') continue;
       if (session.serviceType === 'lombard' || session.tariffType === 'lombard') continue;
       if (sessionIdsWithDebt.has(session.id)) continue;
+      if (sessionIdsWithPaidDebt.has(session.id)) continue;
 
       if (session.serviceType === 'onetime') {
         const days = calculateDays(session.entryTime);
@@ -2138,17 +2191,34 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
     const clientOldDebts = latestDataRef.current.debts.filter(d => d.clientId === clientId && d.remainingAmount > 0)
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-    const cd = clientDebts.find(c => c.clientId === clientId);
+    const latestClientDebts = latestDataRef.current.clientDebts as ClientDebt[] ?? [];
+    const cd = latestClientDebts.find(c => c.clientId === clientId) ?? clientDebts.find(c => c.clientId === clientId);
     const oldDebtsTotal = clientOldDebts.reduce((s, d) => s + d.remainingAmount, 0);
     const clientDebtTotal = cd ? cd.totalAmount : 0;
     const storedTotal = roundMoney(oldDebtsTotal + clientDebtTotal);
 
-    if (storedTotal <= 0) return;
+    if (storedTotal <= 0) {
+      console.log(`[payClientDebt] No debt found for client ${clientId}, storedTotal=${storedTotal}`);
+      return;
+    }
 
     const actualAmount = roundMoney(Math.min(amount, storedTotal));
     const isFullPayment = actualAmount >= storedTotal;
 
-    let remaining = actualAmount;
+    let allocatedToOldDebts = 0;
+    const debtAllocations: Array<{ debtId: string; payAmount: number }> = [];
+
+    if (!isFullPayment && clientOldDebts.length > 0) {
+      let budgetForOld = actualAmount;
+      for (const od of clientOldDebts) {
+        if (budgetForOld <= 0) break;
+        const payForThis = roundMoney(Math.min(budgetForOld, od.remainingAmount));
+        debtAllocations.push({ debtId: od.id, payAmount: payForThis });
+        budgetForOld = roundMoney(budgetForOld - payForThis);
+        allocatedToOldDebts = roundMoney(allocatedToOldDebts + payForThis);
+      }
+    }
+    const allocatedToClientDebt = isFullPayment ? clientDebtTotal : roundMoney(Math.min(actualAmount - allocatedToOldDebts, clientDebtTotal));
 
     const updatedDebtIds: string[] = [];
     if (isFullPayment) {
@@ -2176,16 +2246,14 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         return next;
       });
     } else {
-      if (clientOldDebts.length > 0 && remaining > 0) {
+      if (debtAllocations.length > 0) {
+        const allocMap = new Map(debtAllocations.map(a => [a.debtId, a.payAmount]));
         setDebts(prev => {
           const next = prev.map(d => {
-            if (d.clientId !== clientId || d.remainingAmount <= 0 || remaining <= 0) return d;
-            const idx = clientOldDebts.findIndex(od => od.id === d.id);
-            if (idx === -1) return d;
-            const payForThis = roundMoney(Math.min(remaining, d.remainingAmount));
-            remaining = roundMoney(remaining - payForThis);
+            const alloc = allocMap.get(d.id);
+            if (!alloc || alloc <= 0) return d;
             updatedDebtIds.push(d.id);
-            const newRem = roundMoney(d.remainingAmount - payForThis);
+            const newRem = roundMoney(d.remainingAmount - alloc);
             return { ...d, remainingAmount: newRem, status: newRem <= 0 ? 'paid' as const : d.status, updatedAt: now };
           });
           latestDataRef.current = { ...latestDataRef.current, debts: next };
@@ -2193,15 +2261,13 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         });
       }
 
-      if (remaining > 0 && cd && cd.totalAmount > 0) {
-        const payForCd = roundMoney(Math.min(remaining, cd.totalAmount));
-        remaining = roundMoney(remaining - payForCd);
+      if (allocatedToClientDebt > 0 && cd && cd.totalAmount > 0) {
         setClientDebts(prev => {
           const next = prev.map(c => {
             if (c.clientId !== clientId) return c;
-            const newTotal = roundMoney(Math.max(0, c.totalAmount - payForCd));
-            const frozenReduction = roundMoney(Math.min(payForCd, c.frozenAmount));
-            const activeReduction = roundMoney(payForCd - frozenReduction);
+            const newTotal = roundMoney(Math.max(0, c.totalAmount - allocatedToClientDebt));
+            const frozenReduction = roundMoney(Math.min(allocatedToClientDebt, c.frozenAmount));
+            const activeReduction = roundMoney(allocatedToClientDebt - frozenReduction);
             return {
               ...c,
               totalAmount: newTotal,
@@ -2236,7 +2302,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       shiftId: shifts.find(s => s.status === 'open')?.id ?? null,
       updatedAt: now,
     };
-    setPayments(prev => [...prev, newPayment]);
+    setPayments(prev => {
+      const next = [...prev, newPayment];
+      latestDataRef.current = { ...latestDataRef.current, payments: next };
+      return next;
+    });
 
     addTransaction({
       clientId,
@@ -2267,7 +2337,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
     logAction('debt_payment', 'Погашение долга клиента', `${actualAmount} ₽ (${methodLabelShort(method)}), остаток: ${newRemainingTotal > 0 ? newRemainingTotal + ' ₽' : 'полностью'}`, clientId, 'client_debt');
     schedulePush();
-    console.log(`[PayClientDebt] FIFO paid ${actualAmount} for client ${clientId}, old debts touched: ${updatedDebtIds.length}, remaining: ${newRemainingTotal}`);
+    console.log(`[PayClientDebt] FIFO paid ${actualAmount} for client ${clientId}, old debts: ${allocatedToOldDebts}, clientDebt: ${allocatedToClientDebt}, remaining: ${newRemainingTotal}`);
   }, [debts, clientDebts, currentUser, shifts, addTransaction, updateShiftExpected, logAction, schedulePush, addCashOperation, getShiftCashBalance, cars, overstayedSessionDebts, materializeOverstayDebts]);
 
   const getUnshiftedCashBalance = useCallback((): number => {
