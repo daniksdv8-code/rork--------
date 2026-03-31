@@ -31,13 +31,17 @@ export default function DebtsListScreen() {
     debts, clients, cars, sessions,
     dailyDebtAccruals, tariffs,
     debtors, activeSessions, subscriptions,
-  } = useParking();
+  } = useParking() as any;
   const [search, setSearch] = useState<string>('');
+
+  const debtorClientIds = useMemo(() => {
+    return new Set(debtors.filter((d: any) => d.client && d.totalDebt > 0).map((d: any) => d.client!.id as string));
+  }, [debtors]);
 
   const allDebtRows = useMemo(() => {
     const rows: DebtRow[] = [];
 
-    const activeOldDebts = debts.filter((d: Debt) => d.remainingAmount > 0);
+    const activeOldDebts = debts.filter((d: Debt) => d.remainingAmount > 0 && debtorClientIds.has(d.clientId));
     for (const d of activeOldDebts) {
       const client = clients.find((c: Client) => c.id === d.clientId);
       const car = cars.find((c: Car) => c.id === d.carId);
@@ -60,7 +64,7 @@ export default function DebtsListScreen() {
     const activeDebtIds = new Set(activeOldDebts.map((d: Debt) => d.parkingEntryId).filter(Boolean));
 
     const debtSessions = sessions.filter((s: ParkingSession) =>
-      s.status === 'active_debt' && !s.cancelled && !activeDebtIds.has(s.id)
+      s.status === 'active_debt' && !s.cancelled && !activeDebtIds.has(s.id) && debtorClientIds.has(s.clientId)
     );
 
     for (const session of debtSessions) {
@@ -154,7 +158,7 @@ export default function DebtsListScreen() {
 
     rows.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     return rows;
-  }, [debts, clients, cars, sessions, dailyDebtAccruals, tariffs, debtors, activeSessions, subscriptions]);
+  }, [debts, clients, cars, sessions, dailyDebtAccruals, tariffs, debtors, debtorClientIds, activeSessions, subscriptions]);
 
   const totalDebt = useMemo(() => {
     return debtors.reduce((s: number, d: { totalDebt: number }) => s + d.totalDebt, 0);

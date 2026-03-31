@@ -7,17 +7,17 @@ import { useParking } from '@/providers/ParkingProvider';
 
 export default function DebtorsListScreen() {
   const router = useRouter();
-  const { debtors, sessions, dailyDebtAccruals, debts } = useParking();
+  const { debtors, sessions, dailyDebtAccruals } = useParking() as any;
   const [search, setSearch] = useState<string>('');
 
-  const totalDebt = useMemo(() => debtors.reduce((s, d) => s + d.totalDebt, 0), [debtors]);
+  const totalDebt = useMemo(() => debtors.reduce((s: number, d: any) => s + d.totalDebt, 0), [debtors]);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return debtors;
     const q = search.toLowerCase();
-    return debtors.filter(d =>
+    return debtors.filter((d: any) =>
       (d.client?.name ?? '').toLowerCase().includes(q) ||
-      d.cars.some(c => c.plateNumber.toLowerCase().includes(q))
+      d.cars.some((c: any) => c.plateNumber.toLowerCase().includes(q))
     );
   }, [debtors, search]);
 
@@ -27,19 +27,19 @@ export default function DebtorsListScreen() {
 
   const renderItem = useCallback(({ item, index }: { item: typeof filtered[0]; index: number }) => {
     const hasLombardSession = item.client ? (
-      sessions.some(s =>
+      sessions.some((s: any) =>
         s.clientId === item.client!.id &&
         (s.tariffType === 'lombard' || s.serviceType === 'lombard') &&
         s.status === 'active_debt'
       ) ||
-      item.debts.some(d => d.description?.includes('Ломбард'))
+      item.debts.some((d: any) => d.description?.includes('Ломбард'))
     ) : false;
 
-    const activeAccrualCount = item.client ? sessions.filter(s =>
+    const activeAccrualCount = item.client ? sessions.filter((s: any) =>
       s.clientId === item.client!.id &&
       s.status === 'active_debt' &&
       !s.cancelled &&
-      dailyDebtAccruals.some(a => a.parkingEntryId === s.id)
+      dailyDebtAccruals.some((a: any) => a.parkingEntryId === s.id)
     ).length : 0;
 
     const hasOverstay = (item as any).overstayDebt > 0;
@@ -72,7 +72,7 @@ export default function DebtorsListScreen() {
             <Text style={styles.debtAmount}>{item.totalDebt} ₽</Text>
           </View>
           <Text style={styles.carsText}>
-            {item.cars.map(c => c.plateNumber).join(', ') || '—'}
+            {item.cars.map((c: any) => c.plateNumber).join(', ') || '—'}
           </Text>
           <Text style={styles.metaText}>Записей долга: {totalDebtSources}</Text>
         </View>
