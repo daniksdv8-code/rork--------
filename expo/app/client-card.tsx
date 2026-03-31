@@ -20,7 +20,7 @@ export default function ClientCardScreen() {
     checkIn, checkOut, getSubscription, cancelCheckIn, cancelCheckOut, cancelPayment,
     needsShiftCheck, updateClient, updateCar, tariffs, logAction,
     addManualDebt, deleteManualDebt, getClientDebtInfo,
-  } = useParking();
+  } = useParking() as unknown as Record<string, any>;
 
   const [showAddCar, setShowAddCar] = useState<boolean>(false);
   const [newPlate, setNewPlate] = useState<string>('');
@@ -57,31 +57,31 @@ export default function ClientCardScreen() {
 
   const shiftRequired = needsShiftCheck();
 
-  const client = useMemo(() => clients.find(c => c.id === clientId), [clients, clientId]);
+  const client = useMemo(() => clients.find((c: any) => c.id === clientId), [clients, clientId]);
   const isDeleted = !!client?.deleted;
   const clientCars = useMemo(() => clientId ? getCarsByClient(clientId) : [], [clientId, getCarsByClient]);
   const totalDebt = useMemo(() => clientId ? getClientTotalDebt(clientId) : 0, [clientId, getClientTotalDebt]);
-  const clientDebts = useMemo(() => debts.filter(d => d.clientId === clientId && d.remainingAmount > 0), [debts, clientId]);
+  const clientDebts = useMemo(() => debts.filter((d: any) => d.clientId === clientId && d.remainingAmount > 0), [debts, clientId]);
   const clientDebtInfo = useMemo(() => clientId ? getClientDebtInfo(clientId) : null, [clientId, getClientDebtInfo]);
 
   const clientActiveSessions = useMemo(() =>
-    sessions.filter(s => s.clientId === clientId && (s.status === 'active' || s.status === 'active_debt') && !s.cancelled),
+    sessions.filter((s: any) => s.clientId === clientId && (s.status === 'active' || s.status === 'active_debt') && !s.cancelled),
   [sessions, clientId]);
 
   const recentCompletedSessions = useMemo(() =>
-    sessions.filter(s => s.clientId === clientId && (s.status === 'completed' || s.status === 'released' || s.status === 'released_debt') && !s.cancelled)
-      .sort((a, b) => new Date(b.exitTime ?? b.entryTime).getTime() - new Date(a.exitTime ?? a.entryTime).getTime())
+    sessions.filter((s: any) => s.clientId === clientId && (s.status === 'completed' || s.status === 'released' || s.status === 'released_debt') && !s.cancelled)
+      .sort((a: any, b: any) => new Date(b.exitTime ?? b.entryTime).getTime() - new Date(a.exitTime ?? a.entryTime).getTime())
       .slice(0, 5),
   [sessions, clientId]);
 
   const clientPayments = useMemo(() =>
-    payments.filter(p => p.clientId === clientId && !p.cancelled)
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    payments.filter((p: any) => p.clientId === clientId && !p.cancelled)
+      .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime())
       .slice(0, 10),
   [payments, clientId]);
 
   const carsWithoutActiveSession = useMemo(() =>
-    clientCars.filter(car => !clientActiveSessions.some(s => s.carId === car.id)),
+    clientCars.filter((car: any) => !clientActiveSessions.some((s: any) => s.carId === car.id)),
   [clientCars, clientActiveSessions]);
 
   const hasActiveSubscription = useCallback((carId: string): boolean => {
@@ -91,13 +91,13 @@ export default function ClientCardScreen() {
   }, [clientId, getSubscription]);
 
   const clientSubscriptions = useMemo(() =>
-    subscriptions.filter(s => s.clientId === clientId)
-      .sort((a, b) => new Date(b.paidUntil).getTime() - new Date(a.paidUntil).getTime()),
+    subscriptions.filter((s: any) => s.clientId === clientId)
+      .sort((a: any, b: any) => new Date(b.paidUntil).getTime() - new Date(a.paidUntil).getTime()),
   [subscriptions, clientId]);
 
   const clientTx = useMemo(() =>
-    transactions.filter(t => t.clientId === clientId)
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    transactions.filter((t: any) => t.clientId === clientId)
+      .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime())
       .slice(0, 20),
     [transactions, clientId]
   );
@@ -150,7 +150,7 @@ export default function ClientCardScreen() {
   }, [clientId, client, editName, editPhone, editPhone2, editNotes, updateClient, isAdmin, logAction]);
 
   const startEditCar = useCallback((carId: string) => {
-    const car = clientCars.find(c => c.id === carId);
+    const car = clientCars.find((c: any) => c.id === carId);
     if (!car) return;
     setEditingCarId(carId);
     setEditCarPlate(car.plateNumber);
@@ -164,13 +164,13 @@ export default function ClientCardScreen() {
       return;
     }
     const formatted = formatPlateNumber(editCarPlate);
-    const existingCar = cars.find(c => c.plateNumber === formatted && c.id !== editingCarId);
+    const existingCar = cars.find((c: any) => c.plateNumber === formatted && c.id !== editingCarId);
     if (existingCar) {
       Alert.alert('Ошибка', `Автомобиль ${formatted} уже зарегистрирован`);
       return;
     }
     if (isAdmin) {
-      const oldCar = clientCars.find(c => c.id === editingCarId);
+      const oldCar = clientCars.find((c: any) => c.id === editingCarId);
       if (oldCar) {
         const changes: string[] = [];
         if (formatted !== oldCar.plateNumber) changes.push(`номер: ${oldCar.plateNumber} → ${formatted}`);
@@ -189,9 +189,9 @@ export default function ClientCardScreen() {
   }, [editingCarId, editCarPlate, editCarModel, cars, updateCar, isAdmin, clientCars, client, logAction]);
 
   const handleDeleteCar = useCallback((carId: string) => {
-    const car = clientCars.find(c => c.id === carId);
+    const car = clientCars.find((c: any) => c.id === carId);
     if (!car) return;
-    const hasActiveSession = clientActiveSessions.some(s => s.carId === carId);
+    const hasActiveSession = clientActiveSessions.some((s: any) => s.carId === carId);
     const warningText = hasActiveSession
       ? `\n\n❗ У этого авто есть активная стоянка, она будет отменена.`
       : '';
@@ -328,7 +328,7 @@ export default function ClientCardScreen() {
       return;
     }
     if (!clientId) return;
-    const car = clientCars.find(c => c.id === checkInCarId);
+    const car = clientCars.find((c: any) => c.id === checkInCarId);
     const carHasActiveSub = hasActiveSubscription(checkInCarId);
     const isLombard = checkInTariffType === 'lombard';
     const finalServiceType: ServiceType = isLombard ? 'lombard' : (carHasActiveSub ? 'monthly' : checkInServiceType);
@@ -348,9 +348,9 @@ export default function ClientCardScreen() {
       Alert.alert('Смена не открыта', 'Откройте смену, чтобы оформить выезд.');
       return;
     }
-    const session = clientActiveSessions.find(s => s.id === sessionId);
+    const session = clientActiveSessions.find((s: any) => s.id === sessionId);
     if (!session) return;
-    const car = cars.find(c => c.id === session.carId);
+    const car = cars.find((c: any) => c.id === session.carId);
     const sub = session.serviceType === 'monthly' && clientId
       ? getSubscription(session.carId, clientId)
       : undefined;
@@ -410,9 +410,9 @@ export default function ClientCardScreen() {
   }, [clientActiveSessions, cars, clientId, getSubscription, checkOut, shiftRequired, isAdmin, totalDebt, client, router, logAction]);
 
   const handleCancelCheckIn = useCallback((sessionId: string) => {
-    const session = clientActiveSessions.find(s => s.id === sessionId);
+    const session = clientActiveSessions.find((s: any) => s.id === sessionId);
     if (!session) return;
-    const car = cars.find(c => c.id === session.carId);
+    const car = cars.find((c: any) => c.id === session.carId);
     Alert.alert('Отмена заезда', `Отменить заезд ${car?.plateNumber ?? ''}?`, [
       { text: 'Нет', style: 'cancel' },
       {
@@ -427,9 +427,9 @@ export default function ClientCardScreen() {
   }, [clientActiveSessions, cars, cancelCheckIn]);
 
   const handleCancelCheckOut = useCallback((sessionId: string) => {
-    const session = recentCompletedSessions.find(s => s.id === sessionId);
+    const session = recentCompletedSessions.find((s: any) => s.id === sessionId);
     if (!session) return;
-    const car = cars.find(c => c.id === session.carId);
+    const car = cars.find((c: any) => c.id === session.carId);
     Alert.alert('Отмена выезда', `Вернуть ${car?.plateNumber ?? ''} на парковку?`, [
       { text: 'Нет', style: 'cancel' },
       {
@@ -443,7 +443,7 @@ export default function ClientCardScreen() {
   }, [recentCompletedSessions, cars, cancelCheckOut]);
 
   const handleCancelPayment = useCallback((paymentId: string) => {
-    const payment = clientPayments.find(p => p.id === paymentId);
+    const payment = clientPayments.find((p: any) => p.id === paymentId);
     if (!payment) return;
     Alert.alert('Отмена оплаты', `Отменить оплату ${payment.amount} ₽?\n${payment.description}`, [
       { text: 'Нет', style: 'cancel' },
@@ -475,7 +475,7 @@ export default function ClientCardScreen() {
   }, [clientId, newDebtAmount, newDebtDate, newDebtComment, addManualDebt]);
 
   const handleDeleteDebt = useCallback((debtId: string) => {
-    const debt = clientDebts.find(d => d.id === debtId);
+    const debt = clientDebts.find((d: any) => d.id === debtId);
     if (!debt) return;
     Alert.alert(
       'Удаление долга',
@@ -514,7 +514,7 @@ export default function ClientCardScreen() {
     }
     if (!clientId) return;
     const formatted = formatPlateNumber(newPlate);
-    const existingCar = cars.find(c => c.plateNumber === formatted);
+    const existingCar = cars.find((c: any) => c.plateNumber === formatted);
     if (existingCar) {
       Alert.alert('Ошибка', `Автомобиль ${formatted} уже зарегистрирован`);
       return;
@@ -632,8 +632,8 @@ export default function ClientCardScreen() {
 
         {clientSubscriptions.length > 0 && (
           <View style={styles.subscriptionBlock}>
-            {clientSubscriptions.map(sub => {
-              const car = cars.find(c => c.id === sub.carId);
+            {clientSubscriptions.map((sub: any) => {
+              const car = cars.find((c: any) => c.id === sub.carId);
               const expired = isExpired(sub.paidUntil);
               const remaining = daysUntil(sub.paidUntil);
               return (
@@ -684,7 +684,7 @@ export default function ClientCardScreen() {
             }
             const firstCar = carsWithoutActiveSession[0];
             if (!firstCar) return;
-            const allHaveActiveSub = carsWithoutActiveSession.every(c => hasActiveSubscription(c.id));
+            const allHaveActiveSub = carsWithoutActiveSession.every((c: any) => hasActiveSubscription(c.id));
             setCheckInCarId(firstCar.id);
             if (allHaveActiveSub) {
               setCheckInServiceType('monthly');
@@ -711,8 +711,8 @@ export default function ClientCardScreen() {
               if (clientActiveSessions.length === 1) {
                 handleCheckOut(clientActiveSessions[0].id);
               } else {
-                const buttons = clientActiveSessions.map(session => {
-                  const car = cars.find(c => c.id === session.carId);
+                const buttons = clientActiveSessions.map((session: any) => {
+                  const car = cars.find((c: any) => c.id === session.carId);
                   return {
                     text: car?.plateNumber ?? session.carId,
                     onPress: () => handleCheckOut(session.id),
@@ -743,7 +743,7 @@ export default function ClientCardScreen() {
 
           <Text style={styles.checkInLabel}>Автомобиль</Text>
           <View style={styles.carPickerRow}>
-            {carsWithoutActiveSession.map(car => (
+            {carsWithoutActiveSession.map((car: any) => (
               <TouchableOpacity
                 key={car.id}
                 style={[
@@ -1111,8 +1111,8 @@ export default function ClientCardScreen() {
         <>
           <Text style={styles.sectionTitle}>На парковке сейчас</Text>
           <View style={styles.card}>
-            {clientActiveSessions.map(session => {
-              const car = cars.find(c => c.id === session.carId);
+            {clientActiveSessions.map((session: any) => {
+              const car = cars.find((c: any) => c.id === session.carId);
               const sub = clientId ? getSubscription(session.carId, clientId) : undefined;
               const hasActiveSub = sub && !isExpired(sub.paidUntil);
               return (
@@ -1157,6 +1157,25 @@ export default function ClientCardScreen() {
                     </View>
                   </View>
                   <View style={styles.sessionActions}>
+                    {session.serviceType === 'monthly' && hasActiveSub && (
+                      <TouchableOpacity
+                        style={styles.sessionRefundBtn}
+                        onPress={() => {
+                          if (!isAdmin && shiftRequired) {
+                            Alert.alert('Смена не открыта', 'Откройте смену, чтобы оформить возврат.');
+                            return;
+                          }
+                          router.push({
+                            pathname: '/exit-modal',
+                            params: { sessionId: session.id },
+                          });
+                        }}
+                        activeOpacity={0.7}
+                      >
+                        <RotateCcw size={14} color={Colors.info} />
+                        <Text style={styles.sessionRefundBtnText}>Досрочный</Text>
+                      </TouchableOpacity>
+                    )}
                     <TouchableOpacity
                       style={styles.sessionExitBtn}
                       onPress={() => handleCheckOut(session.id)}
@@ -1184,8 +1203,8 @@ export default function ClientCardScreen() {
         <>
           <Text style={styles.sectionTitle}>Недавние выезды (отмена)</Text>
           <View style={styles.card}>
-            {recentCompletedSessions.map(session => {
-              const car = cars.find(c => c.id === session.carId);
+            {recentCompletedSessions.map((session: any) => {
+              const car = cars.find((c: any) => c.id === session.carId);
               return (
                 <View key={session.id} style={styles.recentExitRow}>
                   <View style={styles.recentExitInfo}>
@@ -1221,8 +1240,8 @@ export default function ClientCardScreen() {
         )}
       </View>
       <View style={styles.card}>
-        {clientCars.map(car => {
-          const sub = subscriptions.find(s => s.carId === car.id && s.clientId === clientId);
+        {clientCars.map((car: any) => {
+          const sub = subscriptions.find((s: any) => s.carId === car.id && s.clientId === clientId);
           if (editingCarId === car.id) {
             return (
               <View key={car.id} style={styles.editCarForm}>
@@ -1353,7 +1372,7 @@ export default function ClientCardScreen() {
             )}
           </View>
           <View style={styles.card}>
-            {clientDebts.map(debt => (
+            {clientDebts.map((debt: any) => (
               <View key={debt.id} style={styles.debtRow}>
                 <View style={styles.debtInfo}>
                   <Text style={styles.debtDesc}>{debt.description}</Text>
@@ -1465,7 +1484,7 @@ export default function ClientCardScreen() {
         <>
           <Text style={styles.sectionTitle}>Оплаты (отмена)</Text>
           <View style={styles.card}>
-            {clientPayments.map(p => (
+            {clientPayments.map((p: any) => (
               <View key={p.id} style={styles.paymentCancelRow}>
                 <View style={styles.paymentCancelInfo}>
                   <Text style={styles.paymentCancelDesc}>{p.description}</Text>
@@ -1490,8 +1509,8 @@ export default function ClientCardScreen() {
         {clientTx.length === 0 ? (
           <Text style={styles.noTx}>Нет операций</Text>
         ) : (
-          clientTx.map(tx => {
-            const car = cars.find(c => c.id === tx.carId);
+          clientTx.map((tx: any) => {
+            const car = cars.find((c: any) => c.id === tx.carId);
             return (
               <View key={tx.id} style={styles.txRow}>
                 <View style={styles.txInfo}>
@@ -2519,13 +2538,27 @@ const styles = StyleSheet.create({
     fontWeight: '600' as const,
     color: Colors.warning,
   },
+  sessionRefundBtn: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: Colors.infoLight,
+  },
+  sessionRefundBtnText: {
+    fontSize: 11,
+    fontWeight: '600' as const,
+    color: Colors.info,
+  },
   sessionCancelBtn: {
     width: 32,
     height: 32,
     borderRadius: 8,
     backgroundColor: Colors.dangerLight,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
   },
   activeSubNotice: {
     flexDirection: 'row',

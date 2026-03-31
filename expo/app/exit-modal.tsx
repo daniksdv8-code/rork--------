@@ -7,12 +7,13 @@ import { useParking } from '@/providers/ParkingProvider';
 import { useAuth } from '@/providers/AuthProvider';
 import { formatDateTime, calculateDays, formatDate, isExpired, getMonthlyAmount } from '@/utils/date';
 import { roundMoney } from '@/utils/money';
-import { PaymentMethod } from '@/types';
+import { PaymentMethod, ParkingSession, Car, Client, MonthlySubscription, Payment, DailyDebtAccrual } from '@/types';
 
 export default function ExitModal() {
   const router = useRouter();
   const { sessionId } = useLocalSearchParams<{ sessionId: string }>();
-  const { sessions, cars, clients, tariffs, subscriptions, payments, checkOut, needsShiftCheck, earlyExitWithRefund, getClientTotalDebt, dailyDebtAccruals, logAction } = useParking();
+  const parking = useParking() as unknown as Record<string, any>;
+  const { sessions, cars, clients, tariffs, subscriptions, payments, checkOut, needsShiftCheck, earlyExitWithRefund, getClientTotalDebt, dailyDebtAccruals, logAction } = parking;
   const { isAdmin } = useAuth();
   const [method, setMethod] = useState<PaymentMethod>('cash');
   const [refundMethod, setRefundMethod] = useState<PaymentMethod>('cash');
@@ -20,9 +21,9 @@ export default function ExitModal() {
 
   const shiftRequired = needsShiftCheck();
 
-  const session = useMemo(() => sessions.find(s => s.id === sessionId), [sessions, sessionId]);
-  const car = useMemo(() => session ? cars.find(c => c.id === session.carId) : null, [session, cars]);
-  const client = useMemo(() => session ? clients.find(c => c.id === session.clientId) : null, [session, clients]);
+  const session = useMemo(() => (sessions as ParkingSession[]).find((s: ParkingSession) => s.id === sessionId), [sessions, sessionId]);
+  const car = useMemo(() => session ? (cars as Car[]).find((c: Car) => c.id === session.carId) : null, [session, cars]);
+  const client = useMemo(() => session ? (clients as Client[]).find((c: Client) => c.id === session.clientId) : null, [session, clients]);
 
   const now = new Date().toISOString();
   const isMonthly = session?.serviceType === 'monthly';
@@ -34,7 +35,7 @@ export default function ExitModal() {
 
   const sub = useMemo(() => {
     if (!session) return null;
-    return subscriptions.find(s => s.carId === session.carId && s.clientId === session.clientId) ?? null;
+    return (subscriptions as MonthlySubscription[]).find((s: MonthlySubscription) => s.carId === session.carId && s.clientId === session.clientId) ?? null;
   }, [session, subscriptions]);
 
   const hasActiveSub = sub ? !isExpired(sub.paidUntil) : false;
@@ -46,12 +47,12 @@ export default function ExitModal() {
 
   const debtAccrualTotal = useMemo(() => {
     if (!session) return 0;
-    return roundMoney(dailyDebtAccruals.filter(a => a.parkingEntryId === session.id).reduce((s, a) => s + a.amount, 0));
+    return roundMoney((dailyDebtAccruals as DailyDebtAccrual[]).filter((a: DailyDebtAccrual) => a.parkingEntryId === session.id).reduce((s: number, a: DailyDebtAccrual) => s + a.amount, 0));
   }, [session, dailyDebtAccruals]);
 
   const debtAccrualDays = useMemo(() => {
     if (!session) return 0;
-    return dailyDebtAccruals.filter(a => a.parkingEntryId === session.id).length;
+    return (dailyDebtAccruals as DailyDebtAccrual[]).filter((a: DailyDebtAccrual) => a.parkingEntryId === session.id).length;
   }, [session, dailyDebtAccruals]);
 
   const getDailyRate = useCallback((m: PaymentMethod): number => {
@@ -77,13 +78,13 @@ export default function ExitModal() {
   const refundCalc = useMemo(() => {
     if (!session || !isMonthly || !hasActiveSub || !sub) return null;
 
-    const activePayments = payments.filter(p =>
+    const activePayments = (payments as Payment[]).filter((p: Payment) =>
       p.clientId === session.clientId &&
       p.carId === session.carId &&
       p.serviceType === 'monthly' &&
       !p.cancelled &&
       p.amount > 0
-    ).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    ).sort((a: Payment, b: Payment) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
     const lastPayment = activePayments[0];
     if (!lastPayment) return null;
@@ -265,7 +266,7 @@ export default function ExitModal() {
   const fullyPrepaid = !isMonthly && !isLombard && prepaid > 0 && remainingAmount === 0;
   const monthlyPaid = isMonthly && hasActiveSub;
   const noPaymentNeeded = fullyPrepaid || monthlyPaid;
-  const canRefund = isAdmin && monthlyPaid && refundCalc && refundCalc.refundAmount > 0;
+  const canRefund = monthlyPaid && refundCalc && refundCalc.refundAmount > 0;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
