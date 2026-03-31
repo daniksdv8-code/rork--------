@@ -12,7 +12,7 @@ import {
 import { EMPTY_DATA } from '@/mocks/initialData';
 import { generateId } from '@/utils/id';
 import { roundMoney, normalizeMoneyData, methodLabel, methodLabelShort, isRealMoney } from '@/utils/money';
-import { calculateDays, addMonths, isExpired, isToday, daysUntil, getMonthlyAmount, toDateString } from '@/utils/date';
+import { calculateDays, addMonths, isExpired, isToday, daysUntil, getMonthlyAmount, toDateString, subtract30Days, MONTHLY_PERIOD_DAYS } from '@/utils/date';
 import { formatPlateNumber } from '@/utils/plate';
 import { useAuth } from './AuthProvider';
 import { trpc, vanillaTrpc } from '@/lib/trpc';
@@ -1696,7 +1696,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     const todayDate = new Date();
     todayDate.setHours(0, 0, 0, 0);
     const diffMs = todayDate.getTime() - periodStart.getTime();
-    const daysUsed = Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)) + 1);
+    const daysUsed = Math.min(MONTHLY_PERIOD_DAYS, Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)) + 1));
     const usedAmount = roundMoney(daysUsed * dailyRate);
     const refundAmount = roundMoney(Math.max(0, paidAmount - usedAmount));
 
@@ -1901,10 +1901,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     if (payment.serviceType === 'monthly') {
       setSubscriptions(prev => prev.map(s => {
         if (s.carId === payment.carId && s.clientId === payment.clientId) {
-          const currentPaidUntil = new Date(s.paidUntil);
-          currentPaidUntil.setMonth(currentPaidUntil.getMonth() - 1);
-          const rolledBack = currentPaidUntil.toISOString();
-          console.log(`[CancelPayment] Rolling back subscription paidUntil from ${s.paidUntil} to ${rolledBack}`);
+          const rolledBack = subtract30Days(s.paidUntil);
+          console.log(`[CancelPayment] Rolling back subscription paidUntil from ${s.paidUntil} to ${rolledBack} (−30 days)`);
           return { ...s, paidUntil: rolledBack, updatedAt: now };
         }
         return s;

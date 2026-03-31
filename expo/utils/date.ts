@@ -33,14 +33,17 @@ export function calculateDays(entryTime: string, exitTime?: string): number {
 
 export function addMonths(dateStr: string, months: number): string {
   const d = new Date(dateStr);
-  const targetMonth = d.getMonth() + months;
-  const dayOfMonth = d.getDate();
-  d.setMonth(targetMonth);
-  if (d.getDate() !== dayOfMonth) {
-    d.setDate(0);
-  }
+  d.setDate(d.getDate() + (months * 30));
   return d.toISOString();
 }
+
+export function subtract30Days(dateStr: string, periods: number = 1): string {
+  const d = new Date(dateStr);
+  d.setDate(d.getDate() - (periods * 30));
+  return d.toISOString();
+}
+
+export const MONTHLY_PERIOD_DAYS = 30;
 
 export function isExpired(dateStr: string): boolean {
   return new Date(dateStr) < new Date();
@@ -134,10 +137,8 @@ export function calculateProRataAmount(startDate: Date, endDate: Date, dailyRate
   return Math.round(dailyRate * days);
 }
 
-export function getMonthlyAmount(dailyRate: number, date?: Date): number {
-  const d = date ?? new Date();
-  const totalDays = daysInMonth(d.getFullYear(), d.getMonth());
-  return Math.round(dailyRate * totalDays);
+export function getMonthlyAmount(dailyRate: number, _date?: Date): number {
+  return Math.round(dailyRate * MONTHLY_PERIOD_DAYS);
 }
 
 export function formatPhone(phone: string): string {
