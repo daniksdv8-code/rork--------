@@ -6,8 +6,7 @@ import Colors from '@/constants/colors';
 import { useParking } from '@/providers/ParkingProvider';
 import { formatDate } from '@/utils/date';
 import { roundMoney } from '@/utils/money';
-import { Client, Car } from '@/types';
-import { calculateStoredDebtTotal } from '@/utils/financeCalculations';
+import { Client, Car, Debt, ParkingSession, MonthlySubscription, DailyDebtAccrual } from '@/types';
 
 interface DebtRow {
   id: string;
@@ -30,17 +29,18 @@ export default function DebtsListScreen() {
   const router = useRouter();
   const {
     debts, clients, cars, sessions,
-    dailyDebtAccruals, clientDebts, tariffs,
+    dailyDebtAccruals, tariffs,
+    debtors, activeSessions, subscriptions,
   } = useParking();
   const [search, setSearch] = useState<string>('');
 
   const allDebtRows = useMemo(() => {
     const rows: DebtRow[] = [];
 
-    const activeOldDebts = debts.filter(d => d.remainingAmount > 0);
+    const activeOldDebts = debts.filter((d: Debt) => d.remainingAmount > 0);
     for (const d of activeOldDebts) {
-      const client = clients.find(c => c.id === d.clientId);
-      const car = cars.find(c => c.id === d.carId);
+      const client = clients.find((c: Client) => c.id === d.clientId);
+      const car = cars.find((c: Car) => c.id === d.carId);
       const isPartial = d.totalAmount > d.remainingAmount;
       rows.push({
         id: d.id,
@@ -57,18 +57,18 @@ export default function DebtsListScreen() {
       });
     }
 
-    const activeDebtIds = new Set(activeOldDebts.map(d => d.parkingEntryId).filter(Boolean));
+    const activeDebtIds = new Set(activeOldDebts.map((d: Debt) => d.parkingEntryId).filter(Boolean));
 
-    const debtSessions = sessions.filter(s =>
+    const debtSessions = sessions.filter((s: ParkingSession) =>
       s.status === 'active_debt' && !s.cancelled && !activeDebtIds.has(s.id)
     );
 
     for (const session of debtSessions) {
-      const sessionAccruals = dailyDebtAccruals.filter(a => a.parkingEntryId === session.id);
+      const sessionAccruals = dailyDebtAccruals.filter((a: DailyDebtAccrual) => a.parkingEntryId === session.id);
       if (sessionAccruals.length === 0) continue;
 
-      const client = clients.find(c => c.id === session.clientId);
-      const car = cars.find(c => c.id === session.carId);
+      const client = clients.find((c: Client) => c.id === session.clientId);
+      const car = cars.find((c: Car) => c.id === session.carId);
       const isLombard = session.serviceType === 'lombard';
       let rate: number;
       if (isLombard) {
@@ -101,13 +101,64 @@ export default function DebtsListScreen() {
       });
     }
 
+    for (const debtor of debtors) {
+      if (!debtor.client || (debtor.overstayDebt ?? 0) <= 0) continue;
+      const clientId = debtor.client.id;
+      const clientOverstaySessions = activeSessions.filter((s: ParkingSession) =>
+        s.clientId === clientId &&
+        s.status === 'active' &&
+        !s.cancelled &&
+        s.serviceType !== 'lombard' &&
+        s.tariffType !== 'lombard'
+      );
+      for (const session of clientOverstaySessions) {
+        const existingDebtRow = rows.find(r => r.id === `accrual_${session.id}` || r.id === `overstay_${session.id}`);
+        if (existingDebtRow) continue;
+        const client = clients.find((c: Client) => c.id === clientId);
+        const car = cars.find((c: Car) => c.id === session.carId);
+        const isOnetime = session.serviceType === 'onetime';
+        const isMonthly = session.serviceType === 'monthly';
+        let owingAmount = 0;
+        if (isOnetime) {
+          const msPerDay = 24 * 60 * 60 * 1000;
+          const elapsed = Date.now() - new Date(session.entryTime).getTime();
+          const days = Math.max(1, Math.ceil(elapsed / msPerDay));
+          const rate = tariffs.onetimeCash;
+          const totalOwed = days * rate;
+          const prepaid = session.prepaidAmount ?? 0;
+          owingAmount = Math.max(0, totalOwed - prepaid);
+        } else if (isMonthly) {
+          const sub = subscriptions.find((s: MonthlySubscription) => s.carId === session.carId && s.clientId === clientId);
+          const isExp = sub ? new Date(sub.paidUntil).getTime() < Date.now() : true;
+          if (isExp) {
+            owingAmount = tariffs.monthlyCash * 30;
+          }
+        }
+        if (owingAmount <= 0) continue;
+        rows.push({
+          id: `overstay_${session.id}`,
+          clientId,
+          client,
+          car,
+          plateNumber: car?.plateNumber ?? '—',
+          amount: owingAmount,
+          description: isOnetime ? `Просрочка (разово)` : `Просрочка (месяц)`,
+          date: session.entryTime,
+          source: 'accrual',
+          status: 'Просрочка',
+          isFrozen: false,
+          serviceType: isOnetime ? 'разово' : 'месяц',
+        });
+      }
+    }
+
     rows.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     return rows;
-  }, [debts, clients, cars, sessions, dailyDebtAccruals, tariffs]);
+  }, [debts, clients, cars, sessions, dailyDebtAccruals, tariffs, debtors, activeSessions, subscriptions]);
 
   const totalDebt = useMemo(() => {
-    return calculateStoredDebtTotal(debts, clientDebts).total;
-  }, [debts, clientDebts]);
+    return debtors.reduce((s: number, d: { totalDebt: number }) => s + d.totalDebt, 0);
+  }, [debtors]);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return allDebtRows;

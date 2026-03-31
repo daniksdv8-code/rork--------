@@ -1337,7 +1337,7 @@ export default function ClientCardScreen() {
         )}
       </View>
 
-      {(clientDebts.length > 0 || (clientDebtInfo && clientDebtInfo.totalAmount > 0)) && (
+      {totalDebt > 0 && (
         <>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Задолженности</Text>
