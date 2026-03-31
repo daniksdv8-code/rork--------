@@ -1349,7 +1349,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
       let newDebtId: string | null = null;
       if (afterPay > 0) {
-        const rate = isLombardSession ? (session.lombardRateApplied ?? tariffs.lombardRate) : (session.serviceType === 'monthly' ? tariffs.monthlyCash : tariffs.onetimeCash);
+        const rateForDesc = isLombardSession
+          ? (session.lombardRateApplied ?? tariffs.lombardRate)
+          : (session.serviceType === 'monthly'
+            ? (paymentAtExit.method === 'card' ? tariffs.monthlyCard : tariffs.monthlyCash)
+            : (paymentAtExit.method === 'card' ? tariffs.onetimeCard : tariffs.onetimeCash));
         const debtId = generateId();
         newDebtId = debtId;
         const serviceLabel = isLombardSession ? 'ломбард' : (session.serviceType === 'monthly' ? 'месяц' : 'разово');
@@ -1363,7 +1367,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
           remainingAmount: afterPay,
           createdAt: now,
           updatedAt: now,
-          description: `${isLombardSession ? 'Ломбард' : 'Стоянка'}: ${entryAccruals.length} сут. × ${rate} ₽, оплачено ${paidAmount} ₽, остаток ${afterPay} ₽ (${serviceLabel})${priorPaidNote}`,
+          description: `${isLombardSession ? 'Ломбард' : 'Стоянка'}: ${entryAccruals.length} сут. × ${rateForDesc} ₽, оплачено ${paidAmount} ₽, остаток ${afterPay} ₽ (${serviceLabel})${priorPaidNote}`,
           parkingEntryId: sessionId,
           status: 'active',
         };
