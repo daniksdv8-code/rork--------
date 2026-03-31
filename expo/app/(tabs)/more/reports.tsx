@@ -8,7 +8,7 @@ import Colors from '@/constants/colors';
 import { useParking } from '@/providers/ParkingProvider';
 import { formatDate, formatDateTime } from '@/utils/date';
 import { formatMoney } from '@/utils/money';
-import { CashShift, ParkingSession, Car, Client, Transaction, Expense, CashWithdrawal } from '@/types';
+import { CashShift, ParkingSession, Car as CarType, Client, Transaction, Expense, CashWithdrawal } from '@/types';
 
 const fm = (n: number) => formatMoney(n);
 
@@ -19,12 +19,12 @@ export default function ReportsScreen() {
   const {
     transactions, debtors, expiringSubscriptions, sessions, cars, clients,
     shifts, expenses, withdrawals,
-  } = useParking() as {
+  } = useParking() as unknown as {
     transactions: Transaction[];
-    debtors: Array<{ client?: { id: string; name: string } | null; totalDebt: number; cars: Car[]; debts: any[] }>;
-    expiringSubscriptions: Array<{ subscription: { id: string; paidUntil: string }; client?: Client | null; car?: Car | null; daysLeft: number }>;
+    debtors: Array<{ client?: { id: string; name: string } | null; totalDebt: number; cars: CarType[]; debts: any[] }>;
+    expiringSubscriptions: Array<{ subscription: { id: string; paidUntil: string }; client?: Client | null; car?: CarType | null; daysLeft: number }>;
     sessions: ParkingSession[];
-    cars: Car[];
+    cars: CarType[];
     clients: Client[];
     shifts: CashShift[];
     expenses: Expense[];
