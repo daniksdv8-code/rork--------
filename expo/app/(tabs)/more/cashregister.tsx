@@ -26,7 +26,7 @@ export default function CashRegisterScreen() {
   const {
     shifts, expenses, transactions, withdrawals, cashOperations,
     openShift, closeShift, getActiveShift, getActiveManagerShift, getActiveAdminShift, addExpense, withdrawCash,
-    getShiftCashBalance,
+    getShiftCashBalance, getLastClosedShiftCarryOver,
   } = useParking();
 
   const [tab, setTab] = useState<CashTab>('current');
@@ -72,14 +72,10 @@ export default function CashRegisterScreen() {
       }
     }
     const operatorRole = currentUser.role === 'admin' ? 'admin' as const : 'manager' as const;
-    const closedShifts = shifts
-      .filter(s => s.status === 'closed' && s.closedAt && (s.operatorRole ?? 'manager') === operatorRole)
-      .sort((a, b) => new Date(b.closedAt!).getTime() - new Date(a.closedAt!).getTime());
-    const lastClosed = closedShifts[0] ?? null;
-    const carryOver = lastClosed?.actualCash ?? 0;
+    const carryOver = getLastClosedShiftCarryOver(operatorRole);
     openShift(currentUser.id, currentUser.name, carryOver, operatorRole);
-    console.log(`[CashRegister] ${operatorRole} shift opened`);
-  }, [currentUser, shifts, openShift, getActiveManagerShift]);
+    console.log(`[CashRegister] ${operatorRole} shift opened with carryOver=${carryOver}`);
+  }, [currentUser, openShift, getActiveManagerShift, getLastClosedShiftCarryOver]);
 
   const handleCloseShift = useCallback(async () => {
     if (!activeShift) return;

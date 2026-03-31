@@ -4371,6 +4371,37 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     return _calcCashBalance(adminCashState);
   }, [adminCashState]);
 
+  const getLastClosedShiftCarryOver = useCallback((role: 'admin' | 'manager'): number => {
+    const closedShifts = shifts
+      .filter(s => s.status === 'closed' && s.closedAt && (s.operatorRole ?? 'manager') === role)
+      .sort((a, b) => new Date(b.closedAt!).getTime() - new Date(a.closedAt!).getTime());
+    const lastClosed = closedShifts[0] ?? null;
+    if (!lastClosed) return 0;
+
+    const closedActualCash = lastClosed.actualCash;
+    const calculatedBalance = calculateShiftCashBalance(lastClosed, { transactions, expenses, withdrawals });
+    let carryOver = (closedActualCash != null && closedActualCash > 0)
+      ? closedActualCash
+      : Math.max(0, calculatedBalance);
+
+    if (lastClosed.closedAt) {
+      const closedAtTime = new Date(lastClosed.closedAt).getTime();
+      const betweenShiftWithdrawals = withdrawals.filter(w =>
+        !w.shiftId && new Date(w.date).getTime() > closedAtTime
+      ).reduce((s, w) => s + w.amount, 0);
+      const betweenShiftExpenses = expenses.filter(e =>
+        !e.shiftId && new Date(e.date).getTime() > closedAtTime
+      ).reduce((s, e) => s + e.amount, 0);
+      if (betweenShiftWithdrawals > 0 || betweenShiftExpenses > 0) {
+        carryOver = roundMoney(Math.max(0, carryOver - betweenShiftWithdrawals - betweenShiftExpenses));
+        console.log(`[CarryOver] Adjusted for between-shift ops: withdrawals=${betweenShiftWithdrawals}, expenses=${betweenShiftExpenses}, final=${carryOver}`);
+      }
+    }
+
+    console.log(`[CarryOver] role=${role}, actualCash=${closedActualCash}, calculated=${calculatedBalance}, final=${carryOver}`);
+    return carryOver;
+  }, [shifts, transactions, expenses, withdrawals]);
+
   const issueSalaryAdvance = useCallback((employeeId: string, employeeName: string, amount: number, comment: string, forceNegative?: boolean, method?: PaymentMethod, source?: 'admin' | 'manager_shift'): { success: boolean; error?: string; wouldGoNegative?: boolean; currentBalance?: number } => {
     if (currentUser?.role !== 'admin') {
       console.log(`[SalaryAdvance] BLOCKED: user ${currentUser?.name} (role=${currentUser?.role}) attempted salary advance`);
@@ -4916,6 +4947,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     getEmployeeSalaryDebt,
     employeeSalaryDebts,
     getAdminFinanceBalance,
+    getLastClosedShiftCarryOver,
     runDiagnostic,
     getAnomalyStats,
     getCleanupChecklist,
@@ -4949,7 +4981,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     addManualDebt, deleteManualDebt,
     calculateDebtByMethod, deleteCashOperation, materializeOverstayDebts,
     salaryAdvances, salaryPayments, issueSalaryAdvance, paySalary, getEmployeeSalaryDebt, employeeSalaryDebts,
-    getAdminFinanceBalance,
+    getAdminFinanceBalance, getLastClosedShiftCarryOver,
     runDiagnostic, getAnomalyStats,
     getCleanupChecklist, saveCleanupChecklist, completeCleanup, getTodayCleaningShift,
     getCleanupTemplate, updateCleanupTemplate, cleanupChecklistTemplate,
