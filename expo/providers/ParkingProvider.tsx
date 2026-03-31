@@ -916,6 +916,15 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     return calculateShiftCashBalance(shift, { transactions, expenses, withdrawals });
   }, [transactions, expenses, withdrawals]);
 
+  const getShiftCashBalanceFresh = useCallback((shift: CashShift): number => {
+    const d = latestDataRef.current;
+    return calculateShiftCashBalance(shift, {
+      transactions: d.transactions,
+      expenses: (d as any).expenses ?? [],
+      withdrawals: (d as any).withdrawals ?? [],
+    });
+  }, []);
+
   const addCashOperation = useCallback((params: {
     type: CashOperation['type'];
     amount: number;
@@ -1072,7 +1081,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         addAdminCardIncome(paymentAtEntry.amount, `Безнал при постановке: ${paymentAtEntry.amount} ₽ (${serviceType === 'monthly' ? 'месяц' : 'разово'})`);
       }
 
-      const entryBalanceBefore = activeShift ? getShiftCashBalance(activeShift) : 0;
+      const entryBalanceBefore = activeShift ? getShiftCashBalanceFresh(activeShift) : 0;
       addCashOperation({
         type: 'income',
         amount: paymentAtEntry.amount,
@@ -1203,7 +1212,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     schedulePush();
     console.log(`[CheckIn] Session created for car ${carId}, status=${sessionStatus}, planned departure: ${plannedDepartureTime ?? 'not set'}`);
     return session;
-  }, [addTransaction, schedulePush, currentUser, shifts, cars, clients, logAction, updateShiftExpected, subscriptions, tariffs, updateClientDebt, addCashOperation, getShiftCashBalance, addAdminCardIncome]);
+  }, [addTransaction, schedulePush, currentUser, shifts, cars, clients, logAction, updateShiftExpected, subscriptions, tariffs, updateClientDebt, addCashOperation, getShiftCashBalanceFresh, addAdminCardIncome]);
 
   const checkOut = useCallback((sessionId: string, paymentAtExit?: { method: PaymentMethod; amount: number }, releaseInDebt?: boolean): { debtId: string | null; amount: number; days: number; paid: number } => {
     const session = sessions.find(s => s.id === sessionId);
@@ -1322,7 +1331,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
           addAdminCardIncome(paidAmount, `Безнал при выезде (долг): ${paidAmount} ₽`);
         }
 
-        const debtExitBalBefore = activeShift ? getShiftCashBalance(activeShift) : 0;
+        const debtExitBalBefore = activeShift ? getShiftCashBalanceFresh(activeShift) : 0;
         addCashOperation({
           type: 'income',
           amount: paidAmount,
@@ -1438,7 +1447,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
           addAdminCardIncome(paidAmount, `Безнал при выезде (разово): ${paidAmount} ₽`);
         }
 
-        const onetimeExitBalBefore = activeShift ? getShiftCashBalance(activeShift) : 0;
+        const onetimeExitBalBefore = activeShift ? getShiftCashBalanceFresh(activeShift) : 0;
         addCashOperation({
           type: 'income',
           amount: paidAmount,
@@ -1590,7 +1599,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
             addAdminCardIncome(paymentAtExit.amount, `Безнал при выезде (месяц): ${paymentAtExit.amount} ₽`);
           }
 
-          const monthlyExitBalBefore = activeShift ? getShiftCashBalance(activeShift) : 0;
+          const monthlyExitBalBefore = activeShift ? getShiftCashBalanceFresh(activeShift) : 0;
           addCashOperation({
             type: 'income',
             amount: paymentAtExit.amount,
@@ -1663,7 +1672,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       console.log('[CheckOut] Monthly exit, subscription active');
       return { debtId: null, amount: 0, days: 0, paid: 0 };
     }
-  }, [sessions, tariffs, subscriptions, addTransaction, schedulePush, cars, logAction, currentUser, shifts, updateShiftExpected, dailyDebtAccruals, updateClientDebt, addCashOperation, getShiftCashBalance, clientDebts, debts, addAdminCardIncome]);
+  }, [sessions, tariffs, subscriptions, addTransaction, schedulePush, cars, logAction, currentUser, shifts, updateShiftExpected, dailyDebtAccruals, updateClientDebt, addCashOperation, getShiftCashBalanceFresh, clientDebts, debts, addAdminCardIncome]);
 
   const earlyExitWithRefund = useCallback((sessionId: string, refundMethod: PaymentMethod): { refundAmount: number; daysUsed: number; dailyRate: number; paidAmount: number } => {
     const session = sessions.find(s => s.id === sessionId);
@@ -1747,7 +1756,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         addAdminCardIncome(-refundAmount, `Возврат безнала: ${refundAmount} ₽ (досрочный выезд)`);
       }
 
-      const refundBalBefore = activeShift ? getShiftCashBalance(activeShift) : 0;
+      const refundBalBefore = activeShift ? getShiftCashBalanceFresh(activeShift) : 0;
       addCashOperation({
         type: 'refund',
         amount: refundAmount,
@@ -1771,7 +1780,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     schedulePush();
     console.log(`[EarlyExit] Refund: ${refundAmount} ₽, days used: ${daysUsed}, original paid: ${paidAmount}, adjusted to: ${usedAmount}, daily: ${dailyRate}`);
     return { refundAmount, daysUsed, dailyRate, paidAmount };
-  }, [sessions, subscriptions, payments, tariffs, shifts, cars, addTransaction, schedulePush, logAction, updateShiftExpected, addCashOperation, getShiftCashBalance, addAdminCardIncome]);
+  }, [sessions, subscriptions, payments, tariffs, shifts, cars, addTransaction, schedulePush, logAction, updateShiftExpected, addCashOperation, getShiftCashBalanceFresh, addAdminCardIncome]);
 
   const cancelCheckIn = useCallback((sessionId: string) => {
     const session = sessions.find(s => s.id === sessionId && (s.status === 'active' || s.status === 'active_debt'));
@@ -1931,7 +1940,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     }
 
     const cancelShift = shifts.find(s => s.status === 'open');
-    const cancelBalBefore = cancelShift ? getShiftCashBalance(cancelShift) : 0;
+    const cancelBalBefore = cancelShift ? getShiftCashBalanceFresh(cancelShift) : 0;
     addCashOperation({
       type: 'refund',
       amount: payment.amount,
@@ -1946,7 +1955,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     logAction('cancel_payment', 'Отмена оплаты', `${payment.amount} ₽, ${payment.description}`, paymentId, 'payment');
     schedulePush();
     console.log(`[Cancel] Payment cancelled: ${paymentId}, amount: ${payment.amount}`);
-  }, [payments, currentUser, addTransaction, schedulePush, shifts, updateShiftExpected, logAction, addCashOperation, getShiftCashBalance, addAdminCardIncome]);
+  }, [payments, currentUser, addTransaction, schedulePush, shifts, updateShiftExpected, logAction, addCashOperation, getShiftCashBalanceFresh, addAdminCardIncome]);
 
   const payMonthly = useCallback((clientId: string, carId: string, method: PaymentMethod, months: number = 1, customAmount?: number, paidUntilDate?: string) => {
     cashOpsDirtyUntilRef.current = Date.now() + COLLECTION_DIRTY_MS;
@@ -2012,7 +2021,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       addAdminCardIncome(amount, `Безнал (оплата месяца): ${amount} ₽`);
     }
 
-    const pmBalBefore = activeShift ? getShiftCashBalance(activeShift) : 0;
+    const pmBalBefore = activeShift ? getShiftCashBalanceFresh(activeShift) : 0;
     addCashOperation({
       type: 'income',
       amount,
@@ -2028,7 +2037,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     const pmClient = clients.find(c => c.id === clientId);
     logAction('payment', 'Оплата месяца', `${pmClient?.name ?? clientId}, ${pmCar?.plateNumber ?? carId}, ${amount} ₽ (${methodLabelShort(method)})`, newPayment.id, 'payment');
     schedulePush();
-  }, [tariffs, currentUser, addTransaction, schedulePush, shifts, updateShiftExpected, cars, clients, logAction, addCashOperation, getShiftCashBalance, addAdminCardIncome]);
+  }, [tariffs, currentUser, addTransaction, schedulePush, shifts, updateShiftExpected, cars, clients, logAction, addCashOperation, getShiftCashBalanceFresh, addAdminCardIncome]);
 
   const payDebt = useCallback((debtId: string, amount: number, method: PaymentMethod) => {
     amount = roundMoney(amount);
@@ -2114,7 +2123,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       addAdminCardIncome(actualAmount, `Безнал (погашение долга): ${actualAmount} ₽`);
     }
 
-    const debtBalBefore = debtActiveShift ? getShiftCashBalance(debtActiveShift) : 0;
+    const debtBalBefore = debtActiveShift ? getShiftCashBalanceFresh(debtActiveShift) : 0;
     addCashOperation({
       type: 'debt_payment_income',
       amount: actualAmount,
@@ -2128,7 +2137,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
     logAction('debt_payment', 'Погашение долга', `${actualAmount} ₽ (${methodLabelShort(method)}), остаток: ${newRemaining > 0 ? newRemaining + ' ₽' : 'полностью'}`, debtId, 'debt');
     schedulePush();
-  }, [debts, clientDebts, currentUser, addTransaction, schedulePush, shifts, updateShiftExpected, logAction, addCashOperation, getShiftCashBalance, addAdminCardIncome]);
+  }, [debts, clientDebts, currentUser, addTransaction, schedulePush, shifts, updateShiftExpected, logAction, addCashOperation, getShiftCashBalanceFresh, addAdminCardIncome]);
 
   const activeSessions = useMemo(() =>
     sessions.filter(s => (s.status === 'active' || s.status === 'active_debt') && !s.cancelled && !isClientDeleted(s.clientId)),
@@ -2345,7 +2354,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       addAdminCardIncome(actualAmount, `Безнал (погашение долга клиента): ${actualAmount} ₽`);
     }
 
-    const cdBalBefore = cdActiveShift ? getShiftCashBalance(cdActiveShift) : 0;
+    const cdBalBefore = cdActiveShift ? getShiftCashBalanceFresh(cdActiveShift) : 0;
     addCashOperation({
       type: 'debt_payment_income',
       amount: actualAmount,
@@ -2360,7 +2369,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     logAction('debt_payment', 'Погашение долга клиента', `${actualAmount} ₽ (${methodLabelShort(method)}), остаток: ${newRemainingTotal > 0 ? newRemainingTotal + ' ₽' : 'полностью'}`, clientId, 'client_debt');
     schedulePush();
     console.log(`[PayClientDebt] FIFO paid ${actualAmount} for client ${clientId}, old debts: ${allocatedToOldDebts}, clientDebt: ${allocatedToClientDebt}, remaining: ${newRemainingTotal}`);
-  }, [debts, clientDebts, currentUser, shifts, addTransaction, updateShiftExpected, logAction, schedulePush, addCashOperation, getShiftCashBalance, cars, overstayedSessionDebts, materializeOverstayDebts, addAdminCardIncome]);
+  }, [debts, clientDebts, currentUser, shifts, addTransaction, updateShiftExpected, logAction, schedulePush, addCashOperation, getShiftCashBalanceFresh, cars, overstayedSessionDebts, materializeOverstayDebts, addAdminCardIncome]);
 
   const getUnshiftedCashBalance = useCallback((): number => {
     const todayStart = new Date();
@@ -2406,6 +2415,45 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     console.log(`[UnshiftedBalance] cashIn=${cashIncome}, cancelled=${cashCancelled}, refunded=${cashRefunded}, withdrawals=${todayWithdrawals}, expenses=${todayExpenses}, salAdvCash=${todaySalaryAdvanceCash}, salPayCash=${todaySalaryPayCash}`);
     return roundMoney(cashIncome - cashCancelled - cashRefunded - todayWithdrawals - todayExpenses - todaySalaryAdvanceCash - todaySalaryPayCash);
   }, [transactions, withdrawals, expenses, salaryAdvances, salaryPayments, shifts]);
+
+  const getUnshiftedCashBalanceFresh = useCallback((): number => {
+    const d = latestDataRef.current;
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayStartTime = todayStart.getTime();
+    const openShiftIds = new Set(((d as any).shifts ?? shifts).filter((s: CashShift) => s.status === 'open').map((s: CashShift) => s.id));
+    const todayTx = d.transactions.filter(t => {
+      if (new Date(t.date).getTime() < todayStartTime) return false;
+      if (t.shiftId && openShiftIds.has(t.shiftId)) return false;
+      return true;
+    });
+    const cashIncome = todayTx.filter(t =>
+      (t.type === 'payment' || t.type === 'debt_payment') && t.method === 'cash' && t.amount > 0
+    ).reduce((s, t) => s + t.amount, 0);
+    const cashCancelled = todayTx.filter(t =>
+      t.type === 'cancel_payment' && t.method === 'cash'
+    ).reduce((s, t) => s + t.amount, 0);
+    const cashRefunded = todayTx.filter(t =>
+      t.type === 'refund' && t.method === 'cash'
+    ).reduce((s, t) => s + t.amount, 0);
+    const freshWithdrawals = (d as any).withdrawals ?? [];
+    const todayWithdrawals = freshWithdrawals.filter((w: any) =>
+      new Date(w.date).getTime() >= todayStartTime && (!w.shiftId || !openShiftIds.has(w.shiftId))
+    ).reduce((s: number, w: any) => s + w.amount, 0);
+    const freshExpenses = (d as any).expenses ?? [];
+    const todayExpenses = freshExpenses.filter((e: any) =>
+      new Date(e.date).getTime() >= todayStartTime && (!e.shiftId || !openShiftIds.has(e.shiftId))
+    ).reduce((s: number, e: any) => s + e.amount, 0);
+    const freshSalaryAdvances = (d as any).salaryAdvances ?? [];
+    const todaySalaryAdvanceCash = freshSalaryAdvances.filter((a: any) =>
+      new Date(a.issuedAt).getTime() >= todayStartTime && (!a.method || a.method === 'cash') && a.source === 'manager_shift'
+    ).reduce((s: number, a: any) => s + a.amount, 0);
+    const freshSalaryPayments = (d as any).salaryPayments ?? [];
+    const todaySalaryPayCash = freshSalaryPayments.filter((p: any) =>
+      new Date(p.paidAt).getTime() >= todayStartTime && p.method === 'cash' && p.netPaid > 0 && p.source === 'manager_shift'
+    ).reduce((s: number, p: any) => s + p.netPaid, 0);
+    return roundMoney(cashIncome - cashCancelled - cashRefunded - todayWithdrawals - todayExpenses - todaySalaryAdvanceCash - todaySalaryPayCash);
+  }, [shifts]);
 
   const getCashBalance = useCallback((): number => {
     const isUserAdmin = currentUser?.role === 'admin';
@@ -2454,16 +2502,16 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     let balanceBefore: number;
     if (isUserAdmin) {
       if (activeShift) {
-        const shiftBal = getShiftCashBalance(activeShift);
-        const unshifted = getUnshiftedCashBalance();
+        const shiftBal = getShiftCashBalanceFresh(activeShift);
+        const unshifted = getUnshiftedCashBalanceFresh();
         balanceBefore = roundMoney(shiftBal + (unshifted > 0 ? unshifted : 0));
         console.log(`[Withdrawal] Admin balance: shiftBal=${shiftBal}, unshifted=${unshifted}, combined=${balanceBefore}`);
       } else {
-        balanceBefore = getUnshiftedCashBalance();
+        balanceBefore = getUnshiftedCashBalanceFresh();
         console.log(`[Withdrawal] Admin no shift, unshifted balance: ${balanceBefore}`);
       }
     } else {
-      balanceBefore = activeShift ? getShiftCashBalance(activeShift) : 0;
+      balanceBefore = activeShift ? getShiftCashBalanceFresh(activeShift) : 0;
       console.log(`[Withdrawal] Manager balance: ${balanceBefore}`);
     }
     const balanceAfter = roundMoney(balanceBefore - amount);
@@ -2539,7 +2587,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     schedulePush();
     console.log(`[Withdrawal] ${amount} ₽ withdrawn by ${currentUser?.name}, balance: ${balanceBefore} → ${balanceAfter}${balanceAfter < 0 ? ' [NEGATIVE ALLOWED]' : ''}`);
     return { success: true, withdrawal };
-  }, [shifts, currentUser, schedulePush, updateShiftExpected, addTransaction, addCashOperation, getShiftCashBalance, getUnshiftedCashBalance, logAction, getActiveManagerShift]);
+  }, [shifts, currentUser, schedulePush, updateShiftExpected, addTransaction, addCashOperation, getShiftCashBalanceFresh, getUnshiftedCashBalanceFresh, logAction, getActiveManagerShift]);
 
   const addManualDebt = useCallback((clientId: string, amount: number, date: string, comment: string) => {
     amount = roundMoney(amount);
@@ -2661,7 +2709,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     }
 
     if (op.relatedEntityId && op.relatedEntityType === 'expense') {
-      setExpenses(prev => prev.filter(e => e.id !== op.relatedEntityId));
+      setExpenses(prev => {
+        const next = prev.filter(e => e.id !== op.relatedEntityId);
+        latestDataRef.current = { ...latestDataRef.current, expenses: next } as any;
+        return next;
+      });
     }
     if (op.relatedEntityId && op.relatedEntityType === 'withdrawal') {
       setWithdrawals(prev => {
@@ -2754,7 +2806,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         if (method === 'card') {
           addAdminCardIncome(advanceAmount, `Безнал (аванс после долга): ${advanceAmount} ₽`);
         }
-        const advBal = advShift ? getShiftCashBalance(advShift) : 0;
+        const advBal = advShift ? getShiftCashBalanceFresh(advShift) : 0;
         addCashOperation({
           type: 'income',
           amount: advanceAmount,
@@ -2775,7 +2827,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     logAction('debt_payment', 'Платёж с приоритетом долга', debtPayLabel, clientId, 'client');
     console.log(`[PayWithDebtPriority] Client ${clientId}: total=${totalPayment}, debtPaid=${debtToPay}, advance=${advanceAmount}, remainingDebt=${newRemainingDebt}`);
     return { debtPaid: debtToPay, advancePaid: advanceAmount, remainingDebt: newRemainingDebt };
-  }, [getClientTotalDebt, payMonthly, payClientDebt, logAction, shifts, currentUser, addTransaction, updateShiftExpected, addCashOperation, getShiftCashBalance, schedulePush, addAdminCardIncome]);
+  }, [getClientTotalDebt, payMonthly, payClientDebt, logAction, shifts, currentUser, addTransaction, updateShiftExpected, addCashOperation, getShiftCashBalanceFresh, schedulePush, addAdminCardIncome]);
 
   const releaseWithDebtWarning = useCallback((sessionId: string): { hasDebt: boolean; clientDebt: number; clientName: string; sessionCarPlate: string } => {
     const session = sessions.find(s => s.id === sessionId);
@@ -3022,7 +3074,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       cashOpsDirtyUntilRef.current = Date.now() + COLLECTION_DIRTY_MS;
       console.log(`[Expense] Marked cashOps dirty for ${COLLECTION_DIRTY_MS}ms`);
       const now = new Date().toISOString();
-      const balanceBefore = targetShift ? getShiftCashBalance(targetShift) : (isUserAdmin ? getUnshiftedCashBalance() : 0);
+      const balanceBefore = targetShift ? getShiftCashBalanceFresh(targetShift) : (isUserAdmin ? getUnshiftedCashBalanceFresh() : 0);
 
       if (!isUserAdmin && targetShift && balanceBefore < amount) {
         console.log(`[Expense] Insufficient funds: balance=${balanceBefore}, expense=${amount}`);
@@ -3047,7 +3099,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         shiftId: targetShift?.id ?? null,
         method: 'cash',
       };
-      setExpenses(prev => [expense, ...prev]);
+      setExpenses(prev => {
+        const next = [expense, ...prev];
+        latestDataRef.current = { ...latestDataRef.current, expenses: next } as any;
+        return next;
+      });
       console.log(`[Expense] Created expense record: ${expense.id}, shiftId=${expense.shiftId}`);
 
       if (targetShift) {
@@ -3091,7 +3147,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       console.log('[Expense] CRITICAL ERROR in addExpense:', err);
       return { success: false, error: `Системная ошибка: ${err instanceof Error ? err.message : String(err)}` };
     }
-  }, [shifts, currentUser, schedulePush, logAction, addTransaction, addCashOperation, getShiftCashBalance]);
+  }, [shifts, currentUser, schedulePush, logAction, addTransaction, addCashOperation, getShiftCashBalanceFresh, getUnshiftedCashBalanceFresh]);
 
   const addAdminExpense = useCallback((amount: number, category: string, description: string, method: PaymentMethod): AdminExpense => {
     const now = new Date().toISOString();
@@ -4425,7 +4481,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         return { success: false, error: 'Нет открытой смены менеджера для списания' };
       }
       shiftIdForOp = managerShift.id;
-      balanceBefore = getShiftCashBalance(managerShift);
+      balanceBefore = getShiftCashBalanceFresh(managerShift);
       balanceAfter = roundMoney(balanceBefore - amount);
       sourceLabel = `касса менеджера (${managerShift.operatorName})`;
 
@@ -4477,7 +4533,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         shiftId: shiftIdForOp,
         method: 'cash',
       };
-      setExpenses(prev => [expenseEntry, ...prev]);
+      setExpenses(prev => {
+        const next = [expenseEntry, ...prev];
+        latestDataRef.current = { ...latestDataRef.current, expenses: next } as any;
+        return next;
+      });
 
       addTransaction({
         clientId: '',
@@ -4531,7 +4591,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     schedulePush();
     console.log(`[SalaryAdvance] Issued ${amount} to ${employeeName} from ${sourceLabel}, method=${effectiveMethod}, id=${advance.id}, balance: ${balanceBefore} → ${balanceAfter}`);
     return { success: true };
-  }, [currentUser, getAdminFinanceBalance, getShiftCashBalance, shifts, updateShiftExpected, addTransaction, addCashOperation, logAction, schedulePush]);
+  }, [currentUser, getAdminFinanceBalance, getShiftCashBalanceFresh, shifts, updateShiftExpected, addTransaction, addCashOperation, logAction, schedulePush]);
 
   const paySalary = useCallback((employeeId: string, employeeName: string, grossAmount: number, method: PaymentMethod, comment: string, forceNegative?: boolean, source?: 'admin' | 'manager_shift'): { success: boolean; error?: string; wouldGoNegative?: boolean; currentBalance?: number; netPaid?: number } => {
     if (currentUser?.role !== 'admin') {
@@ -4618,7 +4678,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         if (managerShift) {
           updateShiftExpected(managerShift.id, -netPaid);
         }
-        const balanceBefore = managerShift ? getShiftCashBalance(managerShift) : 0;
+        const balanceBefore = managerShift ? getShiftCashBalanceFresh(managerShift) : 0;
         const balanceAfter = roundMoney(balanceBefore - netPaid);
 
         const expenseEntry: Expense = {
@@ -4632,7 +4692,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
           shiftId: shiftIdForOp,
           method: 'cash',
         };
-        setExpenses(prev => [expenseEntry, ...prev]);
+        setExpenses(prev => {
+          const next = [expenseEntry, ...prev];
+          latestDataRef.current = { ...latestDataRef.current, expenses: next } as any;
+          return next;
+        });
 
         addTransaction({
           clientId: '',
@@ -4715,7 +4779,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       const zeroPayBalSource = effectiveSource === 'manager_shift'
         ? (() => {
             const ms = shifts.find(s => s.id === shiftIdForOp);
-            return ms ? getShiftCashBalance(ms) : 0;
+            return ms ? getShiftCashBalanceFresh(ms) : 0;
           })()
         : (() => {
             const afb = getAdminFinanceBalance();
@@ -4747,7 +4811,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     schedulePush();
     console.log(`[SalaryPayment] ${employeeName}: gross=${grossAmount}, debtDeducted=${debtDeducted}, netPaid=${netPaid}, source=${sourceLabel}`);
     return { success: true, netPaid };
-  }, [currentUser, salaryAdvances, getAdminFinanceBalance, getShiftCashBalance, shifts, updateShiftExpected, addTransaction, addCashOperation, logAction, schedulePush]);
+  }, [currentUser, salaryAdvances, getAdminFinanceBalance, getShiftCashBalanceFresh, shifts, updateShiftExpected, addTransaction, addCashOperation, logAction, schedulePush]);
 
   const getEmployeeSalaryDebt = useCallback((employeeId: string): number => {
     return roundMoney(salaryAdvances.filter(a => a.employeeId === employeeId && a.remainingAmount > 0).reduce((s, a) => s + a.remainingAmount, 0));
