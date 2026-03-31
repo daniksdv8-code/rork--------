@@ -2743,9 +2743,19 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     return activeDebts.filter(d => d.clientId === clientId);
   }, [activeDebts]);
 
-  const debtState: ClientDebtState = useMemo(() => ({
-    debts, clientDebts, sessions, subscriptions, tariffs, dailyDebtAccruals,
-  }), [debts, clientDebts, sessions, subscriptions, tariffs, dailyDebtAccruals]);
+  const debtState: ClientDebtState = useMemo(() => {
+    const activeDebtsList = debts.filter(d => !isClientDeleted(d.clientId));
+    const activeClientDebtsList = clientDebts.filter(cd => !isClientDeleted(cd.clientId));
+    const activeSessionsList = sessions.filter(s => !isClientDeleted(s.clientId));
+    return {
+      debts: activeDebtsList,
+      clientDebts: activeClientDebtsList,
+      sessions: activeSessionsList,
+      subscriptions,
+      tariffs,
+      dailyDebtAccruals,
+    };
+  }, [debts, clientDebts, sessions, subscriptions, tariffs, dailyDebtAccruals, isClientDeleted]);
 
   const getClientTotalDebt = useCallback((clientId: string): number => {
     return _calcClientDebt(debtState, clientId, activeSessions, overstayedSessionDebts);
