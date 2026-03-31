@@ -84,7 +84,7 @@ export default function DebtsListScreen() {
       }
 
       const days = sessionAccruals.length;
-      const amount = roundMoney(days * rate);
+      const amount = roundMoney(sessionAccruals.reduce((s: number, a: DailyDebtAccrual) => s + a.amount, 0));
       const serviceLabel = isLombard ? 'ломбард' : session.serviceType === 'monthly' ? 'месяц' : 'разово';
 
       rows.push({
@@ -135,7 +135,17 @@ export default function DebtsListScreen() {
           const sub = subscriptions.find((s: MonthlySubscription) => s.carId === session.carId && s.clientId === clientId);
           const isExp = sub ? new Date(sub.paidUntil).getTime() < Date.now() : true;
           if (isExp) {
-            owingAmount = tariffs.monthlyCash * 30;
+            const overstayAccruals = dailyDebtAccruals.filter((a: DailyDebtAccrual) => a.parkingEntryId === session.id);
+            if (overstayAccruals.length > 0) {
+              owingAmount = roundMoney(overstayAccruals.reduce((s: number, a: DailyDebtAccrual) => s + a.amount, 0));
+            } else {
+              const msPerDay = 24 * 60 * 60 * 1000;
+              const paidUntil = sub ? new Date(sub.paidUntil).getTime() : new Date(session.entryTime).getTime();
+              const overstayMs = Math.max(0, Date.now() - paidUntil);
+              const overstayDays = Math.max(1, Math.ceil(overstayMs / msPerDay));
+              const dailyRate = tariffs.monthlyCash / 30;
+              owingAmount = roundMoney(overstayDays * dailyRate);
+            }
           }
         }
         if (owingAmount <= 0) continue;
