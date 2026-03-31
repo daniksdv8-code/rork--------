@@ -12,7 +12,7 @@ import {
 import { EMPTY_DATA } from '@/mocks/initialData';
 import { generateId } from '@/utils/id';
 import { roundMoney, normalizeMoneyData, methodLabel, methodLabelShort, isRealMoney } from '@/utils/money';
-import { calculateDays, addMonths, isExpired, isToday, daysUntil, getMonthlyAmount } from '@/utils/date';
+import { calculateDays, addMonths, isExpired, isToday, daysUntil, getMonthlyAmount, toDateString } from '@/utils/date';
 import { formatPlateNumber } from '@/utils/plate';
 import { useAuth } from './AuthProvider';
 import { trpc, vanillaTrpc } from '@/lib/trpc';
@@ -732,7 +732,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
   const runDebtAccrual = useCallback(() => {
     const now = new Date();
-    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const todayStr = toDateString(now);
     const currentSessions = latestDataRef.current.sessions;
     const currentAccruals = latestDataRef.current.dailyDebtAccruals;
     const currentTariffs = latestDataRef.current.tariffs;
@@ -746,6 +746,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       return;
     }
 
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const MAX_ACCRUAL_DAYS = 90;
     let newAccruals: DailyDebtAccrual[] = [];
     let clientDeltas: Record<string, number> = {};
 
@@ -760,21 +762,22 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         dailyRate = currentTariffs.onetimeCash;
       }
 
-      const entryDate = new Date(session.entryTime);
-      entryDate.setHours(0, 0, 0, 0);
-      const maxBackfillDate = new Date(now);
-      maxBackfillDate.setDate(maxBackfillDate.getDate() - 90);
-      const startDate = entryDate > maxBackfillDate ? entryDate : maxBackfillDate;
-      const checkDate = new Date(startDate);
-      const todayEnd = new Date(now);
-      todayEnd.setHours(23, 59, 59, 999);
+      const entryTimeMs = new Date(session.entryTime).getTime();
+      const nowMs = now.getTime();
+      const diffMs = nowMs - entryTimeMs;
+      const elapsedDays = Math.min(MAX_ACCRUAL_DAYS, Math.max(1, Math.ceil(diffMs / DAY_MS)));
 
-      while (checkDate <= todayEnd) {
-        const dayStr = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, '0')}-${String(checkDate.getDate()).padStart(2, '0')}`;
-        const alreadyAccrued = currentAccruals.some(
-          a => a.parkingEntryId === session.id && a.accrualDate === dayStr
-        ) || newAccruals.some(a => a.parkingEntryId === session.id && a.accrualDate === dayStr);
-        if (!alreadyAccrued) {
+      const existingAccrualCount = currentAccruals.filter(
+        a => a.parkingEntryId === session.id
+      ).length + newAccruals.filter(a => a.parkingEntryId === session.id).length;
+
+      const extraDays = elapsedDays - existingAccrualCount;
+
+      if (extraDays > 0) {
+        for (let i = 0; i < extraDays; i++) {
+          const periodIndex = existingAccrualCount + i;
+          const periodStartMs = entryTimeMs + periodIndex * DAY_MS;
+          const dayStr = toDateString(new Date(periodStartMs));
           const accrual: DailyDebtAccrual = {
             id: generateId(),
             parkingEntryId: session.id,
@@ -788,7 +791,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
           newAccruals.push(accrual);
           clientDeltas[session.clientId] = (clientDeltas[session.clientId] ?? 0) + dailyRate;
         }
-        checkDate.setDate(checkDate.getDate() + 1);
+        console.log(`[DebtAccrual] Session ${session.id}: elapsed=${elapsedDays}, existing=${existingAccrualCount}, new=${extraDays}`);
       }
     }
 
@@ -847,14 +850,12 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     console.log(`[DebtAccrual] Created ${newAccruals.length} accruals for ${todayStr}`);
   }, [addTransaction, logAction, schedulePush]);
 
-  const lastAccrualDateRef = useRef<string>('');
+  const lastAccrualRunRef = useRef<number>(0);
+  const ACCRUAL_MIN_INTERVAL_MS = 5 * 60 * 1000;
   useEffect(() => {
     if (!isLoaded || !isServerSynced) return;
-    const now = new Date();
-    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    if (lastAccrualDateRef.current === todayStr) return;
-    lastAccrualDateRef.current = todayStr;
     const timer = setTimeout(() => {
+      lastAccrualRunRef.current = Date.now();
       runDebtAccrual();
     }, 3000);
     return () => clearTimeout(timer);
@@ -863,10 +864,9 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   useEffect(() => {
     if (!isLoaded || !isServerSynced) return;
     const interval = setInterval(() => {
-      const now = new Date();
-      const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-      if (lastAccrualDateRef.current !== todayStr) {
-        lastAccrualDateRef.current = todayStr;
+      const now = Date.now();
+      if (now - lastAccrualRunRef.current >= ACCRUAL_MIN_INTERVAL_MS) {
+        lastAccrualRunRef.current = now;
         runDebtAccrual();
       }
     }, 60000);
