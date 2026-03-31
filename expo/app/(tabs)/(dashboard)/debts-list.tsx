@@ -46,6 +46,8 @@ export default function DebtsListScreen() {
       const client = clients.find((c: Client) => c.id === d.clientId);
       const car = cars.find((c: Car) => c.id === d.carId);
       const isPartial = d.totalAmount > d.remainingAmount;
+      const linkedSession = d.parkingEntryId ? sessions.find((s: ParkingSession) => s.id === d.parkingEntryId) : undefined;
+      const frozen = linkedSession?.status === 'released_debt';
       rows.push({
         id: d.id,
         clientId: d.clientId,
@@ -56,15 +58,15 @@ export default function DebtsListScreen() {
         description: d.description || 'Долг',
         date: d.createdAt,
         source: 'old_debt',
-        status: isPartial ? 'Частично' : 'Активен',
-        isFrozen: false,
+        status: isPartial ? 'Частично' : frozen ? 'Заморожен' : 'Активен',
+        isFrozen: frozen,
       });
     }
 
     const activeDebtIds = new Set(activeOldDebts.map((d: Debt) => d.parkingEntryId).filter(Boolean));
 
     const debtSessions = sessions.filter((s: ParkingSession) =>
-      s.status === 'active_debt' && !s.cancelled && !activeDebtIds.has(s.id) && debtorClientIds.has(s.clientId)
+      (s.status === 'active_debt' || s.status === 'released_debt') && !s.cancelled && !activeDebtIds.has(s.id) && debtorClientIds.has(s.clientId)
     );
 
     for (const session of debtSessions) {
@@ -87,6 +89,7 @@ export default function DebtsListScreen() {
       const amount = roundMoney(sessionAccruals.reduce((s: number, a: DailyDebtAccrual) => s + a.amount, 0));
       const serviceLabel = isLombard ? 'ломбард' : session.serviceType === 'monthly' ? 'месяц' : 'разово';
 
+      const sessionFrozen = session.status === 'released_debt';
       rows.push({
         id: `accrual_${session.id}`,
         clientId: session.clientId,
@@ -97,8 +100,8 @@ export default function DebtsListScreen() {
         description: `${serviceLabel} · ${days} дн. × ${rate} ₽`,
         date: sessionAccruals[0]?.createdAt ?? session.entryTime,
         source: 'accrual',
-        status: 'На парковке',
-        isFrozen: false,
+        status: sessionFrozen ? 'Выпущен в долг' : 'На парковке',
+        isFrozen: sessionFrozen,
         days,
         rate,
         serviceType: serviceLabel,

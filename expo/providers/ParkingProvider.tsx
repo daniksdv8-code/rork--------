@@ -2081,7 +2081,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
               activeAmount: roundMoney(Math.max(0, c.activeAmount - activeRed)),
               lastUpdate: now,
             };
-          });
+          }).filter(c => c.totalAmount > 0 || c.activeAmount > 0 || c.frozenAmount > 0);
           latestDataRef.current = { ...latestDataRef.current, clientDebts: next };
           return next;
         });
@@ -2263,19 +2263,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         return next;
       });
       setClientDebts(prev => {
-        const next = prev.map(c => {
-          if (c.clientId !== clientId) return c;
-          return {
-            ...c,
-            totalAmount: 0,
-            frozenAmount: 0,
-            activeAmount: 0,
-            lastUpdate: now,
-          };
-        });
+        const next = prev.filter(c => c.clientId !== clientId);
         latestDataRef.current = { ...latestDataRef.current, clientDebts: next };
         return next;
       });
+      console.log(`[payClientDebt] Removed zero-balance clientDebt for ${clientId}`);
     } else {
       if (debtAllocations.length > 0) {
         const allocMap = new Map(debtAllocations.map(a => [a.debtId, a.payAmount]));
@@ -2306,7 +2298,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
               activeAmount: roundMoney(Math.max(0, c.activeAmount - activeReduction)),
               lastUpdate: now,
             };
-          });
+          }).filter(c => c.totalAmount > 0 || c.activeAmount > 0 || c.frozenAmount > 0);
           latestDataRef.current = { ...latestDataRef.current, clientDebts: next };
           return next;
         });
