@@ -8,8 +8,7 @@ import Colors from '@/constants/colors';
 import { useParking } from '@/providers/ParkingProvider';
 import { formatDate, formatDateTime } from '@/utils/date';
 import { formatMoney } from '@/utils/money';
-import { CashShift } from '@/types';
-import { calculateStoredDebtTotal } from '@/utils/financeCalculations';
+import { CashShift, ParkingSession, Car, Client, Transaction, Expense, CashWithdrawal } from '@/types';
 
 const fm = (n: number) => formatMoney(n);
 
@@ -18,9 +17,19 @@ type RevenuePeriod = 'day' | 'week' | 'month' | 'quarter' | 'year' | 'all';
 
 export default function ReportsScreen() {
   const {
-    transactions, debtors, expiringSubscriptions, debts, sessions, cars, clients,
-    shifts, expenses, withdrawals, clientDebts,
-  } = useParking();
+    transactions, debtors, expiringSubscriptions, sessions, cars, clients,
+    shifts, expenses, withdrawals,
+  } = useParking() as {
+    transactions: Transaction[];
+    debtors: Array<{ client?: { id: string; name: string } | null; totalDebt: number; cars: Car[]; debts: any[] }>;
+    expiringSubscriptions: Array<{ subscription: { id: string; paidUntil: string }; client?: Client | null; car?: Car | null; daysLeft: number }>;
+    sessions: ParkingSession[];
+    cars: Car[];
+    clients: Client[];
+    shifts: CashShift[];
+    expenses: Expense[];
+    withdrawals: CashWithdrawal[];
+  };
   const [tab, setTab] = useState<ReportTab>('revenue');
   const [revenuePeriod, setRevenuePeriod] = useState<RevenuePeriod>('month');
   const [vehiclePeriod, setVehiclePeriod] = useState<RevenuePeriod>('month');
@@ -100,13 +109,12 @@ export default function ReportsScreen() {
     const adjustment = Math.round(adjustmentGross - adjustmentCancelled);
     const totalRefunds = Math.round(cashRefunded + cardRefunded);
 
-    const storedDebt = calculateStoredDebtTotal(debts, clientDebts);
-    const totalDebtAmount = storedDebt.total;
+    const totalDebtAmount = Math.round(debtors.reduce((s: number, d: { totalDebt: number }) => s + d.totalDebt, 0));
     const debtorsCount = debtors.length;
     const expenseCount = filteredExpenses.length;
 
     return { cash, card, adjustment, total: Math.round(cash + card + adjustment), totalDebtAmount, debtorsCount, totalRefunds, totalExpensesAmount, expenseCount, expenseCategories };
-  }, [transactions, debts, clientDebts, debtors, revenuePeriod, expenses]);
+  }, [transactions, debtors, revenuePeriod, expenses]);
 
   const vehicleData = useMemo(() => {
     const cutoff = getCutoff(vehiclePeriod);
