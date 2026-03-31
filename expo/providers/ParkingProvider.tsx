@@ -2962,8 +2962,52 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     const operatorRole = role ?? (currentUser?.role === 'admin' ? 'admin' : 'manager');
     const existingOpen = shifts.find(s => s.status === 'open' && (s.operatorRole ?? 'manager') === operatorRole);
     if (existingOpen) {
-      console.log(`[Shift] Already have open ${operatorRole} shift ${existingOpen.id}, returning existing`);
-      return existingOpen;
+      if (existingOpen.operatorId === operatorId) {
+        console.log(`[Shift] Already have open ${operatorRole} shift ${existingOpen.id} for same operator, returning existing`);
+        return existingOpen;
+      }
+      console.log(`[Shift] Auto-closing stale ${operatorRole} shift ${existingOpen.id} (operator: ${existingOpen.operatorName}) before opening new one for ${operatorName}`);
+      const autoCloseNow = new Date().toISOString();
+      const openTime = new Date(existingOpen.openedAt).getTime();
+      const closeTime = Date.now();
+      const shiftTx = latestDataRef.current.transactions.filter(t =>
+        (t.type === 'payment' || t.type === 'debt_payment') &&
+        t.amount > 0 &&
+        new Date(t.date).getTime() >= openTime &&
+        new Date(t.date).getTime() <= closeTime
+      );
+      const shiftCancelTx = latestDataRef.current.transactions.filter(t =>
+        t.type === 'cancel_payment' &&
+        new Date(t.date).getTime() >= openTime &&
+        new Date(t.date).getTime() <= closeTime
+      );
+      const shiftRefundTx = latestDataRef.current.transactions.filter(t =>
+        t.type === 'refund' &&
+        new Date(t.date).getTime() >= openTime &&
+        new Date(t.date).getTime() <= closeTime
+      );
+      const cashIncome = roundMoney(shiftTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0)
+        - shiftCancelTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0)
+        - shiftRefundTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0));
+      const totalExpenses = roundMoney(latestDataRef.current.expenses.filter(e => e.shiftId === existingOpen.id).reduce((s, e) => s + e.amount, 0));
+      const totalWithdrawals = roundMoney((latestDataRef.current.withdrawals ?? []).filter((w: CashWithdrawal) => w.shiftId === existingOpen.id).reduce((s: number, w: CashWithdrawal) => s + w.amount, 0));
+      const calculatedBalance = roundMoney(existingOpen.carryOver + cashIncome - totalExpenses - totalWithdrawals);
+      setShifts(prev => prev.map(s =>
+        s.id === existingOpen.id ? {
+          ...s,
+          closedAt: autoCloseNow,
+          status: 'closed' as const,
+          actualCash: calculatedBalance,
+          notes: 'Автоматически закрыта при открытии новой смены',
+          closingSummary: { cashIncome, cardIncome: 0, totalExpenses, totalWithdrawals, calculatedBalance, discrepancy: 0 },
+          cashVariance: 0,
+          cashVarianceType: 'none' as const,
+          updatedAt: autoCloseNow,
+        } : s
+      ));
+      logAction('shift_close', 'Автозакрытие смены', `${existingOpen.operatorName} (${existingOpen.operatorRole === 'admin' ? 'админ' : 'менеджер'}) — автоматически закрыта при открытии новой смены`, existingOpen.id, 'shift');
+      console.log(`[Shift] Auto-closed stale shift ${existingOpen.id}, calculatedBalance=${calculatedBalance}`);
+      carryOver = calculatedBalance;
     }
     shiftsDirtyUntilRef.current = Date.now() + COLLECTION_DIRTY_MS;
     console.log(`[Shift] Marked shifts dirty for ${COLLECTION_DIRTY_MS}ms`);
