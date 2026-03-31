@@ -557,36 +557,32 @@ export default function SalaryAdvancesScreen() {
                 </View>
               )}
 
-              {payNet > 0 && (
-                <>
-                  {renderMethodSelector(payMethod, setPayMethod)}
+              {renderMethodSelector(payMethod, setPayMethod)}
 
-                  {Number(payGrossAmount) > 0 && (
-                    <View style={styles.balanceCheckCard}>
-                      <View style={styles.balanceCheckRow}>
-                        <Text style={styles.balanceCheckLabel}>Остаток ({payMethod === 'cash' ? 'нал' : 'безнал'}):</Text>
-                        <Text style={styles.balanceCheckValue}>
-                          {getAdminBalance(payMethod)} ₽
-                        </Text>
-                      </View>
-                      <View style={styles.balanceCheckRow}>
-                        <Text style={styles.balanceCheckLabel}>К выдаче:</Text>
-                        <Text style={[styles.balanceCheckValue, { color: Colors.danger }]}>
-                          −{payNet} ₽
-                        </Text>
-                      </View>
-                      <View style={[styles.balanceCheckRow, styles.balanceCheckRowTotal]}>
-                        <Text style={styles.balanceCheckLabelBold}>После выдачи:</Text>
-                        <Text style={[
-                          styles.balanceCheckValueBold,
-                          { color: getAdminBalance(payMethod) - payNet < 0 ? Colors.danger : Colors.success },
-                        ]}>
-                          {getAdminBalance(payMethod) - payNet} ₽
-                        </Text>
-                      </View>
-                    </View>
-                  )}
-                </>
+              {payNet > 0 && Number(payGrossAmount) > 0 && (
+                <View style={styles.balanceCheckCard}>
+                  <View style={styles.balanceCheckRow}>
+                    <Text style={styles.balanceCheckLabel}>Остаток ({payMethod === 'cash' ? 'нал' : 'безнал'}):</Text>
+                    <Text style={styles.balanceCheckValue}>
+                      {getAdminBalance(payMethod)} ₽
+                    </Text>
+                  </View>
+                  <View style={styles.balanceCheckRow}>
+                    <Text style={styles.balanceCheckLabel}>К выдаче:</Text>
+                    <Text style={[styles.balanceCheckValue, { color: Colors.danger }]}>
+                      −{payNet} ₽
+                    </Text>
+                  </View>
+                  <View style={[styles.balanceCheckRow, styles.balanceCheckRowTotal]}>
+                    <Text style={styles.balanceCheckLabelBold}>После выдачи:</Text>
+                    <Text style={[
+                      styles.balanceCheckValueBold,
+                      { color: getAdminBalance(payMethod) - payNet < 0 ? Colors.danger : Colors.success },
+                    ]}>
+                      {getAdminBalance(payMethod) - payNet} ₽
+                    </Text>
+                  </View>
+                </View>
               )}
 
               {payNet <= 0 && Number(payGrossAmount) > 0 && (
