@@ -955,6 +955,23 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     return op;
   }, [currentUser]);
 
+  const addAdminCardIncome = useCallback((amount: number, description: string) => {
+    const now = new Date().toISOString();
+    const adminOp: AdminCashOperation = {
+      id: generateId(),
+      type: 'card_income',
+      amount,
+      method: 'card',
+      description,
+      operatorId: currentUser?.id ?? 'unknown',
+      operatorName: currentUser?.name ?? 'Неизвестно',
+      date: now,
+      updatedAt: now,
+    };
+    setAdminCashOperations(prev => [adminOp, ...prev]);
+    console.log(`[AdminCardIncome] ${amount > 0 ? '+' : ''}${amount} ₽: ${description}`);
+  }, [currentUser]);
+
   const checkIn = useCallback((carId: string, clientId: string, serviceType: ServiceType, plannedDepartureTime?: string, paymentAtEntry?: { method: PaymentMethod; amount: number; days?: number; paidUntilDate?: string; baseAmount?: number; adjustmentReason?: string }, debtAtEntry?: { amount: number; description?: string; paidUntilDate?: string }, isSecondary?: boolean, lombardEntry?: boolean) => {
     if (paymentAtEntry && paymentAtEntry.amount > 0) {
       cashOpsDirtyUntilRef.current = Date.now() + COLLECTION_DIRTY_MS;
@@ -1049,6 +1066,10 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
       if (paymentAtEntry.method === 'cash' && activeShift) {
         updateShiftExpected(activeShift.id, paymentAtEntry.amount);
+      }
+
+      if (paymentAtEntry.method === 'card') {
+        addAdminCardIncome(paymentAtEntry.amount, `Безнал при постановке: ${paymentAtEntry.amount} ₽ (${serviceType === 'monthly' ? 'месяц' : 'разово'})`);
       }
 
       const entryBalanceBefore = activeShift ? getShiftCashBalance(activeShift) : 0;
@@ -1182,7 +1203,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     schedulePush();
     console.log(`[CheckIn] Session created for car ${carId}, status=${sessionStatus}, planned departure: ${plannedDepartureTime ?? 'not set'}`);
     return session;
-  }, [addTransaction, schedulePush, currentUser, shifts, cars, clients, logAction, updateShiftExpected, subscriptions, tariffs, updateClientDebt, addCashOperation, getShiftCashBalance]);
+  }, [addTransaction, schedulePush, currentUser, shifts, cars, clients, logAction, updateShiftExpected, subscriptions, tariffs, updateClientDebt, addCashOperation, getShiftCashBalance, addAdminCardIncome]);
 
   const checkOut = useCallback((sessionId: string, paymentAtExit?: { method: PaymentMethod; amount: number }, releaseInDebt?: boolean): { debtId: string | null; amount: number; days: number; paid: number } => {
     const session = sessions.find(s => s.id === sessionId);
@@ -1297,6 +1318,10 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
           updateShiftExpected(activeShift.id, paidAmount);
         }
 
+        if (paymentAtExit.method === 'card' && paidAmount > 0) {
+          addAdminCardIncome(paidAmount, `Безнал при выезде (долг): ${paidAmount} ₽`);
+        }
+
         const debtExitBalBefore = activeShift ? getShiftCashBalance(activeShift) : 0;
         addCashOperation({
           type: 'income',
@@ -1407,6 +1432,10 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         });
         if (paymentAtExit.method === 'cash' && activeShift) {
           updateShiftExpected(activeShift.id, paidAmount);
+        }
+
+        if (paymentAtExit.method === 'card' && paidAmount > 0) {
+          addAdminCardIncome(paidAmount, `Безнал при выезде (разово): ${paidAmount} ₽`);
         }
 
         const onetimeExitBalBefore = activeShift ? getShiftCashBalance(activeShift) : 0;
@@ -1557,6 +1586,10 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
             updateShiftExpected(activeShift.id, paymentAtExit.amount);
           }
 
+          if (paymentAtExit.method === 'card') {
+            addAdminCardIncome(paymentAtExit.amount, `Безнал при выезде (месяц): ${paymentAtExit.amount} ₽`);
+          }
+
           const monthlyExitBalBefore = activeShift ? getShiftCashBalance(activeShift) : 0;
           addCashOperation({
             type: 'income',
@@ -1630,7 +1663,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       console.log('[CheckOut] Monthly exit, subscription active');
       return { debtId: null, amount: 0, days: 0, paid: 0 };
     }
-  }, [sessions, tariffs, subscriptions, addTransaction, schedulePush, cars, logAction, currentUser, shifts, updateShiftExpected, dailyDebtAccruals, updateClientDebt, addCashOperation, getShiftCashBalance, clientDebts, debts]);
+  }, [sessions, tariffs, subscriptions, addTransaction, schedulePush, cars, logAction, currentUser, shifts, updateShiftExpected, dailyDebtAccruals, updateClientDebt, addCashOperation, getShiftCashBalance, clientDebts, debts, addAdminCardIncome]);
 
   const earlyExitWithRefund = useCallback((sessionId: string, refundMethod: PaymentMethod): { refundAmount: number; daysUsed: number; dailyRate: number; paidAmount: number } => {
     const session = sessions.find(s => s.id === sessionId);
@@ -1710,6 +1743,10 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         updateShiftExpected(activeShift.id, -refundAmount);
       }
 
+      if (refundMethod === 'card' && refundAmount > 0) {
+        addAdminCardIncome(-refundAmount, `Возврат безнала: ${refundAmount} ₽ (досрочный выезд)`);
+      }
+
       const refundBalBefore = activeShift ? getShiftCashBalance(activeShift) : 0;
       addCashOperation({
         type: 'refund',
@@ -1734,7 +1771,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     schedulePush();
     console.log(`[EarlyExit] Refund: ${refundAmount} ₽, days used: ${daysUsed}, original paid: ${paidAmount}, adjusted to: ${usedAmount}, daily: ${dailyRate}`);
     return { refundAmount, daysUsed, dailyRate, paidAmount };
-  }, [sessions, subscriptions, payments, tariffs, shifts, cars, addTransaction, schedulePush, logAction, updateShiftExpected, addCashOperation, getShiftCashBalance]);
+  }, [sessions, subscriptions, payments, tariffs, shifts, cars, addTransaction, schedulePush, logAction, updateShiftExpected, addCashOperation, getShiftCashBalance, addAdminCardIncome]);
 
   const cancelCheckIn = useCallback((sessionId: string) => {
     const session = sessions.find(s => s.id === sessionId && (s.status === 'active' || s.status === 'active_debt'));
@@ -1891,6 +1928,10 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       }
     }
 
+    if (payment.method === 'card') {
+      addAdminCardIncome(-payment.amount, `Отмена оплаты (безнал): ${payment.amount} ₽`);
+    }
+
     const cancelShift = shifts.find(s => s.status === 'open');
     const cancelBalBefore = cancelShift ? getShiftCashBalance(cancelShift) : 0;
     addCashOperation({
@@ -1907,7 +1948,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     logAction('cancel_payment', 'Отмена оплаты', `${payment.amount} ₽, ${payment.description}`, paymentId, 'payment');
     schedulePush();
     console.log(`[Cancel] Payment cancelled: ${paymentId}, amount: ${payment.amount}`);
-  }, [payments, currentUser, addTransaction, schedulePush, shifts, updateShiftExpected, logAction, addCashOperation, getShiftCashBalance]);
+  }, [payments, currentUser, addTransaction, schedulePush, shifts, updateShiftExpected, logAction, addCashOperation, getShiftCashBalance, addAdminCardIncome]);
 
   const payMonthly = useCallback((clientId: string, carId: string, method: PaymentMethod, months: number = 1, customAmount?: number, paidUntilDate?: string) => {
     cashOpsDirtyUntilRef.current = Date.now() + COLLECTION_DIRTY_MS;
@@ -1969,6 +2010,10 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       updateShiftExpected(activeShift.id, amount);
     }
 
+    if (method === 'card') {
+      addAdminCardIncome(amount, `Безнал (оплата месяца): ${amount} ₽`);
+    }
+
     const pmBalBefore = activeShift ? getShiftCashBalance(activeShift) : 0;
     addCashOperation({
       type: 'income',
@@ -1985,7 +2030,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     const pmClient = clients.find(c => c.id === clientId);
     logAction('payment', 'Оплата месяца', `${pmClient?.name ?? clientId}, ${pmCar?.plateNumber ?? carId}, ${amount} ₽ (${methodLabelShort(method)})`, newPayment.id, 'payment');
     schedulePush();
-  }, [tariffs, currentUser, addTransaction, schedulePush, shifts, updateShiftExpected, cars, clients, logAction, addCashOperation, getShiftCashBalance]);
+  }, [tariffs, currentUser, addTransaction, schedulePush, shifts, updateShiftExpected, cars, clients, logAction, addCashOperation, getShiftCashBalance, addAdminCardIncome]);
 
   const payDebt = useCallback((debtId: string, amount: number, method: PaymentMethod) => {
     amount = roundMoney(amount);
@@ -2067,6 +2112,10 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       updateShiftExpected(debtActiveShift.id, actualAmount);
     }
 
+    if (method === 'card') {
+      addAdminCardIncome(actualAmount, `Безнал (погашение долга): ${actualAmount} ₽`);
+    }
+
     const debtBalBefore = debtActiveShift ? getShiftCashBalance(debtActiveShift) : 0;
     addCashOperation({
       type: 'debt_payment_income',
@@ -2081,7 +2130,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
     logAction('debt_payment', 'Погашение долга', `${actualAmount} ₽ (${methodLabelShort(method)}), остаток: ${newRemaining > 0 ? newRemaining + ' ₽' : 'полностью'}`, debtId, 'debt');
     schedulePush();
-  }, [debts, clientDebts, currentUser, addTransaction, schedulePush, shifts, updateShiftExpected, logAction, addCashOperation, getShiftCashBalance]);
+  }, [debts, clientDebts, currentUser, addTransaction, schedulePush, shifts, updateShiftExpected, logAction, addCashOperation, getShiftCashBalance, addAdminCardIncome]);
 
   const activeSessions = useMemo(() =>
     sessions.filter(s => (s.status === 'active' || s.status === 'active_debt') && !s.cancelled && !isClientDeleted(s.clientId)),
@@ -2294,6 +2343,10 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       updateShiftExpected(cdActiveShift.id, actualAmount);
     }
 
+    if (method === 'card') {
+      addAdminCardIncome(actualAmount, `Безнал (погашение долга клиента): ${actualAmount} ₽`);
+    }
+
     const cdBalBefore = cdActiveShift ? getShiftCashBalance(cdActiveShift) : 0;
     addCashOperation({
       type: 'debt_payment_income',
@@ -2309,7 +2362,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     logAction('debt_payment', 'Погашение долга клиента', `${actualAmount} ₽ (${methodLabelShort(method)}), остаток: ${newRemainingTotal > 0 ? newRemainingTotal + ' ₽' : 'полностью'}`, clientId, 'client_debt');
     schedulePush();
     console.log(`[PayClientDebt] FIFO paid ${actualAmount} for client ${clientId}, old debts: ${allocatedToOldDebts}, clientDebt: ${allocatedToClientDebt}, remaining: ${newRemainingTotal}`);
-  }, [debts, clientDebts, currentUser, shifts, addTransaction, updateShiftExpected, logAction, schedulePush, addCashOperation, getShiftCashBalance, cars, overstayedSessionDebts, materializeOverstayDebts]);
+  }, [debts, clientDebts, currentUser, shifts, addTransaction, updateShiftExpected, logAction, schedulePush, addCashOperation, getShiftCashBalance, cars, overstayedSessionDebts, materializeOverstayDebts, addAdminCardIncome]);
 
   const getUnshiftedCashBalance = useCallback((): number => {
     const todayStart = new Date();
@@ -2390,7 +2443,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       console.log(`[Withdrawal] BLOCKED: user ${currentUser?.name} (role=${currentUser?.role}) attempted cash withdrawal`);
       return { success: false, error: 'Операцию может выполнить только администратор' };
     }
-    const activeShift = shifts.find(s => s.status === 'open');
+    const managerShift = getActiveManagerShift();
+    const activeShift = managerShift ?? shifts.find(s => s.status === 'open');
     if (!activeShift && currentUser?.role !== 'admin') {
       console.log(`[Withdrawal] BLOCKED: no open shift for non-admin`);
       return { success: false, error: 'Нет открытой смены. Откройте смену, чтобы снять наличные.' };
@@ -2487,7 +2541,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     schedulePush();
     console.log(`[Withdrawal] ${amount} ₽ withdrawn by ${currentUser?.name}, balance: ${balanceBefore} → ${balanceAfter}${balanceAfter < 0 ? ' [NEGATIVE ALLOWED]' : ''}`);
     return { success: true, withdrawal };
-  }, [shifts, currentUser, schedulePush, updateShiftExpected, addTransaction, addCashOperation, getShiftCashBalance, getUnshiftedCashBalance, logAction]);
+  }, [shifts, currentUser, schedulePush, updateShiftExpected, addTransaction, addCashOperation, getShiftCashBalance, getUnshiftedCashBalance, logAction, getActiveManagerShift]);
 
   const addManualDebt = useCallback((clientId: string, amount: number, date: string, comment: string) => {
     amount = roundMoney(amount);
@@ -2699,6 +2753,9 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         if (method === 'cash' && advShift) {
           updateShiftExpected(advShift.id, advanceAmount);
         }
+        if (method === 'card') {
+          addAdminCardIncome(advanceAmount, `Безнал (аванс после долга): ${advanceAmount} ₽`);
+        }
         const advBal = advShift ? getShiftCashBalance(advShift) : 0;
         addCashOperation({
           type: 'income',
@@ -2720,7 +2777,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     logAction('debt_payment', 'Платёж с приоритетом долга', debtPayLabel, clientId, 'client');
     console.log(`[PayWithDebtPriority] Client ${clientId}: total=${totalPayment}, debtPaid=${debtToPay}, advance=${advanceAmount}, remainingDebt=${newRemainingDebt}`);
     return { debtPaid: debtToPay, advancePaid: advanceAmount, remainingDebt: newRemainingDebt };
-  }, [getClientTotalDebt, payMonthly, payClientDebt, logAction, shifts, currentUser, addTransaction, updateShiftExpected, addCashOperation, getShiftCashBalance, schedulePush]);
+  }, [getClientTotalDebt, payMonthly, payClientDebt, logAction, shifts, currentUser, addTransaction, updateShiftExpected, addCashOperation, getShiftCashBalance, schedulePush, addAdminCardIncome]);
 
   const releaseWithDebtWarning = useCallback((sessionId: string): { hasDebt: boolean; clientDebt: number; clientName: string; sessionCarPlate: string } => {
     const session = sessions.find(s => s.id === sessionId);
