@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, RefreshControl } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Search, Car, Wallet, AlertTriangle, Users, Clock, ChevronRight, LogOut, UserPlus, BarChart3, LogIn, Banknote, PlayCircle, HandCoins, Shield } from 'lucide-react-native';
@@ -24,21 +24,23 @@ export default function DashboardScreen() {
   }, [transactions]);
   const shiftRequired = needsShiftCheck();
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [searchResults, setSearchResults] = useState<Client[]>([]);
   const [refreshing, setRefreshing] = useState<boolean>(false);
+  const searchClientsRef = useRef(searchClients);
+  searchClientsRef.current = searchClients;
+
+  const searchResults = useMemo(() => {
+    if (searchQuery.trim().length > 0) {
+      return searchClientsRef.current(searchQuery);
+    }
+    return [] as Client[];
+  }, [searchQuery]);
 
   const handleSearch = useCallback((text: string) => {
     setSearchQuery(text);
-    if (text.trim().length > 0) {
-      setSearchResults(searchClients(text));
-    } else {
-      setSearchResults([]);
-    }
-  }, [searchClients]);
+  }, []);
 
   const handleSelectClient = useCallback((clientId: string) => {
     setSearchQuery('');
-    setSearchResults([]);
     router.push({ pathname: '/client-card', params: { clientId } });
   }, [router]);
 
