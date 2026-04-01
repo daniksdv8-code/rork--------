@@ -23,12 +23,15 @@ export function formatTime(dateStr: string): string {
   return `${hours}:${minutes}`;
 }
 
+const HOUR_MS = 1000 * 60 * 60;
+const DAY_MS = 24 * HOUR_MS;
+const GRACE_MS = 4 * HOUR_MS;
+
 export function calculateDays(entryTime: string, exitTime?: string): number {
   const entry = new Date(entryTime);
   const exit = exitTime ? new Date(exitTime) : new Date();
   const diffMs = exit.getTime() - entry.getTime();
-  const diffDays = diffMs / (1000 * 60 * 60 * 24);
-  return Math.max(1, Math.ceil(diffDays));
+  return Math.max(1, Math.ceil((diffMs - GRACE_MS) / DAY_MS));
 }
 
 export function addMonths(dateStr: string, months: number): string {
