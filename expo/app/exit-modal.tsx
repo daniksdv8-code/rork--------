@@ -7,13 +7,13 @@ import { useParking } from '@/providers/ParkingProvider';
 import { useAuth } from '@/providers/AuthProvider';
 import { formatDateTime, calculateDays, formatDate, isExpired, getMonthlyAmount } from '@/utils/date';
 import { roundMoney } from '@/utils/money';
-import { PaymentMethod, ParkingSession, Car, Client, MonthlySubscription, Payment, DailyDebtAccrual } from '@/types';
+import { PaymentMethod, ParkingSession, Car, Client, MonthlySubscription, Payment, DailyDebtAccrual, ClientDebt } from '@/types';
 
 export default function ExitModal() {
   const router = useRouter();
   const { sessionId } = useLocalSearchParams<{ sessionId: string }>();
   const parking = useParking() as unknown as Record<string, any>;
-  const { sessions, cars, clients, tariffs, subscriptions, payments, checkOut, needsShiftCheck, earlyExitWithRefund, getClientTotalDebt, dailyDebtAccruals, logAction } = parking;
+  const { sessions, cars, clients, tariffs, subscriptions, payments, checkOut, needsShiftCheck, earlyExitWithRefund, getClientTotalDebt, dailyDebtAccruals, logAction, clientDebts: clientDebtsData } = parking;
   const { isAdmin } = useAuth();
   const [method, setMethod] = useState<PaymentMethod>('cash');
   const [refundMethod, setRefundMethod] = useState<PaymentMethod>('cash');
@@ -55,6 +55,23 @@ export default function ExitModal() {
     return (dailyDebtAccruals as DailyDebtAccrual[]).filter((a: DailyDebtAccrual) => a.parkingEntryId === session.id).length;
   }, [session, dailyDebtAccruals]);
 
+  const clientDebtAmount = useMemo(() => {
+    if (!session) return 0;
+    const cds = clientDebtsData as ClientDebt[] | undefined;
+    const cd = cds?.find((c: ClientDebt) => c.clientId === session.clientId);
+    return cd?.totalAmount ?? 0;
+  }, [session, clientDebtsData]);
+
+  const actualLombardDebt = useMemo(() => {
+    if (!isLombard || !session) return debtAccrualTotal;
+    return roundMoney(Math.min(debtAccrualTotal, clientDebtAmount));
+  }, [isLombard, session, debtAccrualTotal, clientDebtAmount]);
+
+  const lombardPaidBefore = useMemo(() => {
+    if (!isLombard) return 0;
+    return roundMoney(debtAccrualTotal - actualLombardDebt);
+  }, [isLombard, debtAccrualTotal, actualLombardDebt]);
+
   const getDailyRate = useCallback((m: PaymentMethod): number => {
     if (isLombard) return lombardRate;
     if (isMonthly) return m === 'card' ? tariffs.monthlyCard : tariffs.monthlyCash;
@@ -62,13 +79,13 @@ export default function ExitModal() {
   }, [isLombard, isMonthly, lombardRate, tariffs]);
 
   const dailyRate = getDailyRate(method);
-  const onetimeAmountCash = isLombard ? debtAccrualTotal : roundMoney(tariffs.onetimeCash * days);
-  const onetimeAmountCard = isLombard ? debtAccrualTotal : roundMoney(tariffs.onetimeCard * days);
-  const onetimeAmount = isLombard ? debtAccrualTotal : (method === 'cash' ? onetimeAmountCash : onetimeAmountCard);
+  const onetimeAmountCash = isLombard ? actualLombardDebt : roundMoney(tariffs.onetimeCash * days);
+  const onetimeAmountCard = isLombard ? actualLombardDebt : roundMoney(tariffs.onetimeCard * days);
+  const onetimeAmount = isLombard ? actualLombardDebt : (method === 'cash' ? onetimeAmountCash : onetimeAmountCard);
   const debtRecalculated = isDebtSession && !isLombard
     ? roundMoney(debtAccrualDays * dailyRate)
     : debtAccrualTotal;
-  const remainingAmount = isLombard ? debtAccrualTotal : (isDebtSession ? debtRecalculated : Math.max(0, onetimeAmount - prepaid));
+  const remainingAmount = isLombard ? actualLombardDebt : (isDebtSession ? debtRecalculated : Math.max(0, onetimeAmount - prepaid));
 
   const monthlyAmountCash = getMonthlyAmount(tariffs.monthlyCash);
   const monthlyAmountCard = getMonthlyAmount(tariffs.monthlyCard);
@@ -342,6 +359,18 @@ export default function ExitModal() {
               <Text style={styles.infoLabel}>Начислено долга:</Text>
               <Text style={[styles.infoValueBold, { color: Colors.danger }]}>{debtAccrualTotal} ₽</Text>
             </View>
+            {lombardPaidBefore > 0 && (
+              <View style={styles.infoRow}>
+                <Text style={[styles.infoLabel, { color: Colors.success }]}>Оплачено ранее:</Text>
+                <Text style={[styles.infoValueBold, { color: Colors.success }]}>−{lombardPaidBefore} ₽</Text>
+              </View>
+            )}
+            {lombardPaidBefore > 0 && (
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Остаток долга:</Text>
+                <Text style={[styles.infoValueBold, { color: Colors.danger }]}>{actualLombardDebt} ₽</Text>
+              </View>
+            )}
           </>
         )}
 
@@ -415,13 +444,19 @@ export default function ExitModal() {
               <Text style={styles.calcValue}>{debtAccrualDays}</Text>
             </View>
             <View style={styles.calcDivider} />
+            {lombardPaidBefore > 0 && (
+              <View style={styles.calcRow}>
+                <Text style={[styles.calcLabel, { color: Colors.success }]}>Оплачено ранее:</Text>
+                <Text style={[styles.calcValue, { color: Colors.success }]}>−{lombardPaidBefore} ₽</Text>
+              </View>
+            )}
             <View style={styles.calcRow}>
-              <Text style={styles.calcTotalLabel}>Долг:</Text>
-              <Text style={styles.calcTotalValue}>{debtAccrualTotal} ₽</Text>
+              <Text style={styles.calcTotalLabel}>{lombardPaidBefore > 0 ? 'Остаток долга:' : 'Долг:'}</Text>
+              <Text style={styles.calcTotalValue}>{actualLombardDebt} ₽</Text>
             </View>
           </View>
 
-          {existingDebt > debtAccrualTotal && (
+          {existingDebt > actualLombardDebt && (
             <View style={styles.existingDebtNotice}>
               <AlertTriangle size={14} color={Colors.warning} />
               <Text style={styles.existingDebtText}>Общий долг клиента (с предыдущими): {existingDebt} ₽</Text>
@@ -453,7 +488,7 @@ export default function ExitModal() {
             </TouchableOpacity>
           </View>
 
-          {debtAccrualTotal > 0 && (
+          {actualLombardDebt > 0 && (
             <TouchableOpacity
               style={[styles.payExitBtn, (!isAdmin && shiftRequired) && styles.exitBtnDisabled]}
               onPress={() => {
@@ -462,14 +497,34 @@ export default function ExitModal() {
                   return;
                 }
                 if (!session) return;
-                checkOut(session.id, { method, amount: debtAccrualTotal });
-                Alert.alert('Готово', `Выезд зафиксирован, оплачено ${debtAccrualTotal} ₽`);
+                checkOut(session.id, { method, amount: actualLombardDebt });
+                Alert.alert('Готово', `Выезд зафиксирован, оплачено ${actualLombardDebt} ₽`);
                 router.back();
               }}
               activeOpacity={0.7}
             >
               <Wallet size={20} color={Colors.white} />
-              <Text style={styles.payExitBtnText}>Оплатить {debtAccrualTotal} ₽ и выезд</Text>
+              <Text style={styles.payExitBtnText}>Оплатить {actualLombardDebt} ₽ и выезд</Text>
+            </TouchableOpacity>
+          )}
+
+          {actualLombardDebt === 0 && debtAccrualTotal > 0 && (
+            <TouchableOpacity
+              style={[styles.exitBtn, (!isAdmin && shiftRequired) && styles.exitBtnDisabled]}
+              onPress={() => {
+                if (!isAdmin && shiftRequired) {
+                  Alert.alert('Смена не открыта', 'Откройте смену, чтобы оформить выезд.');
+                  return;
+                }
+                if (!session) return;
+                checkOut(session.id);
+                Alert.alert('Готово', 'Выезд зафиксирован. Долг полностью оплачен ранее.');
+                router.back();
+              }}
+              activeOpacity={0.7}
+            >
+              <Check size={20} color={Colors.white} />
+              <Text style={styles.exitBtnText}>Выезд (долг оплачен)</Text>
             </TouchableOpacity>
           )}
 
@@ -496,14 +551,16 @@ export default function ExitModal() {
             <Text style={styles.partialPayHint}>Остаток останется как долг</Text>
           </View>
 
-          <TouchableOpacity
-            style={[styles.debtExitBtn, (!isAdmin && shiftRequired) && styles.exitBtnDisabled]}
-            onPress={handleExitWithDebt}
-            activeOpacity={0.7}
-          >
-            <AlertTriangle size={18} color={Colors.danger} />
-            <Text style={styles.debtExitBtnText}>Выпустить в долг ({debtAccrualTotal} ₽)</Text>
-          </TouchableOpacity>
+          {actualLombardDebt > 0 && (
+            <TouchableOpacity
+              style={[styles.debtExitBtn, (!isAdmin && shiftRequired) && styles.exitBtnDisabled]}
+              onPress={handleExitWithDebt}
+              activeOpacity={0.7}
+            >
+              <AlertTriangle size={18} color={Colors.danger} />
+              <Text style={styles.debtExitBtnText}>Выпустить в долг ({actualLombardDebt} ₽)</Text>
+            </TouchableOpacity>
+          )}
         </>
       ) : noPaymentNeeded ? (
         <>
