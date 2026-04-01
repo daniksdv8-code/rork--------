@@ -1948,15 +1948,19 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     });
 
     if (relatedDebts.length > 0) {
-      const debtRemainingToRestore = roundMoney(relatedDebts.reduce((s, d) => s + d.remainingAmount, 0));
       const debtIds = new Set(relatedDebts.map(d => d.id));
-      setDebts(prev => prev.map(d =>
-        debtIds.has(d.id) ? { ...d, remainingAmount: 0, status: 'paid' as const, updatedAt: now } : d
-      ));
+      const debtTotalToRemove = roundMoney(relatedDebts.reduce((s, d) => s + d.remainingAmount, 0));
+      setDebts(prev => {
+        const next = prev.map(d =>
+          debtIds.has(d.id) ? { ...d, remainingAmount: 0, status: 'paid' as const, updatedAt: now } : d
+        );
+        latestDataRef.current = { ...latestDataRef.current, debts: next };
+        return next;
+      });
 
-      if (restoreStatus === 'active_debt' && debtRemainingToRestore > 0) {
-        updateClientDebt(session.clientId, debtRemainingToRestore);
-        console.log(`[Cancel] Restored ${debtRemainingToRestore} ₽ to clientDebts for ${session.clientId} (debt session cancel)`);
+      if (debtTotalToRemove > 0) {
+        updateClientDebt(session.clientId, -debtTotalToRemove);
+        console.log(`[Cancel] Removed exit debts ${debtTotalToRemove} ₽ from clientDebts for ${session.clientId}`);
       }
     }
 
@@ -2711,11 +2715,14 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       description: `Ручное добавление долга: ${amount} ₽${comment ? ` — ${comment}` : ''}`,
     });
 
+    updateClientDebt(clientId, amount);
+    console.log(`[ManualDebt] Updated clientDebts for ${clientId} by +${amount}`);
+
     const client = clients.find(c => c.id === clientId);
     logAction('manual_debt_add', '[ADMIN] Ручное добавление долга', `Клиент: ${client?.name ?? clientId}, сумма: ${amount} ₽, дата: ${debtDate.split('T')[0]}${comment ? `, комментарий: ${comment}` : ''}`, newDebt.id, 'debt');
     schedulePush();
     console.log(`[ManualDebt] Added ${amount} ₽ debt for client ${clientId}`);
-  }, [clients, addTransaction, logAction, schedulePush]);
+  }, [clients, addTransaction, logAction, schedulePush, updateClientDebt]);
 
   const deleteManualDebt = useCallback((debtId: string) => {
     const debt = debts.find(d => d.id === debtId);
@@ -2741,11 +2748,16 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       description: `Удаление долга администратором: ${debt.remainingAmount} ₽ — ${debt.description}`,
     });
 
+    if (debt.remainingAmount > 0) {
+      updateClientDebt(debt.clientId, -debt.remainingAmount);
+      console.log(`[ManualDebt] Reduced clientDebts for ${debt.clientId} by -${debt.remainingAmount}`);
+    }
+
     const client = clients.find(c => c.id === debt.clientId);
     logAction('manual_debt_delete', '[ADMIN] Удаление долга', `Клиент: ${client?.name ?? debt.clientId}, сумма: ${debt.remainingAmount} ₽, описание: ${debt.description}`, debtId, 'debt');
     schedulePush();
     console.log(`[ManualDebt] Deleted debt ${debtId}, amount: ${debt.remainingAmount}`);
-  }, [debts, clients, addTransaction, logAction, schedulePush]);
+  }, [debts, clients, addTransaction, logAction, schedulePush, updateClientDebt]);
 
   const deleteCashOperation = useCallback((operationId: string) => {
     const op = cashOperations.find(o => o.id === operationId);
@@ -2760,19 +2772,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       return next;
     });
 
-    if (op.relatedEntityId && op.relatedEntityType === 'debt') {
-      setDebts(prev => {
-        const next = prev.map(d => {
-          if (d.id !== op.relatedEntityId) return d;
-          return { ...d, remainingAmount: roundMoney(d.remainingAmount + op.amount), status: 'active' as const, updatedAt: now };
-        });
-        latestDataRef.current = { ...latestDataRef.current, debts: next };
-        return next;
-      });
-      console.log(`[DeleteCashOp] Restored debt ${op.relatedEntityId} by +${op.amount}`);
-    }
-
-    if (op.type === 'debt_payment_income' && op.relatedEntityId) {
+    if (op.relatedEntityId && (op.relatedEntityType === 'debt' || op.type === 'debt_payment_income')) {
       setDebts(prev => {
         const next = prev.map(d => {
           if (d.id !== op.relatedEntityId) return d;
@@ -2782,6 +2782,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         latestDataRef.current = { ...latestDataRef.current, debts: next };
         return next;
       });
+      const relatedDebt = latestDataRef.current.debts.find(d => d.id === op.relatedEntityId);
+      if (relatedDebt) {
+        updateClientDebt(relatedDebt.clientId, op.amount);
+      }
+      console.log(`[DeleteCashOp] Restored debt ${op.relatedEntityId} by +${op.amount}`);
     }
 
     if (op.type === 'income' || op.type === 'debt_payment_income') {
@@ -2823,7 +2828,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     logAction('admin_edit', '[ADMIN] Удаление операции', `${op.type}: ${op.amount} ₽ — ${op.description}`, operationId, 'cash_operation');
     schedulePush();
     console.log(`[DeleteCashOp] Deleted operation ${operationId}: ${op.type}, ${op.amount} ₽, cascaded to related entities`);
-  }, [cashOperations, shifts, updateShiftExpected, logAction, schedulePush]);
+  }, [cashOperations, shifts, updateShiftExpected, logAction, schedulePush, updateClientDebt]);
 
   const activeDebts = useMemo(() => debts.filter(d => d.remainingAmount > 0), [debts]);
 
@@ -3125,24 +3130,16 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     const shift = shifts.find(s => s.id === shiftId);
     if (!shift) return;
 
-    const openTime = new Date(shift.openedAt).getTime();
-    const closeTime = Date.now();
-
-    const shiftTx = transactions.filter(t =>
+    const allShiftTx = transactions.filter(t => t.shiftId === shiftId);
+    const shiftTx = allShiftTx.filter(t =>
       (t.type === 'payment' || t.type === 'debt_payment') &&
-      t.amount > 0 &&
-      new Date(t.date).getTime() >= openTime &&
-      new Date(t.date).getTime() <= closeTime
+      t.amount > 0
     );
-    const shiftCancelTx = transactions.filter(t =>
-      t.type === 'cancel_payment' &&
-      new Date(t.date).getTime() >= openTime &&
-      new Date(t.date).getTime() <= closeTime
+    const shiftCancelTx = allShiftTx.filter(t =>
+      t.type === 'cancel_payment'
     );
-    const shiftRefundTx = transactions.filter(t =>
-      t.type === 'refund' &&
-      new Date(t.date).getTime() >= openTime &&
-      new Date(t.date).getTime() <= closeTime
+    const shiftRefundTx = allShiftTx.filter(t =>
+      t.type === 'refund'
     );
     const cashIncome = roundMoney(shiftTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0)
       - shiftCancelTx.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0)
