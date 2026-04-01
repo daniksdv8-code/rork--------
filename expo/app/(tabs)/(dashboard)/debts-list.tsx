@@ -4,227 +4,158 @@ import { Stack, useRouter } from 'expo-router';
 import { Search, Wallet, ChevronRight, Inbox, Clock } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useParking } from '@/providers/ParkingProvider';
-import { formatDate } from '@/utils/date';
-import { roundMoney } from '@/utils/money';
-import { Client, Car, Debt, ParkingSession, MonthlySubscription, DailyDebtAccrual } from '@/types';
+import { formatMoney } from '@/utils/money';
 
-interface DebtRow {
-  id: string;
+interface DebtClientRow {
   clientId: string;
-  client: Client | undefined;
-  car: Car | undefined;
-  plateNumber: string;
-  amount: number;
-  description: string;
-  date: string;
-  source: 'old_debt' | 'accrual';
-  status: string;
-  isFrozen: boolean;
-  days?: number;
-  rate?: number;
-  serviceType?: string;
+  clientName: string;
+  totalDebt: number;
+  plates: string[];
+  debtSources: number;
+  hasLombard: boolean;
+  hasOverstay: boolean;
+  hasFrozen: boolean;
 }
 
 export default function DebtsListScreen() {
   const router = useRouter();
   const {
-    debts, clients, cars, sessions,
-    dailyDebtAccruals, tariffs,
-    debtors, activeSessions, subscriptions,
+    debtors, sessions, dailyDebtAccruals, cars, getClientTotalDebt,
   } = useParking() as any;
   const [search, setSearch] = useState<string>('');
 
-  const debtorClientIds = useMemo(() => {
-    return new Set(debtors.filter((d: any) => d.client && d.totalDebt > 0).map((d: any) => d.client!.id as string));
-  }, [debtors]);
+  const clientRows = useMemo(() => {
+    const rows: DebtClientRow[] = [];
 
-  const allDebtRows = useMemo(() => {
-    const rows: DebtRow[] = [];
+    for (const d of debtors) {
+      if (!d.client) continue;
+      const clientId = d.client.id as string;
+      const liveDebt = getClientTotalDebt(clientId);
+      const displayDebt = liveDebt > 0 ? liveDebt : d.totalDebt;
+      if (displayDebt <= 0) continue;
 
-    const activeOldDebts = debts.filter((d: Debt) => d.remainingAmount > 0 && debtorClientIds.has(d.clientId));
-    for (const d of activeOldDebts) {
-      const client = clients.find((c: Client) => c.id === d.clientId);
-      const car = cars.find((c: Car) => c.id === d.carId);
-      const isPartial = d.totalAmount > d.remainingAmount;
-      const linkedSession = d.parkingEntryId ? sessions.find((s: ParkingSession) => s.id === d.parkingEntryId) : undefined;
-      const frozen = linkedSession?.status === 'released_debt';
-      rows.push({
-        id: d.id,
-        clientId: d.clientId,
-        client,
-        car,
-        plateNumber: car?.plateNumber ?? '—',
-        amount: d.remainingAmount,
-        description: d.description || 'Долг',
-        date: d.createdAt,
-        source: 'old_debt',
-        status: isPartial ? 'Частично' : frozen ? 'Заморожен' : 'Активен',
-        isFrozen: frozen,
-      });
-    }
-
-    const activeDebtIds = new Set(activeOldDebts.map((d: Debt) => d.parkingEntryId).filter(Boolean));
-
-    const debtSessions = sessions.filter((s: ParkingSession) =>
-      (s.status === 'active_debt' || s.status === 'released_debt') && !s.cancelled && !activeDebtIds.has(s.id) && debtorClientIds.has(s.clientId)
-    );
-
-    for (const session of debtSessions) {
-      const sessionAccruals = dailyDebtAccruals.filter((a: DailyDebtAccrual) => a.parkingEntryId === session.id);
-      if (sessionAccruals.length === 0) continue;
-
-      const client = clients.find((c: Client) => c.id === session.clientId);
-      const car = cars.find((c: Car) => c.id === session.carId);
-      const isLombard = session.serviceType === 'lombard';
-      let rate: number;
-      if (isLombard) {
-        rate = session.lombardRateApplied ?? tariffs.lombardRate;
-      } else if (session.serviceType === 'monthly') {
-        rate = tariffs.monthlyCash;
-      } else {
-        rate = tariffs.onetimeCash;
-      }
-
-      const days = sessionAccruals.length;
-      const amount = roundMoney(sessionAccruals.reduce((s: number, a: DailyDebtAccrual) => s + a.amount, 0));
-      const serviceLabel = isLombard ? 'ломбард' : session.serviceType === 'monthly' ? 'месяц' : 'разово';
-
-      const sessionFrozen = session.status === 'released_debt';
-      rows.push({
-        id: `accrual_${session.id}`,
-        clientId: session.clientId,
-        client,
-        car,
-        plateNumber: car?.plateNumber ?? '—',
-        amount,
-        description: `${serviceLabel} · ${days} дн. × ${rate} ₽`,
-        date: sessionAccruals[0]?.createdAt ?? session.entryTime,
-        source: 'accrual',
-        status: sessionFrozen ? 'Выпущен в долг' : 'На парковке',
-        isFrozen: sessionFrozen,
-        days,
-        rate,
-        serviceType: serviceLabel,
-      });
-    }
-
-    for (const debtor of debtors) {
-      if (!debtor.client || (debtor.overstayDebt ?? 0) <= 0) continue;
-      const clientId = debtor.client.id;
-      const clientOverstaySessions = activeSessions.filter((s: ParkingSession) =>
-        s.clientId === clientId &&
-        s.status === 'active' &&
-        !s.cancelled &&
-        s.serviceType !== 'lombard' &&
-        s.tariffType !== 'lombard'
-      );
-      for (const session of clientOverstaySessions) {
-        const existingDebtRow = rows.find(r => r.id === `accrual_${session.id}` || r.id === `overstay_${session.id}`);
-        if (existingDebtRow) continue;
-        const client = clients.find((c: Client) => c.id === clientId);
-        const car = cars.find((c: Car) => c.id === session.carId);
-        const isOnetime = session.serviceType === 'onetime';
-        const isMonthly = session.serviceType === 'monthly';
-        let owingAmount = 0;
-        if (isOnetime) {
-          const msPerDay = 24 * 60 * 60 * 1000;
-          const elapsed = Date.now() - new Date(session.entryTime).getTime();
-          const days = Math.max(1, Math.ceil(elapsed / msPerDay));
-          const rate = tariffs.onetimeCash;
-          const totalOwed = days * rate;
-          const prepaid = session.prepaidAmount ?? 0;
-          owingAmount = Math.max(0, totalOwed - prepaid);
-        } else if (isMonthly) {
-          const sub = subscriptions.find((s: MonthlySubscription) => s.carId === session.carId && s.clientId === clientId);
-          const isExp = sub ? new Date(sub.paidUntil).getTime() < Date.now() : true;
-          if (isExp) {
-            const overstayAccruals = dailyDebtAccruals.filter((a: DailyDebtAccrual) => a.parkingEntryId === session.id);
-            if (overstayAccruals.length > 0) {
-              owingAmount = roundMoney(overstayAccruals.reduce((s: number, a: DailyDebtAccrual) => s + a.amount, 0));
-            } else {
-              const msPerDay = 24 * 60 * 60 * 1000;
-              const paidUntil = sub ? new Date(sub.paidUntil).getTime() : new Date(session.entryTime).getTime();
-              const overstayMs = Math.max(0, Date.now() - paidUntil);
-              const overstayDays = Math.max(1, Math.ceil(overstayMs / msPerDay));
-              const dailyRate = tariffs.monthlyCash / 30;
-              owingAmount = roundMoney(overstayDays * dailyRate);
-            }
-          }
+      const debtCarIds = new Set<string>();
+      if (d.debts) {
+        for (const debt of d.debts) {
+          if (debt.carId) debtCarIds.add(debt.carId);
         }
-        if (owingAmount <= 0) continue;
-        rows.push({
-          id: `overstay_${session.id}`,
-          clientId,
-          client,
-          car,
-          plateNumber: car?.plateNumber ?? '—',
-          amount: owingAmount,
-          description: isOnetime ? `Просрочка (разово)` : `Просрочка (месяц)`,
-          date: session.entryTime,
-          source: 'accrual',
-          status: 'Просрочка',
-          isFrozen: false,
-          serviceType: isOnetime ? 'разово' : 'месяц',
-        });
       }
+
+      const clientSessions = sessions.filter((s: any) =>
+        s.clientId === clientId &&
+        (s.status === 'active_debt' || s.status === 'released_debt') &&
+        !s.cancelled
+      );
+      for (const s of clientSessions) {
+        if (s.carId) debtCarIds.add(s.carId);
+      }
+
+      if ((d.overstayDebt ?? 0) > 0) {
+        const overstaySessions = sessions.filter((s: any) =>
+          s.clientId === clientId &&
+          s.status === 'active' &&
+          !s.cancelled &&
+          s.serviceType !== 'lombard' &&
+          s.tariffType !== 'lombard'
+        );
+        for (const s of overstaySessions) {
+          if (s.carId) debtCarIds.add(s.carId);
+        }
+      }
+
+      const plates = debtCarIds.size > 0
+        ? Array.from(debtCarIds).map((carId: string) => {
+            const car = (d.cars as any[])?.find((c: any) => c.id === carId)
+              ?? cars.find((c: any) => c.id === carId);
+            return car ? car.plateNumber : null;
+          }).filter(Boolean) as string[]
+        : (d.cars ?? []).map((c: any) => c.plateNumber).filter(Boolean) as string[];
+
+      const hasLombard = sessions.some((s: any) =>
+        s.clientId === clientId &&
+        (s.tariffType === 'lombard' || s.serviceType === 'lombard') &&
+        s.status === 'active_debt'
+      ) || (d.debts ?? []).some((debt: any) => debt.description?.includes('Ломбард'));
+
+      const activeAccrualCount = sessions.filter((s: any) =>
+        s.clientId === clientId &&
+        s.status === 'active_debt' &&
+        !s.cancelled &&
+        dailyDebtAccruals.some((a: any) => a.parkingEntryId === s.id)
+      ).length;
+
+      const hasOverstay = (d.overstayDebt ?? 0) > 0;
+      const hasFrozen = clientSessions.some((s: any) => s.status === 'released_debt');
+      const debtSources = (d.debts?.length ?? 0) + activeAccrualCount + (hasOverstay ? 1 : 0);
+
+      rows.push({
+        clientId,
+        clientName: d.client.name ?? '—',
+        totalDebt: displayDebt,
+        plates,
+        debtSources: Math.max(debtSources, 1),
+        hasLombard,
+        hasOverstay,
+        hasFrozen,
+      });
     }
 
-    rows.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    rows.sort((a, b) => b.totalDebt - a.totalDebt);
     return rows;
-  }, [debts, clients, cars, sessions, dailyDebtAccruals, tariffs, debtors, debtorClientIds, activeSessions, subscriptions]);
+  }, [debtors, sessions, cars, dailyDebtAccruals, getClientTotalDebt]);
 
-  const totalDebt = useMemo(() => {
-    return debtors.reduce((s: number, d: { totalDebt: number }) => s + d.totalDebt, 0);
-  }, [debtors]);
+  const grandTotal = useMemo(() => clientRows.reduce((s, r) => s + r.totalDebt, 0), [clientRows]);
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return allDebtRows;
+    if (!search.trim()) return clientRows;
     const q = search.toLowerCase();
-    return allDebtRows.filter(d =>
-      (d.client?.name ?? '').toLowerCase().includes(q) ||
-      d.plateNumber.toLowerCase().includes(q) ||
-      d.description.toLowerCase().includes(q)
+    return clientRows.filter(r =>
+      r.clientName.toLowerCase().includes(q) ||
+      r.plates.some(p => p.toLowerCase().includes(q))
     );
-  }, [allDebtRows, search]);
+  }, [clientRows, search]);
 
   const handlePress = useCallback((clientId: string) => {
     router.push({ pathname: '/client-card', params: { clientId } });
   }, [router]);
 
-  const renderItem = useCallback(({ item, index }: { item: DebtRow; index: number }) => {
+  const renderItem = useCallback(({ item, index }: { item: DebtClientRow; index: number }) => {
     return (
       <TouchableOpacity
         style={styles.row}
         activeOpacity={0.7}
-        onPress={() => item.clientId && handlePress(item.clientId)}
+        onPress={() => handlePress(item.clientId)}
       >
-        <View style={[styles.rowNum, item.source === 'accrual' && styles.rowNumAccrual]}>
-          <Text style={[styles.rowNumText, item.source === 'accrual' && styles.rowNumTextAccrual]}>{index + 1}</Text>
+        <View style={styles.rowNum}>
+          <Text style={styles.rowNumText}>{index + 1}</Text>
         </View>
         <View style={styles.rowContent}>
           <View style={styles.rowTop}>
-            <Text style={styles.clientText} numberOfLines={1}>{item.client?.name ?? '—'}</Text>
-            <Text style={styles.debtAmount}>{item.amount} ₽</Text>
-          </View>
-          <Text style={styles.plateText}>{item.plateNumber}</Text>
-          <View style={styles.rowBottom}>
-            <Text style={styles.metaText}>{formatDate(item.date)}</Text>
-            <View style={[
-              styles.statusBadgeWrap,
-              item.status === 'Активен' || item.status === 'На парковке' ? styles.statusActiveBg :
-              item.status === 'Частично' ? styles.statusPartialBg :
-              item.isFrozen ? styles.statusFrozenBg : styles.statusActiveBg,
-            ]}>
-              {item.isFrozen && <Clock size={10} color={Colors.info} />}
-              <Text style={[
-                styles.statusBadgeText,
-                item.status === 'Активен' || item.status === 'На парковке' ? styles.statusActiveColor :
-                item.status === 'Частично' ? styles.statusPartialColor :
-                item.isFrozen ? styles.statusFrozenColor : styles.statusActiveColor,
-              ]}>{item.status}</Text>
+            <View style={styles.clientRow}>
+              <Text style={styles.clientText} numberOfLines={1}>{item.clientName}</Text>
+              {item.hasLombard && (
+                <View style={styles.lombardTag}>
+                  <Text style={styles.lombardTagText}>Ломбард</Text>
+                </View>
+              )}
+              {item.hasOverstay && (
+                <View style={styles.overstayTag}>
+                  <Text style={styles.overstayTagText}>Просрочка</Text>
+                </View>
+              )}
+              {item.hasFrozen && (
+                <View style={styles.frozenTag}>
+                  <Clock size={9} color={Colors.info} />
+                  <Text style={styles.frozenTagText}>Выпущен</Text>
+                </View>
+              )}
             </View>
+            <Text style={styles.debtAmount}>{formatMoney(item.totalDebt)} ₽</Text>
           </View>
-          <Text style={styles.descText} numberOfLines={1}>{item.description}</Text>
+          <Text style={styles.plateText}>
+            {item.plates.length > 0 ? item.plates.join(', ') : '—'}
+          </Text>
+          <Text style={styles.metaText}>Записей долга: {item.debtSources}</Text>
         </View>
         <ChevronRight size={16} color={Colors.textMuted} />
       </TouchableOpacity>
@@ -238,10 +169,10 @@ export default function DebtsListScreen() {
         <View style={styles.header}>
           <View style={styles.headerBadge}>
             <Wallet size={18} color={Colors.danger} />
-            <Text style={styles.headerTitle}>ВСЕ ДОЛГИ (итого: {totalDebt} ₽)</Text>
+            <Text style={styles.headerTitle}>ВСЕ ДОЛГИ (итого: {formatMoney(grandTotal)} ₽)</Text>
           </View>
           <Text style={styles.headerSubtitle}>
-            Записей: {filtered.length}
+            Должников: {filtered.length}
           </Text>
         </View>
 
@@ -249,7 +180,7 @@ export default function DebtsListScreen() {
           <Search size={16} color={Colors.textMuted} />
           <TextInput
             style={styles.searchInput}
-            placeholder="Поиск по ФИО, номеру, описанию..."
+            placeholder="Поиск по ФИО, номеру авто..."
             placeholderTextColor={Colors.textMuted}
             value={search}
             onChangeText={setSearch}
@@ -258,7 +189,7 @@ export default function DebtsListScreen() {
 
         <FlatList
           data={filtered}
-          keyExtractor={item => item.id}
+          keyExtractor={item => item.clientId}
           renderItem={renderItem}
           contentContainerStyle={styles.list}
           ListEmptyComponent={
@@ -295,30 +226,20 @@ const styles = StyleSheet.create({
     width: 28, height: 28, borderRadius: 14, backgroundColor: Colors.dangerLight,
     alignItems: 'center', justifyContent: 'center', marginRight: 10,
   },
-  rowNumAccrual: {
-    backgroundColor: Colors.warningLight,
-  },
   rowNumText: { fontSize: 12, fontWeight: '600' as const, color: Colors.danger },
-  rowNumTextAccrual: { color: Colors.warning },
   rowContent: { flex: 1 },
   rowTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 },
-  clientText: { fontSize: 15, fontWeight: '600' as const, color: Colors.text, flex: 1, marginRight: 8 },
+  clientRow: { flexDirection: 'row' as const, alignItems: 'center' as const, flex: 1, gap: 6, flexWrap: 'wrap' as const },
+  clientText: { fontSize: 15, fontWeight: '600' as const, color: Colors.text, flexShrink: 1 },
+  lombardTag: { backgroundColor: '#fef3c7', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 1 },
+  lombardTagText: { fontSize: 10, fontWeight: '700' as const, color: '#b45309' },
+  overstayTag: { backgroundColor: '#fee2e2', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 1 },
+  overstayTagText: { fontSize: 10, fontWeight: '700' as const, color: '#dc2626' },
+  frozenTag: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 3, backgroundColor: '#dbeafe', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 1 },
+  frozenTagText: { fontSize: 10, fontWeight: '700' as const, color: Colors.info },
   debtAmount: { fontSize: 15, fontWeight: '700' as const, color: Colors.danger },
   plateText: { fontSize: 13, color: Colors.textSecondary, marginBottom: 2 },
-  rowBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 },
   metaText: { fontSize: 12, color: Colors.textMuted },
-  descText: { fontSize: 12, color: Colors.textMuted, fontStyle: 'italic' as const },
-  statusBadgeWrap: {
-    flexDirection: 'row', alignItems: 'center', gap: 3,
-    paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6,
-  },
-  statusBadgeText: { fontSize: 11, fontWeight: '600' as const },
-  statusActiveBg: { backgroundColor: Colors.dangerLight },
-  statusActiveColor: { color: Colors.danger },
-  statusPartialBg: { backgroundColor: Colors.warningLight },
-  statusPartialColor: { color: Colors.warning },
-  statusFrozenBg: { backgroundColor: Colors.infoLight },
-  statusFrozenColor: { color: Colors.info },
   empty: { alignItems: 'center', justifyContent: 'center', paddingVertical: 60 },
   emptyText: { fontSize: 14, color: Colors.textMuted, marginTop: 12 },
 });
