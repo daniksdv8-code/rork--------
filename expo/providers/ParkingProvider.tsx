@@ -2298,7 +2298,12 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         latestDataRef.current = { ...latestDataRef.current, debts: next };
         return next;
       });
+
+      const sessionAmounts: Record<string, number> = {};
       for (const nd of newDebts) {
+        sessionAmounts[nd.parkingEntryId!] = roundMoney(
+          (sessionAmounts[nd.parkingEntryId!] ?? 0) + nd.totalAmount
+        );
         addTransaction({
           clientId: nd.clientId,
           carId: nd.carId,
@@ -2309,6 +2314,19 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
           description: nd.description,
         });
       }
+
+      setSessions(prev => {
+        const next = prev.map(s => {
+          const addedDebt = sessionAmounts[s.id];
+          if (!addedDebt) return s;
+          const newPrepaid = roundMoney((s.prepaidAmount ?? 0) + addedDebt);
+          console.log(`[MaterializeOverstay] Updated session ${s.id} prepaidAmount: ${s.prepaidAmount ?? 0} → ${newPrepaid}`);
+          return { ...s, prepaidAmount: newPrepaid, updatedAt: now };
+        });
+        latestDataRef.current = { ...latestDataRef.current, sessions: next };
+        return next;
+      });
+
       logAction('debt_accrual', 'Фиксация долга за просрочку', `Клиент ${clientId}: ${newDebts.length} записей, всего ${totalMaterialized} ₽`);
     }
     return totalMaterialized;

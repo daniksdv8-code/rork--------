@@ -63,20 +63,30 @@ export function calculateOverstayedSessionDebts(
   tariffs: Tariffs,
 ): Record<string, number> {
   const result: Record<string, number> = {};
-  const sessionIdsWithDebt = new Set(
+  const sessionIdsWithActiveDebt = new Set(
     debts.filter(d => d.parkingEntryId && d.remainingAmount > 0).map(d => d.parkingEntryId!)
   );
+  const sessionPaidDebtTotals: Record<string, number> = {};
+  for (const d of debts) {
+    if (d.parkingEntryId && d.remainingAmount <= 0) {
+      sessionPaidDebtTotals[d.parkingEntryId] = roundMoney(
+        (sessionPaidDebtTotals[d.parkingEntryId] ?? 0) + d.totalAmount
+      );
+    }
+  }
   for (const session of activeSessions) {
     if (session.status === 'active_debt') continue;
     if (session.serviceType === 'lombard' || session.tariffType === 'lombard') continue;
-    if (sessionIdsWithDebt.has(session.id)) continue;
+    if (sessionIdsWithActiveDebt.has(session.id)) continue;
 
     if (session.serviceType === 'onetime') {
       const days = calculateDays(session.entryTime);
       const dailyRate = tariffs.onetimeCash;
       const totalOwed = roundMoney(dailyRate * days);
       const prepaid = session.prepaidAmount ?? 0;
-      const owing = roundMoney(Math.max(0, totalOwed - prepaid));
+      const paidDebtTotal = sessionPaidDebtTotals[session.id] ?? 0;
+      const alreadyCovered = roundMoney(Math.max(prepaid, paidDebtTotal));
+      const owing = roundMoney(Math.max(0, totalOwed - alreadyCovered));
       if (owing > 0) {
         result[session.clientId] = roundMoney((result[session.clientId] ?? 0) + owing);
       }
@@ -98,20 +108,30 @@ export function calculateOverstayedSessionDetails(
   tariffs: Tariffs,
 ): Record<string, OverstayedSessionDetail[]> {
   const result: Record<string, OverstayedSessionDetail[]> = {};
-  const sessionIdsWithDebt = new Set(
+  const sessionIdsWithActiveDebt = new Set(
     debts.filter(d => d.parkingEntryId && d.remainingAmount > 0).map(d => d.parkingEntryId!)
   );
+  const sessionPaidDebtTotals: Record<string, number> = {};
+  for (const d of debts) {
+    if (d.parkingEntryId && d.remainingAmount <= 0) {
+      sessionPaidDebtTotals[d.parkingEntryId] = roundMoney(
+        (sessionPaidDebtTotals[d.parkingEntryId] ?? 0) + d.totalAmount
+      );
+    }
+  }
   for (const session of activeSessions) {
     if (session.status === 'active_debt') continue;
     if (session.serviceType === 'lombard' || session.tariffType === 'lombard') continue;
-    if (sessionIdsWithDebt.has(session.id)) continue;
+    if (sessionIdsWithActiveDebt.has(session.id)) continue;
 
     if (session.serviceType === 'onetime') {
       const days = calculateDays(session.entryTime);
       const dailyRate = tariffs.onetimeCash;
       const totalOwed = roundMoney(dailyRate * days);
       const prepaid = session.prepaidAmount ?? 0;
-      const owing = roundMoney(Math.max(0, totalOwed - prepaid));
+      const paidDebtTotal = sessionPaidDebtTotals[session.id] ?? 0;
+      const alreadyCovered = roundMoney(Math.max(prepaid, paidDebtTotal));
+      const owing = roundMoney(Math.max(0, totalOwed - alreadyCovered));
       if (owing > 0) {
         if (!result[session.clientId]) result[session.clientId] = [];
         result[session.clientId].push({
@@ -121,7 +141,7 @@ export function calculateOverstayedSessionDetails(
           days,
           rate: dailyRate,
           amount: owing,
-          prepaid,
+          prepaid: alreadyCovered,
           serviceType: session.serviceType,
         });
       }
