@@ -142,46 +142,32 @@ export default function ReportsScreen() {
 
   const shiftCashIncome = useCallback((shift: CashShift) => {
     if (shift.closingSummary) return shift.closingSummary.cashIncome;
-    const openTime = new Date(shift.openedAt).getTime();
-    const closeTime = shift.closedAt ? new Date(shift.closedAt).getTime() : Date.now();
-    const income = transactions.filter(t =>
+    const shiftTx = transactions.filter(t => t.shiftId === shift.id);
+    const income = shiftTx.filter(t =>
       (t.type === 'payment' || t.type === 'debt_payment') &&
-      t.method === 'cash' && t.amount > 0 &&
-      new Date(t.date).getTime() >= openTime &&
-      new Date(t.date).getTime() <= closeTime
+      t.method === 'cash' && t.amount > 0
     ).reduce((s, t) => s + t.amount, 0);
-    const cancelled = transactions.filter(t =>
-      t.type === 'cancel_payment' && t.method === 'cash' &&
-      new Date(t.date).getTime() >= openTime &&
-      new Date(t.date).getTime() <= closeTime
+    const cancelled = shiftTx.filter(t =>
+      t.type === 'cancel_payment' && t.method === 'cash'
     ).reduce((s, t) => s + t.amount, 0);
-    const refunded = transactions.filter(t =>
-      t.type === 'refund' && t.method === 'cash' &&
-      new Date(t.date).getTime() >= openTime &&
-      new Date(t.date).getTime() <= closeTime
+    const refunded = shiftTx.filter(t =>
+      t.type === 'refund' && t.method === 'cash'
     ).reduce((s, t) => s + t.amount, 0);
     return Math.round(income - cancelled - refunded);
   }, [transactions]);
 
   const shiftCardIncome = useCallback((shift: CashShift) => {
     if (shift.closingSummary) return shift.closingSummary.cardIncome;
-    const openTime = new Date(shift.openedAt).getTime();
-    const closeTime = shift.closedAt ? new Date(shift.closedAt).getTime() : Date.now();
-    const income = transactions.filter(t =>
+    const shiftTx = transactions.filter(t => t.shiftId === shift.id);
+    const income = shiftTx.filter(t =>
       (t.type === 'payment' || t.type === 'debt_payment') &&
-      t.method === 'card' && t.amount > 0 &&
-      new Date(t.date).getTime() >= openTime &&
-      new Date(t.date).getTime() <= closeTime
+      t.method === 'card' && t.amount > 0
     ).reduce((s, t) => s + t.amount, 0);
-    const cancelled = transactions.filter(t =>
-      t.type === 'cancel_payment' && t.method === 'card' &&
-      new Date(t.date).getTime() >= openTime &&
-      new Date(t.date).getTime() <= closeTime
+    const cancelled = shiftTx.filter(t =>
+      t.type === 'cancel_payment' && t.method === 'card'
     ).reduce((s, t) => s + t.amount, 0);
-    const refunded = transactions.filter(t =>
-      t.type === 'refund' && t.method === 'card' &&
-      new Date(t.date).getTime() >= openTime &&
-      new Date(t.date).getTime() <= closeTime
+    const refunded = shiftTx.filter(t =>
+      t.type === 'refund' && t.method === 'card'
     ).reduce((s, t) => s + t.amount, 0);
     return Math.round(income - cancelled - refunded);
   }, [transactions]);
