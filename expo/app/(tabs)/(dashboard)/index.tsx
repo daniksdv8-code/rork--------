@@ -1,20 +1,32 @@
-import React, { useState, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, RefreshControl } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Search, Car, Wallet, AlertTriangle, Users, Clock, ChevronRight, LogOut, UserPlus, BarChart3, LogIn, Banknote, PlayCircle, HandCoins, Shield, RefreshCw, CheckCircle, WifiOff, AlertCircle } from 'lucide-react-native';
+import { Search, Car, Wallet, AlertTriangle, Users, Clock, ChevronRight, LogOut, UserPlus, BarChart3, LogIn, Banknote, PlayCircle, HandCoins, Shield, RefreshCw, CheckCircle, AlertCircle } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/providers/AuthProvider';
 import { useParking } from '@/providers/ParkingProvider';
 import ShiftGuard from '@/components/ShiftGuard';
 import CleaningReminder from '@/components/CleaningReminder';
-import { Client } from '@/types';
+import { Client, Transaction } from '@/types';
 import { isToday } from '@/utils/date';
 import { formatMoney } from '@/utils/money';
 
 export default function DashboardScreen() {
   const router = useRouter();
   const { currentUser, logout } = useAuth();
-  const { todayStats, searchClients, cars, expiringSubscriptions, needsShiftCheck, transactions, getCurrentMonthViolations, syncStatus, lastSyncTime, forceSync } = useParking();
+  const parking = useParking() as any;
+  const { todayStats, searchClients, cars, expiringSubscriptions, needsShiftCheck, transactions, getCurrentMonthViolations, syncStatus, lastSyncTime, forceSync } = parking as {
+    todayStats: any;
+    searchClients: (q: string) => Client[];
+    cars: { id: string; clientId: string; plateNumber: string; carModel?: string }[];
+    expiringSubscriptions: any[];
+    needsShiftCheck: () => boolean;
+    transactions: Transaction[];
+    getCurrentMonthViolations: () => { violationCount: number; status: string };
+    syncStatus: string;
+    lastSyncTime: number;
+    forceSync: () => Promise<void>;
+  };
 
   const monthViolations = useMemo(() => getCurrentMonthViolations(), [getCurrentMonthViolations]);
 
