@@ -395,6 +395,20 @@ export interface SalaryPayment {
   source?: SalarySource;
 }
 
+export type ClientEditField = 'name' | 'phone' | 'phone2' | 'plateNumber' | 'carModel';
+
+export interface ClientEditHistoryEntry {
+  id: string;
+  clientId: string;
+  editedBy: string;
+  editorName: string;
+  editedAt: string;
+  field: ClientEditField;
+  oldValue: string;
+  newValue: string;
+  carId?: string;
+}
+
 export interface AppData {
   clients: Client[];
   cars: Car[];
@@ -420,6 +434,7 @@ export interface AppData {
   salaryAdvances: SalaryAdvance[];
   salaryPayments: SalaryPayment[];
   cleanupChecklistTemplate?: CleanupTemplateItem[];
+  editHistory?: ClientEditHistoryEntry[];
   deletedClientIds?: string[];
   restoreEpoch?: number;
 }

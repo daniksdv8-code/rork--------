@@ -8,7 +8,8 @@ import {
   PaymentMethod, ServiceType, CashShift, Expense, User, CashWithdrawal, ScheduledShift,
   ActionLog, ActionType, AdminExpense, AdminCashOperation, ExpenseCategory,
   DailyDebtAccrual, ClientDebt, CashOperation, TeamViolationMonth,
-  SalaryAdvance, SalaryPayment, CleanupChecklistItem, CleanupTemplateItem
+  SalaryAdvance, SalaryPayment, CleanupChecklistItem, CleanupTemplateItem,
+  ClientEditHistoryEntry, ClientEditField
 } from '@/types';
 import { EMPTY_DATA } from '@/mocks/initialData';
 import { generateId } from '@/utils/id';
@@ -66,6 +67,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   const [salaryAdvances, setSalaryAdvances] = useState<SalaryAdvance[]>([]);
   const [salaryPayments, setSalaryPayments] = useState<SalaryPayment[]>([]);
   const [cleanupChecklistTemplate, setCleanupChecklistTemplate] = useState<CleanupTemplateItem[]>([]);
+  const [editHistory, setEditHistory] = useState<ClientEditHistoryEntry[]>([]);
   const [deletedClientIds, setDeletedClientIds] = useState<string[]>([]);
   const [isLoaded, setIsLoaded] = useState<boolean>(false);
   const [isServerSynced, setIsServerSynced] = useState<boolean>(false);
@@ -93,11 +95,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   const POST_PUSH_GRACE_MS = 15000;
 
   const latestDataRef = useRef({
-    clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories, dailyDebtAccruals, clientDebts, cashOperations, teamViolations, salaryAdvances, salaryPayments, cleanupChecklistTemplate,
+    clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories, dailyDebtAccruals, clientDebts, cashOperations, teamViolations, salaryAdvances, salaryPayments, cleanupChecklistTemplate, editHistory,
   });
   useEffect(() => {
-    latestDataRef.current = { clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories, dailyDebtAccruals, clientDebts, cashOperations, teamViolations, salaryAdvances, salaryPayments, cleanupChecklistTemplate };
-  }, [clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories, dailyDebtAccruals, clientDebts, cashOperations, teamViolations, salaryAdvances, salaryPayments, cleanupChecklistTemplate]);
+    latestDataRef.current = { clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories, dailyDebtAccruals, clientDebts, cashOperations, teamViolations, salaryAdvances, salaryPayments, cleanupChecklistTemplate, editHistory };
+  }, [clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories, dailyDebtAccruals, clientDebts, cashOperations, teamViolations, salaryAdvances, salaryPayments, cleanupChecklistTemplate, editHistory]);
 
   const logAction = useCallback((action: ActionType, label: string, details: string, entityId?: string, entityType?: string) => {
     const entry: ActionLog = {
@@ -226,6 +228,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       setSalaryPayments(d.salaryPayments ?? localData.salaryPayments ?? []);
     }
     setCleanupChecklistTemplate(d.cleanupChecklistTemplate ?? localData.cleanupChecklistTemplate ?? []);
+    setEditHistory(d.editHistory ?? localData.editHistory ?? []);
     console.log(`[Sync] Applied server data (${source ?? '?'}): clients=${serverClientCount}, sessions=${(d.sessions||[]).length}, shifts=${(d.shifts||[]).length}, users=${(serverUsers||[]).length}`);
   }, []);
 
@@ -263,6 +266,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
           if (data.salaryAdvances) setSalaryAdvances(data.salaryAdvances);
           if (data.salaryPayments) setSalaryPayments(data.salaryPayments);
           if (data.cleanupChecklistTemplate) setCleanupChecklistTemplate(data.cleanupChecklistTemplate);
+          if (data.editHistory) setEditHistory(data.editHistory);
           if (data.users) {
             setUsers(data.users);
           }
@@ -634,6 +638,12 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     return { client: newClient, car: newCar };
   }, [schedulePush, logAction]);
 
+  const addEditHistoryEntries = useCallback((entries: ClientEditHistoryEntry[]) => {
+    if (entries.length === 0) return;
+    setEditHistory(prev => [...entries, ...prev]);
+    console.log(`[EditHistory] Added ${entries.length} entries`);
+  }, []);
+
   const updateClient = useCallback((clientId: string, updates: { name?: string; phone?: string; phone2?: string; notes?: string }) => {
     const now = new Date().toISOString();
     const client = clients.find(c => c.id === clientId);
@@ -642,14 +652,27 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       c.id === clientId ? { ...c, ...updates, updatedAt: now } : c
     ));
     const changes: string[] = [];
-    if (updates.name && updates.name !== client.name) changes.push(`имя: ${client.name} → ${updates.name}`);
-    if (updates.phone && updates.phone !== client.phone) changes.push(`тел: ${client.phone} → ${updates.phone}`);
-    if (updates.phone2 !== undefined && updates.phone2 !== client.phone2) changes.push(`тел2: ${updates.phone2 || '—'}`);
+    const historyEntries: ClientEditHistoryEntry[] = [];
+    const userId = currentUser?.id ?? 'unknown';
+    const userName = currentUser?.name ?? 'Неизвестно';
+    if (updates.name && updates.name !== client.name) {
+      changes.push(`имя: ${client.name} → ${updates.name}`);
+      historyEntries.push({ id: generateId(), clientId, editedBy: userId, editorName: userName, editedAt: now, field: 'name', oldValue: client.name, newValue: updates.name });
+    }
+    if (updates.phone && updates.phone !== client.phone) {
+      changes.push(`тел: ${client.phone} → ${updates.phone}`);
+      historyEntries.push({ id: generateId(), clientId, editedBy: userId, editorName: userName, editedAt: now, field: 'phone', oldValue: client.phone, newValue: updates.phone });
+    }
+    if (updates.phone2 !== undefined && updates.phone2 !== (client.phone2 ?? '')) {
+      changes.push(`тел2: ${client.phone2 || '—'} → ${updates.phone2 || '—'}`);
+      historyEntries.push({ id: generateId(), clientId, editedBy: userId, editorName: userName, editedAt: now, field: 'phone2', oldValue: client.phone2 ?? '', newValue: updates.phone2 ?? '' });
+    }
     if (updates.notes !== undefined && updates.notes !== client.notes) changes.push(`заметки`);
+    addEditHistoryEntries(historyEntries);
     logAction('client_edit', 'Редактирование клиента', `${client.name}: ${changes.join(', ') || 'без изменений'}`, clientId, 'client');
     schedulePush();
     console.log(`[Client] Updated client ${clientId}: ${changes.join(', ')}`);
-  }, [clients, schedulePush, logAction]);
+  }, [clients, schedulePush, logAction, currentUser, addEditHistoryEntries]);
 
   const updateCar = useCallback((carId: string, updates: { plateNumber?: string; carModel?: string }) => {
     const now = new Date().toISOString();
@@ -662,12 +685,23 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       c.id === carId ? { ...c, ...finalUpdates } : c
     ));
     const changes: string[] = [];
-    if (updates.plateNumber && formatPlateNumber(updates.plateNumber) !== car.plateNumber) changes.push(`номер: ${car.plateNumber} → ${formatPlateNumber(updates.plateNumber)}`);
-    if (updates.carModel !== undefined && updates.carModel !== (car.carModel ?? '')) changes.push(`модель: ${updates.carModel || '—'}`);
+    const historyEntries: ClientEditHistoryEntry[] = [];
+    const userId = currentUser?.id ?? 'unknown';
+    const userName = currentUser?.name ?? 'Неизвестно';
+    const clientId = car.clientId;
+    if (updates.plateNumber && formatPlateNumber(updates.plateNumber) !== car.plateNumber) {
+      changes.push(`номер: ${car.plateNumber} → ${formatPlateNumber(updates.plateNumber)}`);
+      historyEntries.push({ id: generateId(), clientId, editedBy: userId, editorName: userName, editedAt: now, field: 'plateNumber', oldValue: car.plateNumber, newValue: formatPlateNumber(updates.plateNumber), carId });
+    }
+    if (updates.carModel !== undefined && updates.carModel !== (car.carModel ?? '')) {
+      changes.push(`модель: ${car.carModel || '—'} → ${updates.carModel || '—'}`);
+      historyEntries.push({ id: generateId(), clientId, editedBy: userId, editorName: userName, editedAt: now, field: 'carModel', oldValue: car.carModel ?? '', newValue: updates.carModel ?? '', carId });
+    }
+    addEditHistoryEntries(historyEntries);
     logAction('client_edit', 'Редактирование авто', `${car.plateNumber}: ${changes.join(', ') || 'без изменений'}`, carId, 'car');
     schedulePush();
     console.log(`[Car] Updated car ${carId}: ${changes.join(', ')}`);
-  }, [cars, schedulePush, logAction]);
+  }, [cars, schedulePush, logAction, currentUser, addEditHistoryEntries]);
 
   const addCarToClient = useCallback((clientId: string, plateNumber: string, carModel?: string): Car => {
     const newCar: Car = {
@@ -4042,6 +4076,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       salaryAdvances: safeArr(snapshot?.salaryAdvances ?? salaryAdvances),
       salaryPayments: safeArr(snapshot?.salaryPayments ?? salaryPayments),
       cleanupChecklistTemplate: safeArr(snapshot?.cleanupChecklistTemplate ?? cleanupChecklistTemplate),
+      editHistory: safeArr(snapshot?.editHistory ?? editHistory),
     };
 
     const backupData = {
@@ -4101,6 +4136,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         salaryAdvances: snapshot.salaryAdvances,
         salaryPayments: snapshot.salaryPayments,
         cleanupChecklistTemplate: snapshot.cleanupChecklistTemplate,
+        editHistory: snapshot.editHistory,
       },
     };
     return JSON.stringify(backupData);
@@ -4259,6 +4295,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       salaryAdvances: Array.isArray(d.salaryAdvances) ? d.salaryAdvances : [],
       salaryPayments: Array.isArray(d.salaryPayments) ? d.salaryPayments : [],
       cleanupChecklistTemplate: Array.isArray(d.cleanupChecklistTemplate) ? d.cleanupChecklistTemplate : [],
+      editHistory: Array.isArray(d.editHistory) ? d.editHistory : [],
     };
 
     let serverResetSuccess = false;
@@ -4313,6 +4350,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     setSalaryAdvances(restorePayload.salaryAdvances);
     setSalaryPayments(restorePayload.salaryPayments);
     setCleanupChecklistTemplate(restorePayload.cleanupChecklistTemplate ?? []);
+    setEditHistory(restorePayload.editHistory ?? []);
 
     try {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(restorePayload));
@@ -4448,6 +4486,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       salaryAdvances: [] as any[],
       salaryPayments: [] as any[],
       cleanupChecklistTemplate: [] as any[],
+      editHistory: [] as any[],
     };
 
     try {
@@ -5080,6 +5119,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     getCleanupTemplate,
     updateCleanupTemplate,
     cleanupChecklistTemplate,
+    editHistory,
   }), [
     clients, cars, activeClients, activeCars, isClientDeleted,
     sessions, subscriptions, payments, debts, transactions, tariffs,
@@ -5108,5 +5148,6 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     runDiagnostic, getAnomalyStats,
     getCleanupChecklist, saveCleanupChecklist, completeCleanup, getTodayCleaningShift,
     getCleanupTemplate, updateCleanupTemplate, cleanupChecklistTemplate,
+    editHistory,
   ]);
 });

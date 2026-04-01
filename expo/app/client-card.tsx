@@ -1,14 +1,14 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Alert, Linking, TextInput } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { Phone, Car, Calendar, CreditCard, AlertTriangle, Trash2, Plus, Check, X, LogIn, LogOut, XCircle, RotateCcw, Ban, Pencil, Banknote, Wallet, Clock, FileEdit } from 'lucide-react-native';
+import { Phone, Car, Calendar, CreditCard, AlertTriangle, Trash2, Plus, Check, X, LogIn, LogOut, XCircle, RotateCcw, Ban, Pencil, Banknote, Wallet, Clock, FileEdit, History } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/providers/AuthProvider';
 import { useParking } from '@/providers/ParkingProvider';
 import { formatDate, formatDateTime, isExpired, getMonthlyAmount, toDateString, daysUntil } from '@/utils/date';
 import { roundMoney } from '@/utils/money';
 import { formatPlateNumber } from '@/utils/plate';
-import { ServiceType, PaymentMethod, TariffType } from '@/types';
+import { ServiceType, PaymentMethod, TariffType, ClientEditHistoryEntry, ClientEditField } from '@/types';
 
 export default function ClientCardScreen() {
   const router = useRouter();
@@ -19,7 +19,7 @@ export default function ClientCardScreen() {
     getCarsByClient, getClientTotalDebt, deleteCar, deleteClient, addCarToClient,
     checkIn, checkOut, getSubscription, cancelCheckIn, cancelCheckOut, cancelPayment,
     needsShiftCheck, updateClient, updateCar, tariffs, logAction,
-    addManualDebt, deleteManualDebt, getClientDebtInfo,
+    addManualDebt, deleteManualDebt, getClientDebtInfo, editHistory,
   } = useParking() as unknown as Record<string, any>;
 
   const [showAddCar, setShowAddCar] = useState<boolean>(false);
@@ -101,6 +101,24 @@ export default function ClientCardScreen() {
       .slice(0, 20),
     [transactions, clientId]
   );
+
+  const clientEditHistory = useMemo(() =>
+    (editHistory as ClientEditHistoryEntry[] ?? []).filter((e: ClientEditHistoryEntry) => e.clientId === clientId)
+      .sort((a: ClientEditHistoryEntry, b: ClientEditHistoryEntry) => new Date(b.editedAt).getTime() - new Date(a.editedAt).getTime())
+      .slice(0, 30),
+    [editHistory, clientId]
+  );
+
+  const getFieldLabel = useCallback((field: ClientEditField): string => {
+    switch (field) {
+      case 'name': return 'ФИО';
+      case 'phone': return 'Телефон';
+      case 'phone2': return 'Доп. телефон';
+      case 'plateNumber': return 'Номер авто';
+      case 'carModel': return 'Марка/модель';
+      default: return field;
+    }
+  }, []);
 
   const handleCall = useCallback((phoneNumber?: string) => {
     const num = phoneNumber || client?.phone;
@@ -1533,6 +1551,32 @@ export default function ClientCardScreen() {
         )}
       </View>
 
+      {clientEditHistory.length > 0 && (
+        <>
+          <Text style={styles.sectionTitle}>История изменений</Text>
+          <View style={styles.card}>
+            {clientEditHistory.map((entry: ClientEditHistoryEntry) => (
+              <View key={entry.id} style={styles.editHistoryRow}>
+                <View style={styles.editHistoryIconWrap}>
+                  <History size={13} color={Colors.textMuted} />
+                </View>
+                <View style={styles.editHistoryInfo}>
+                  <Text style={styles.editHistoryField}>{getFieldLabel(entry.field)}</Text>
+                  <Text style={styles.editHistoryValues}>
+                    <Text style={styles.editHistoryOld}>{entry.oldValue || '—'}</Text>
+                    <Text style={styles.editHistoryArrow}> → </Text>
+                    <Text style={styles.editHistoryNew}>{entry.newValue || '—'}</Text>
+                  </Text>
+                  <Text style={styles.editHistoryMeta}>
+                    {formatDateTime(entry.editedAt)} • {entry.editorName}
+                  </Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        </>
+      )}
+
       {isAdmin && !isDeleted && (
         <TouchableOpacity style={styles.deleteBtn} onPress={handleDelete}>
           <Trash2 size={18} color={Colors.danger} />
@@ -2883,5 +2927,52 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: Colors.textMuted,
     marginTop: 1,
+  },
+  editHistoryRow: {
+    flexDirection: 'row' as const,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+    gap: 8,
+  },
+  editHistoryIconWrap: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    backgroundColor: Colors.inputBg,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    marginTop: 1,
+  },
+  editHistoryInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  editHistoryField: {
+    fontSize: 13,
+    fontWeight: '600' as const,
+    color: Colors.text,
+  },
+  editHistoryValues: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    lineHeight: 17,
+  },
+  editHistoryOld: {
+    color: Colors.danger,
+    textDecorationLine: 'line-through' as const,
+  },
+  editHistoryArrow: {
+    color: Colors.textMuted,
+  },
+  editHistoryNew: {
+    color: Colors.success,
+    fontWeight: '600' as const,
+  },
+  editHistoryMeta: {
+    fontSize: 11,
+    color: Colors.textMuted,
+    marginTop: 2,
   },
 });
