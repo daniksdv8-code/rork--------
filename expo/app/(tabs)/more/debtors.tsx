@@ -20,11 +20,12 @@ interface DebtorItem {
 
 export default function DebtorsScreen() {
   const router = useRouter();
-  const { debtors, dailyDebtAccruals, sessions, cars } = useParking() as any as {
+  const { debtors, dailyDebtAccruals, sessions, cars, getClientTotalDebt } = useParking() as any as {
     debtors: DebtorItem[];
     dailyDebtAccruals: DailyDebtAccrual[];
     sessions: ParkingSession[];
     cars: Car[];
+    getClientTotalDebt: (clientId: string) => number;
   };
 
   const accrualDetailsByClient = useMemo(() => {
@@ -88,13 +89,15 @@ export default function DebtorsScreen() {
     const _oldDebtsTotal = roundMoney(item.debts.reduce((s, d) => s + d.remainingAmount, 0));
     const clientDebtAmount = item.clientDebt ? item.clientDebt.totalAmount : 0;
     const unaccountedClientDebt = roundMoney(Math.max(0, clientDebtAmount - accrualTotal));
+    const liveDebt = getClientTotalDebt(item.client.id);
+    const displayDebt = liveDebt > 0 ? liveDebt : item.totalDebt;
 
     return (
       <View style={styles.card}>
         <View style={styles.cardHeader}>
           <View style={styles.debtBadge}>
             <AlertTriangle size={14} color={Colors.danger} />
-            <Text style={styles.debtAmount}>{formatMoney(item.totalDebt)} ₽</Text>
+            <Text style={styles.debtAmount}>{formatMoney(displayDebt)} ₽</Text>
           </View>
         </View>
         <Text style={styles.clientName}>{item.client.name}</Text>
@@ -201,7 +204,7 @@ export default function DebtorsScreen() {
         </TouchableOpacity>
       </View>
     );
-  }, [router, accrualDetailsByClient]);
+  }, [router, accrualDetailsByClient, getClientTotalDebt]);
 
   if (debtors.length === 0) {
     return (

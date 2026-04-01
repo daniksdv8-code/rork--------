@@ -4,22 +4,66 @@ import { Stack, useRouter } from 'expo-router';
 import { Search, AlertTriangle, ChevronRight, Inbox } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useParking } from '@/providers/ParkingProvider';
+import { formatMoney } from '@/utils/money';
 
 export default function DebtorsListScreen() {
   const router = useRouter();
-  const { debtors, sessions, dailyDebtAccruals } = useParking() as any;
+  const { debtors, sessions, dailyDebtAccruals, cars, getClientTotalDebt } = useParking() as any;
   const [search, setSearch] = useState<string>('');
 
-  const totalDebt = useMemo(() => debtors.reduce((s: number, d: any) => s + d.totalDebt, 0), [debtors]);
+  const enrichedDebtors = useMemo(() => {
+    return debtors.map((d: any) => {
+      const liveDebt = d.client ? getClientTotalDebt(d.client.id) : d.totalDebt;
+      const debtCarIds = new Set<string>();
+      if (d.debts) {
+        for (const debt of d.debts) {
+          if (debt.carId) debtCarIds.add(debt.carId);
+        }
+      }
+      if (d.client) {
+        const debtSessions = sessions.filter((s: any) =>
+          s.clientId === d.client.id &&
+          (s.status === 'active_debt' || s.status === 'released_debt') &&
+          !s.cancelled
+        );
+        for (const s of debtSessions) {
+          if (s.carId) debtCarIds.add(s.carId);
+        }
+        const overstaySessionsForClient = sessions.filter((s: any) =>
+          s.clientId === d.client.id &&
+          s.status === 'active' &&
+          !s.cancelled &&
+          s.serviceType !== 'lombard' &&
+          s.tariffType !== 'lombard'
+        );
+        if ((d.overstayDebt ?? 0) > 0) {
+          for (const s of overstaySessionsForClient) {
+            if (s.carId) debtCarIds.add(s.carId);
+          }
+        }
+      }
+      const debtCars = debtCarIds.size > 0
+        ? Array.from(debtCarIds).map((carId: string) => {
+            const car = (d.cars as any[])?.find((c: any) => c.id === carId)
+              ?? cars.find((c: any) => c.id === carId);
+            return car ? car.plateNumber : null;
+          }).filter(Boolean)
+        : d.cars.map((c: any) => c.plateNumber);
+      return { ...d, liveDebt: liveDebt > 0 ? liveDebt : d.totalDebt, debtCarPlates: debtCars };
+    }).filter((d: any) => d.client && d.liveDebt > 0);
+  }, [debtors, sessions, cars, getClientTotalDebt]);
+
+  const totalDebt = useMemo(() => enrichedDebtors.reduce((s: number, d: any) => s + d.liveDebt, 0), [enrichedDebtors]);
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return debtors;
+    if (!search.trim()) return enrichedDebtors;
     const q = search.toLowerCase();
-    return debtors.filter((d: any) =>
+    return enrichedDebtors.filter((d: any) =>
       (d.client?.name ?? '').toLowerCase().includes(q) ||
-      d.cars.some((c: any) => c.plateNumber.toLowerCase().includes(q))
+      d.cars.some((c: any) => c.plateNumber.toLowerCase().includes(q)) ||
+      (d.debtCarPlates as string[]).some((p: string) => p.toLowerCase().includes(q))
     );
-  }, [debtors, search]);
+  }, [enrichedDebtors, search]);
 
   const handlePress = useCallback((clientId: string) => {
     router.push({ pathname: '/client-card', params: { clientId } });
@@ -69,10 +113,12 @@ export default function DebtorsListScreen() {
                 </View>
               )}
             </View>
-            <Text style={styles.debtAmount}>{item.totalDebt} ₽</Text>
+            <Text style={styles.debtAmount}>{formatMoney(item.liveDebt)} ₽</Text>
           </View>
           <Text style={styles.carsText}>
-            {item.cars.map((c: any) => c.plateNumber).join(', ') || '—'}
+            {(item.debtCarPlates as string[]).length > 0
+              ? (item.debtCarPlates as string[]).join(', ')
+              : item.cars.map((c: any) => c.plateNumber).join(', ') || '—'}
           </Text>
           <Text style={styles.metaText}>Записей долга: {totalDebtSources}</Text>
         </View>
@@ -88,7 +134,7 @@ export default function DebtorsListScreen() {
         <View style={styles.header}>
           <View style={styles.headerBadge}>
             <AlertTriangle size={18} color={Colors.danger} />
-            <Text style={styles.headerTitle}>ДОЛЖНИКИ ({filtered.length} чел., общий долг: {totalDebt} ₽)</Text>
+            <Text style={styles.headerTitle}>ДОЛЖНИКИ ({filtered.length} чел., общий долг: {formatMoney(totalDebt)} ₽)</Text>
           </View>
         </View>
 
