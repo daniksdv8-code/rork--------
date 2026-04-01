@@ -31,6 +31,7 @@ export default function ExitModal() {
   const isDebtSession = session?.status === 'active_debt';
   const days = session ? calculateDays(session.entryTime, now) : 0;
   const prepaid = session?.prepaidAmount ?? 0;
+  const wasDebtEntry = prepaid > 0 && !session?.prepaidMethod;
   const lombardRate = session?.lombardRateApplied ?? tariffs.lombardRate;
 
   const sub = useMemo(() => {
@@ -337,7 +338,7 @@ export default function ExitModal() {
             {prepaid > 0 && (
               <View style={styles.prepaidRow}>
                 <Check size={14} color={Colors.success} />
-                <Text style={styles.prepaidLabel}>Предоплата при постановке:</Text>
+                <Text style={styles.prepaidLabel}>{wasDebtEntry ? 'Оплачено ранее (долг):' : 'Предоплата при постановке:'}</Text>
                 <Text style={styles.prepaidValue}>{prepaid} ₽</Text>
               </View>
             )}
@@ -718,7 +719,7 @@ export default function ExitModal() {
                   <>
                     <View style={styles.calcDivider} />
                     <View style={styles.calcRow}>
-                      <Text style={[styles.calcLabel, { color: Colors.success }]}>Предоплата:</Text>
+                      <Text style={[styles.calcLabel, { color: Colors.success }]}>{wasDebtEntry ? 'Оплачено ранее (долг):' : 'Предоплата:'}</Text>
                       <Text style={[styles.calcValue, { color: Colors.success }]}>−{prepaid} ₽</Text>
                     </View>
                   </>

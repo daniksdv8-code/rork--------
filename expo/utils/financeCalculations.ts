@@ -66,14 +66,10 @@ export function calculateOverstayedSessionDebts(
   const sessionIdsWithDebt = new Set(
     debts.filter(d => d.parkingEntryId && d.remainingAmount > 0).map(d => d.parkingEntryId!)
   );
-  const sessionIdsWithPaidDebt = new Set(
-    debts.filter(d => d.parkingEntryId && d.status === 'paid' && d.remainingAmount <= 0).map(d => d.parkingEntryId!)
-  );
   for (const session of activeSessions) {
     if (session.status === 'active_debt') continue;
     if (session.serviceType === 'lombard' || session.tariffType === 'lombard') continue;
     if (sessionIdsWithDebt.has(session.id)) continue;
-    if (sessionIdsWithPaidDebt.has(session.id)) continue;
 
     if (session.serviceType === 'onetime') {
       const days = calculateDays(session.entryTime);
@@ -105,14 +101,10 @@ export function calculateOverstayedSessionDetails(
   const sessionIdsWithDebt = new Set(
     debts.filter(d => d.parkingEntryId && d.remainingAmount > 0).map(d => d.parkingEntryId!)
   );
-  const sessionIdsWithPaidDebt = new Set(
-    debts.filter(d => d.parkingEntryId && d.status === 'paid' && d.remainingAmount <= 0).map(d => d.parkingEntryId!)
-  );
   for (const session of activeSessions) {
     if (session.status === 'active_debt') continue;
     if (session.serviceType === 'lombard' || session.tariffType === 'lombard') continue;
     if (sessionIdsWithDebt.has(session.id)) continue;
-    if (sessionIdsWithPaidDebt.has(session.id)) continue;
 
     if (session.serviceType === 'onetime') {
       const days = calculateDays(session.entryTime);

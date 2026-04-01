@@ -1479,6 +1479,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       const totalAmount = roundMoney(dailyRate * days);
       const prepaid = session.prepaidAmount ?? 0;
       const remaining = roundMoney(Math.max(0, totalAmount - prepaid));
+      const wasDebtEntry = prepaid > 0 && !session.prepaidMethod;
+      const prepaidLabel = wasDebtEntry ? `оплачено ранее (долг) ${prepaid} ₽` : `предоплата ${prepaid} ₽`;
 
       addTransaction({
         clientId: session.clientId,
@@ -1487,14 +1489,14 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         amount: 0,
         method: null,
         date: now,
-        description: `Выезд (разово): ${days} сут., начислено ${totalAmount} ₽ (${dailyRate} ₽/сут.)${prepaid > 0 ? `, предоплата ${prepaid} ₽` : ''}`,
+        description: `Выезд (разово): ${days} сут., начислено ${totalAmount} ₽ (${dailyRate} ₽/сут.)${prepaid > 0 ? `, ${prepaidLabel}` : ''}`,
       });
 
       if (paymentAtExit && paymentAtExit.amount > 0 && remaining > 0) {
         const paidAmount = roundMoney(Math.min(paymentAtExit.amount, remaining));
         const afterPay = roundMoney(remaining - paidAmount);
 
-        const payDesc = `Оплата при выезде: ${paidAmount} ₽ (${days} сут. × ${dailyRate} ₽, ${methodLabel(paymentAtExit.method)})${prepaid > 0 ? `, предоплата ${prepaid} ₽` : ''}`;
+        const payDesc = `Оплата при выезде: ${paidAmount} ₽ (${days} сут. × ${dailyRate} ₽, ${methodLabel(paymentAtExit.method)})${prepaid > 0 ? `, ${prepaidLabel}` : ''}`;
         const exitPayment: Payment = {
           id: generateId(),
           clientId: session.clientId,
@@ -1588,7 +1590,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
           createdAt: now,
           updatedAt: now,
           description: prepaid > 0
-            ? `Разовый заезд: ${days} сут. × ${dailyRate} ₽ − предоплата ${prepaid} ₽ = ${remaining} ₽`
+            ? `Разовый заезд: ${days} сут. × ${dailyRate} ₽ − ${prepaidLabel} = ${remaining} ₽`
             : `Разовый заезд: ${days} сут. × ${dailyRate} ₽`,
           parkingEntryId: sessionId,
           status: 'active',
@@ -1602,11 +1604,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
           amount: remaining,
           method: null,
           date: now,
-          description: `Начислен долг: ${remaining} ₽${prepaid > 0 ? ` (всего ${totalAmount} ₽, предоплата ${prepaid} ₽)` : ''}`,
+          description: `Начислен долг: ${remaining} ₽${prepaid > 0 ? ` (всего ${totalAmount} ₽, ${prepaidLabel})` : ''}`,
         });
 
         const carO = cars.find(c => c.id === session.carId);
-        logAction('checkout', 'Выезд (разово)', `${carO?.plateNumber ?? session.carId}, ${days} сут., долг ${remaining} ₽${prepaid > 0 ? ` (предоплата ${prepaid} ₽)` : ''}`, sessionId, 'session');
+        logAction('checkout', 'Выезд (разово)', `${carO?.plateNumber ?? session.carId}, ${days} сут., долг ${remaining} ₽${prepaid > 0 ? ` (${prepaidLabel})` : ''}`, sessionId, 'session');
         schedulePush();
         console.log(`[CheckOut] Onetime exit, debt created: ${debtId}, amount: ${remaining}, prepaid: ${prepaid}`);
         return { debtId, amount: remaining, days, paid: 0 };
@@ -1625,7 +1627,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
           logAction('checkout', 'Корректировка долга при досрочном выезде', `${carAdj?.plateNumber ?? session.carId}, долг скорректирован: ${prepaid} ₽ → ${totalAmount} ₽ (фактически ${days} сут.)`, sessionId, 'session');
         }
         const carO = cars.find(c => c.id === session.carId);
-        logAction('checkout', 'Выезд (разово)', `${carO?.plateNumber ?? session.carId}, ${days} сут., полностью оплачено при постановке`, sessionId, 'session');
+        logAction('checkout', 'Выезд (разово)', `${carO?.plateNumber ?? session.carId}, ${days} сут., ${wasDebtEntry ? 'долг полностью оплачен ранее' : 'полностью оплачено при постановке'}`, sessionId, 'session');
         schedulePush();
         console.log(`[CheckOut] Onetime exit, fully prepaid: ${prepaid} ₽, total: ${totalAmount} ₽`);
         return { debtId: null, amount: 0, days, paid: 0 };
