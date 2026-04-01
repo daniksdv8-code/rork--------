@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, InteractionManager, ActivityIndicator } from 'react-native';
+import React, { useMemo } from 'react';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { AlertTriangle, Clock, BarChart3, Settings, ChevronRight, Banknote, CalendarDays, FileText, Download, Wallet, Briefcase, ShieldCheck, Sparkles } from 'lucide-react-native';
 import Colors from '@/constants/colors';
@@ -11,15 +11,6 @@ export default function MoreScreen() {
   const { isAdmin } = useAuth();
   const parking = useParking() as any;
   const debtors = parking?.debtors ?? [];
-  const [isReady, setIsReady] = useState<boolean>(false);
-
-  useEffect(() => {
-    const handle = InteractionManager.runAfterInteractions(() => {
-      setIsReady(true);
-    });
-    return () => handle.cancel();
-  }, []);
-
   const debtorsBadge = useMemo(() => {
     return debtors.length > 0 ? String(debtors.length) : undefined;
   }, [debtors.length]);
@@ -103,14 +94,6 @@ export default function MoreScreen() {
     });
   }
 
-  if (!isReady) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="small" color={Colors.primary} />
-      </View>
-    );
-  }
-
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.menuList}>
@@ -139,12 +122,6 @@ export default function MoreScreen() {
 }
 
 const styles = StyleSheet.create({
-  loadingContainer: {
-    flex: 1,
-    backgroundColor: Colors.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   container: {
     flex: 1,
     backgroundColor: Colors.background,
