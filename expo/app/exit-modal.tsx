@@ -25,7 +25,7 @@ export default function ExitModal() {
   const car = useMemo(() => session ? (cars as Car[]).find((c: Car) => c.id === session.carId) : null, [session, cars]);
   const client = useMemo(() => session ? (clients as Client[]).find((c: Client) => c.id === session.clientId) : null, [session, clients]);
 
-  const now = new Date().toISOString();
+  const now = useMemo(() => new Date().toISOString(), []);
   const isMonthly = session?.serviceType === 'monthly';
   const isLombard = session?.tariffType === 'lombard' || session?.serviceType === 'lombard';
   const isDebtSession = session?.status === 'active_debt';

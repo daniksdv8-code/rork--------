@@ -964,8 +964,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     const d = latestDataRef.current;
     return calculateShiftCashBalance(shift, {
       transactions: d.transactions,
-      expenses: (d as any).expenses ?? [],
-      withdrawals: (d as any).withdrawals ?? [],
+      expenses: d.expenses ?? [],
+      withdrawals: d.withdrawals ?? [],
     });
   }, []);
 
@@ -1964,6 +1964,15 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       }
     }
 
+    if (restoreStatus === 'active_debt') {
+      const sessionAccruals = dailyDebtAccruals.filter(a => a.parkingEntryId === sessionId);
+      const accrualTotal = roundMoney(sessionAccruals.reduce((s, a) => s + a.amount, 0));
+      if (accrualTotal > 0) {
+        updateClientDebt(session.clientId, accrualTotal);
+        console.log(`[Cancel] Restored ${accrualTotal} ₽ to clientDebts for active_debt session ${sessionId}`);
+      }
+    }
+
     addTransaction({
       clientId: session.clientId,
       carId: session.carId,
@@ -1978,7 +1987,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     logAction('cancel_checkout', 'Отмена выезда', `${cancelExitCar?.plateNumber ?? session.carId}, долгов снято: ${relatedDebts.length}${restoreStatus === 'active_debt' ? `, восстановлено в clientDebts` : ''}`, sessionId, 'session');
     schedulePush();
     console.log(`[Cancel] Check-out cancelled: ${sessionId}, debts zeroed: ${relatedDebts.length}, restored to clientDebts: ${restoreStatus === 'active_debt'}`);
-  }, [sessions, debts, currentUser, addTransaction, schedulePush, cars, logAction, updateClientDebt]);
+  }, [sessions, debts, currentUser, addTransaction, schedulePush, cars, logAction, updateClientDebt, dailyDebtAccruals]);
 
   const cancelPayment = useCallback((paymentId: string) => {
     const payment = payments.find(p => p.id === paymentId && !p.cancelled);
@@ -2160,7 +2169,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       return next;
     });
 
-    const cd = clientDebts.find(c => c.clientId === debt.clientId);
+    const latestClientDebts = latestDataRef.current.clientDebts as ClientDebt[] ?? [];
+    const cd = latestClientDebts.find(c => c.clientId === debt.clientId) ?? clientDebts.find(c => c.clientId === debt.clientId);
     if (cd && cd.totalAmount > 0) {
       const cdReduction = roundMoney(Math.min(actualAmount, cd.totalAmount));
       if (cdReduction > 0) {
@@ -2513,7 +2523,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
     const todayStartTime = todayStart.getTime();
-    const openShiftIds = new Set(((d as any).shifts ?? shifts).filter((s: CashShift) => s.status === 'open').map((s: CashShift) => s.id));
+    const openShiftIds = new Set((d.shifts ?? shifts).filter((s: CashShift) => s.status === 'open').map((s: CashShift) => s.id));
     const todayTx = d.transactions.filter(t => {
       if (new Date(t.date).getTime() < todayStartTime) return false;
       if (t.shiftId && openShiftIds.has(t.shiftId)) return false;
@@ -2528,19 +2538,19 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     const cashRefunded = todayTx.filter(t =>
       t.type === 'refund' && t.method === 'cash'
     ).reduce((s, t) => s + t.amount, 0);
-    const freshWithdrawals = (d as any).withdrawals ?? [];
+    const freshWithdrawals = d.withdrawals ?? [];
     const todayWithdrawals = freshWithdrawals.filter((w: any) =>
       new Date(w.date).getTime() >= todayStartTime && (!w.shiftId || !openShiftIds.has(w.shiftId))
     ).reduce((s: number, w: any) => s + w.amount, 0);
-    const freshExpenses = (d as any).expenses ?? [];
+    const freshExpenses = d.expenses ?? [];
     const todayExpenses = freshExpenses.filter((e: any) =>
       new Date(e.date).getTime() >= todayStartTime && (!e.shiftId || !openShiftIds.has(e.shiftId))
     ).reduce((s: number, e: any) => s + e.amount, 0);
-    const freshSalaryAdvances = (d as any).salaryAdvances ?? [];
+    const freshSalaryAdvances = d.salaryAdvances ?? [];
     const todaySalaryAdvanceCash = freshSalaryAdvances.filter((a: any) =>
       new Date(a.issuedAt).getTime() >= todayStartTime && (!a.method || a.method === 'cash') && a.source === 'manager_shift'
     ).reduce((s: number, a: any) => s + a.amount, 0);
-    const freshSalaryPayments = (d as any).salaryPayments ?? [];
+    const freshSalaryPayments = d.salaryPayments ?? [];
     const todaySalaryPayCash = freshSalaryPayments.filter((p: any) =>
       new Date(p.paidAt).getTime() >= todayStartTime && p.method === 'cash' && p.netPaid > 0 && p.source === 'manager_shift'
     ).reduce((s: number, p: any) => s + p.netPaid, 0);
