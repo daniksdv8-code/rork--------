@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useMemo, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, RefreshControl } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Search, Car, Wallet, AlertTriangle, Users, Clock, ChevronRight, LogOut, UserPlus, BarChart3, LogIn, Banknote, PlayCircle, HandCoins, Shield } from 'lucide-react-native';
+import { Search, Car, Wallet, AlertTriangle, Users, Clock, ChevronRight, LogOut, UserPlus, BarChart3, LogIn, Banknote, PlayCircle, HandCoins, Shield, RefreshCw, CheckCircle, WifiOff, AlertCircle } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/providers/AuthProvider';
 import { useParking } from '@/providers/ParkingProvider';
@@ -14,7 +14,7 @@ import { formatMoney } from '@/utils/money';
 export default function DashboardScreen() {
   const router = useRouter();
   const { currentUser, logout } = useAuth();
-  const { todayStats, searchClients, cars, expiringSubscriptions, needsShiftCheck, transactions, getCurrentMonthViolations } = useParking();
+  const { todayStats, searchClients, cars, expiringSubscriptions, needsShiftCheck, transactions, getCurrentMonthViolations, syncStatus, lastSyncTime, forceSync } = useParking();
 
   const monthViolations = useMemo(() => getCurrentMonthViolations(), [getCurrentMonthViolations]);
 
@@ -44,9 +44,36 @@ export default function DashboardScreen() {
     router.push({ pathname: '/client-card', params: { clientId } });
   }, [router]);
 
-  const onRefresh = useCallback(() => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 500);
+    try {
+      await forceSync();
+    } catch (e) {
+      console.log('[Dashboard] Force sync on refresh failed:', e);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [forceSync]);
+
+  const syncLabel = useMemo(() => {
+    if (syncStatus === 'pushing') return 'Сохранение...';
+    if (syncStatus === 'syncing') return 'Синхронизация...';
+    if (syncStatus === 'error') return 'Ошибка связи';
+    if (syncStatus === 'offline') return 'Нет связи';
+    if (lastSyncTime > 0) {
+      const ago = Math.floor((Date.now() - lastSyncTime) / 1000);
+      if (ago < 5) return 'Синхронизировано';
+      if (ago < 60) return `${ago} сек. назад`;
+      if (ago < 3600) return `${Math.floor(ago / 60)} мин. назад`;
+      return 'Давно не обновлялось';
+    }
+    return 'Синхронизация...';
+  }, [syncStatus, lastSyncTime]);
+
+  const [, setTick] = useState<number>(0);
+  useEffect(() => {
+    const timer = setInterval(() => setTick(t => t + 1), 10000);
+    return () => clearInterval(timer);
   }, []);
 
   const handleLogout = useCallback(async () => {
@@ -80,9 +107,35 @@ export default function DashboardScreen() {
           <Text style={styles.greeting}>Здравствуйте,</Text>
           <Text style={styles.userName}>{currentUser.name}</Text>
         </View>
-        <TouchableOpacity onPress={handleLogout} style={styles.logoutBtn}>
-          <LogOut size={20} color={Colors.textSecondary} />
-        </TouchableOpacity>
+        <View style={styles.userRowRight}>
+          <TouchableOpacity
+            onPress={forceSync}
+            style={styles.syncBadge}
+            activeOpacity={0.6}
+            testID="sync-badge"
+          >
+            {syncStatus === 'error' || syncStatus === 'offline' ? (
+              <AlertCircle size={13} color={Colors.danger} />
+            ) : syncStatus === 'pushing' || syncStatus === 'syncing' ? (
+              <RefreshCw size={13} color={Colors.warning} />
+            ) : (
+              <CheckCircle size={13} color={Colors.success} />
+            )}
+            <Text style={[
+              styles.syncText,
+              {
+                color: syncStatus === 'error' || syncStatus === 'offline'
+                  ? Colors.danger
+                  : syncStatus === 'pushing' || syncStatus === 'syncing'
+                    ? Colors.warning
+                    : Colors.success,
+              },
+            ]}>{syncLabel}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={handleLogout} style={styles.logoutBtn}>
+            <LogOut size={20} color={Colors.textSecondary} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <View style={styles.searchContainer}>
@@ -402,6 +455,26 @@ const styles = StyleSheet.create({
   },
   logoutBtn: {
     padding: 8,
+  },
+  userRowRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  syncBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: Colors.card,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: Colors.cardBorder,
+  },
+  syncText: {
+    fontSize: 11,
+    fontWeight: '500' as const,
   },
   authPrompt: {
     flex: 1,

@@ -40,6 +40,8 @@ const STORAGE_KEY = 'park_data';
 const MAX_TRANSACTIONS = 10000;
 const MAX_ACTION_LOGS = 5000;
 
+type SyncStatus = 'synced' | 'syncing' | 'pushing' | 'error' | 'offline';
+
 export const [ParkingProvider, useParking] = createContextHook(() => {
   const { currentUser } = useAuth();
 
@@ -71,6 +73,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   const [deletedClientIds, setDeletedClientIds] = useState<string[]>([]);
   const [isLoaded, setIsLoaded] = useState<boolean>(false);
   const [isServerSynced, setIsServerSynced] = useState<boolean>(false);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('syncing');
+  const [lastSyncTime, setLastSyncTime] = useState<number>(0);
 
   const lastSyncedVersionRef = useRef<number>(-1);
   const pushingRef = useRef<boolean>(false);
@@ -85,14 +89,14 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   const shiftsDirtyUntilRef = useRef<number>(0);
   const salaryDirtyUntilRef = useRef<number>(0);
   const cashOpsDirtyUntilRef = useRef<number>(0);
-  const COLLECTION_DIRTY_MS = 45000;
+  const COLLECTION_DIRTY_MS = 20000;
   const restoreEpochRef = useRef<number>(-1);
   const restoreInProgressRef = useRef<boolean>(false);
   const restoreServerOkRef = useRef<boolean>(false);
   const restoreFinishedAtRef = useRef<number>(0);
   const lastPushCompletedRef = useRef<number>(0);
   const RESTORE_GRACE_MS = 300000;
-  const POST_PUSH_GRACE_MS = 15000;
+  const POST_PUSH_GRACE_MS = 5000;
 
   const latestDataRef = useRef({
     clients, cars, sessions, subscriptions, payments, debts, transactions, tariffs, shifts, expenses, withdrawals, users, deletedClientIds, scheduledShifts, actionLogs, adminExpenses, adminCashOperations, expenseCategories, dailyDebtAccruals, clientDebts, cashOperations, teamViolations, salaryAdvances, salaryPayments, cleanupChecklistTemplate, editHistory,
@@ -119,14 +123,40 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
   const utils = trpc.useUtils();
 
+  const lastActivityRef = useRef<number>(Date.now());
+  const pushRetryCountRef = useRef<number>(0);
+  const consecutiveErrorsRef = useRef<number>(0);
+
+  const getPollingInterval = useCallback((): number => {
+    const idleMs = Date.now() - lastActivityRef.current;
+    if (localDirtyRef.current || pushingRef.current) return 2000;
+    if (idleMs < 30000) return 3000;
+    if (idleMs < 120000) return 5000;
+    return 10000;
+  }, []);
+
+  const [pollingInterval, setPollingInterval] = useState<number>(3000);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const newInterval = getPollingInterval();
+      setPollingInterval(prev => prev !== newInterval ? newInterval : prev);
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [getPollingInterval]);
+
+  const markActivity = useCallback(() => {
+    lastActivityRef.current = Date.now();
+  }, []);
+
   const dataQuery = trpc.parking.getData.useQuery(undefined, {
-    refetchInterval: 3000,
+    refetchInterval: pollingInterval,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
     refetchOnMount: true,
     staleTime: 0,
-    retry: 2,
-    retryDelay: 1000,
+    retry: 3,
+    retryDelay: (attemptIndex) => Math.min(1000 * Math.pow(2, attemptIndex), 8000),
     throwOnError: false,
   });
 
@@ -229,6 +259,9 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     }
     setCleanupChecklistTemplate(d.cleanupChecklistTemplate ?? localData.cleanupChecklistTemplate ?? []);
     setEditHistory(d.editHistory ?? localData.editHistory ?? []);
+    setLastSyncTime(Date.now());
+    consecutiveErrorsRef.current = 0;
+    setSyncStatus('synced');
     console.log(`[Sync] Applied server data (${source ?? '?'}): clients=${serverClientCount}, sessions=${(d.sessions||[]).length}, shifts=${(d.shifts||[]).length}, users=${(serverUsers||[]).length}`);
   }, []);
 
@@ -400,6 +433,22 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dataQuery.data, isLoaded, isServerSynced, applyServerData]);
 
+  useEffect(() => {
+    if (dataQuery.isError && !pushingRef.current && !localDirtyRef.current) {
+      consecutiveErrorsRef.current++;
+      if (consecutiveErrorsRef.current >= 3) {
+        setSyncStatus('error');
+      }
+      console.log(`[Sync] Poll error #${consecutiveErrorsRef.current}:`, dataQuery.error?.message);
+    } else if (dataQuery.isSuccess && !pushingRef.current && !localDirtyRef.current) {
+      consecutiveErrorsRef.current = 0;
+      if (syncStatus === 'error' || syncStatus === 'offline') {
+        setSyncStatus('synced');
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dataQuery.isError, dataQuery.isSuccess, dataQuery.dataUpdatedAt]);
+
   const pushToServer = useCallback(async () => {
     if (restoreInProgressRef.current) {
       console.log('[Sync] Push blocked: restore in progress');
@@ -410,6 +459,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       return;
     }
     pushingRef.current = true;
+    setSyncStatus('pushing');
 
     try {
       const localData = latestDataRef.current;
@@ -423,6 +473,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         clientRestoreEpoch: restoreEpochRef.current >= 0 ? restoreEpochRef.current : undefined,
       } as any) as any;
 
+      pushRetryCountRef.current = 0;
+      consecutiveErrorsRef.current = 0;
       const isGracePeriod = restoreFinishedAtRef.current > 0 && (Date.now() - restoreFinishedAtRef.current) < RESTORE_GRACE_MS;
 
       if (result.epochConflict) {
@@ -450,6 +502,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       lastSyncedVersionRef.current = result.version;
       restoreEpochRef.current = result.restoreEpoch ?? restoreEpochRef.current;
       lastPushCompletedRef.current = Date.now();
+      setLastSyncTime(Date.now());
 
       const hasNewLocalChanges = localChangeCounterRef.current !== changeCountBefore;
 
@@ -480,17 +533,23 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         }, 50);
       } else {
         localDirtyRef.current = false;
+        setSyncStatus('synced');
       }
 
       void utils.parking.getData.invalidate();
     } catch (e) {
       console.log('[Sync] Push failed, will retry:', e);
       localDirtyRef.current = true;
+      pushRetryCountRef.current++;
+      consecutiveErrorsRef.current++;
+      const retryDelay = Math.min(1000 * Math.pow(2, pushRetryCountRef.current - 1), 15000);
+      setSyncStatus(consecutiveErrorsRef.current >= 3 ? 'error' : 'pushing');
+      console.log(`[Sync] Retry #${pushRetryCountRef.current} in ${retryDelay}ms`);
       if (pushRetryTimerRef.current) clearTimeout(pushRetryTimerRef.current);
       pushRetryTimerRef.current = setTimeout(() => {
         pushRetryTimerRef.current = null;
         void pushToServer();
-      }, 1500);
+      }, retryDelay);
     } finally {
       pushingRef.current = false;
     }
@@ -505,6 +564,8 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     }
     localDirtyRef.current = true;
     localChangeCounterRef.current++;
+    lastActivityRef.current = Date.now();
+    setSyncStatus('pushing');
     if (pushTimerRef.current) {
       clearTimeout(pushTimerRef.current);
     }
@@ -523,6 +584,28 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       void pushToServer();
     }, 50);
   }, [pushToServer]);
+
+  const forceSync = useCallback(async () => {
+    console.log('[Sync] Force sync requested');
+    lastActivityRef.current = Date.now();
+    setSyncStatus('syncing');
+    pushRetryCountRef.current = 0;
+    consecutiveErrorsRef.current = 0;
+    try {
+      if (localDirtyRef.current) {
+        console.log('[Sync] Force sync: pushing local changes first');
+        await pushToServer();
+      }
+      await utils.parking.getData.invalidate();
+      await utils.parking.getData.refetch();
+      setLastSyncTime(Date.now());
+      setSyncStatus('synced');
+      console.log('[Sync] Force sync completed');
+    } catch (e) {
+      console.log('[Sync] Force sync failed:', e);
+      setSyncStatus('error');
+    }
+  }, [pushToServer, utils]);
 
   const updateShiftExpected = useCallback((shiftId: string, amount: number) => {
     const now = new Date().toISOString();
@@ -5101,6 +5184,9 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     scheduledShifts: activeScheduledShifts,
     isLoaded,
     isServerSynced,
+    syncStatus,
+    lastSyncTime,
+    forceSync,
     activeSessions,
     debtors,
     todayStats,
@@ -5206,7 +5292,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     clients, cars, activeClients, activeCars, isClientDeleted,
     sessions, subscriptions, payments, debts, transactions, tariffs,
     shifts, expenses, withdrawals, users, activeScheduledShifts, actionLogs,
-    isLoaded, isServerSynced, activeSessions, debtors, todayStats, expiringSubscriptions,
+    isLoaded, isServerSynced, syncStatus, lastSyncTime, forceSync, activeSessions, debtors, todayStats, expiringSubscriptions,
     getClientByCar, getCarsByClient, getAllCarsByClient, getClientDebts, getClientTotalDebt, getSubscription,
     updateClient, updateCar,
     addClient, addCarToClient, checkIn, checkOut,
