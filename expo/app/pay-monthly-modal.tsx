@@ -1,12 +1,12 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Alert, TextInput } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Wallet, Check, Calendar, ChevronLeft, ChevronRight, AlertTriangle } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useParking } from '@/providers/ParkingProvider';
 import { useAuth } from '@/providers/AuthProvider';
 import { PaymentMethod } from '@/types';
-import { formatDate, isExpired, daysBetween, calculateProRataAmount, getMonthlyAmount } from '@/utils/date';
+import { formatDate, isExpired, daysBetween, calculateProRataAmount, getMonthlyAmount, daysInMonth } from '@/utils/date';
 import { roundMoney } from '@/utils/money';
 
 export default function PayMonthlyModal() {
@@ -211,6 +211,22 @@ export default function PayMonthlyModal() {
   const monthNames = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
   const weekDays = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 
+  const [customDaysInput, setCustomDaysInput] = useState<string>('');
+  const [customDaysActive, setCustomDaysActive] = useState<boolean>(false);
+
+  const getSmartMonthDays = useCallback((fromDate: Date): number => {
+    if (fromDate.getDate() === 1) {
+      return daysInMonth(fromDate.getFullYear(), fromDate.getMonth());
+    }
+    return 30;
+  }, []);
+
+  const smartMonthLabel = useMemo(() => {
+    const base = subExpired && subPaidUntilDate ? subPaidUntilDate : new Date();
+    const d = getSmartMonthDays(base);
+    return `Месяц (${d} дн.)`;
+  }, [subExpired, subPaidUntilDate, getSmartMonthDays]);
+
   const quickPeriods = useMemo(() => {
     return [
       { label: '15 дн.', days: 15 },
@@ -225,6 +241,33 @@ export default function PayMonthlyModal() {
     s.setHours(0, 0, 0, 0);
     const e = new Date(s);
     e.setDate(e.getDate() + numDays - 1);
+    setStartDate(s);
+    setEndDate(e);
+    setCalendarMonth(new Date(s.getFullYear(), s.getMonth(), 1));
+    setCustomDaysActive(false);
+    setCustomDaysInput('');
+  }, [subExpired, subPaidUntilDate]);
+
+  const handleSmartMonth = useCallback(() => {
+    const s = subExpired && subPaidUntilDate ? new Date(subPaidUntilDate) : new Date();
+    s.setHours(0, 0, 0, 0);
+    const numDays = getSmartMonthDays(s);
+    const e = new Date(s);
+    e.setDate(e.getDate() + numDays - 1);
+    setStartDate(s);
+    setEndDate(e);
+    setCalendarMonth(new Date(s.getFullYear(), s.getMonth(), 1));
+    setCustomDaysActive(false);
+    setCustomDaysInput('');
+  }, [subExpired, subPaidUntilDate, getSmartMonthDays]);
+
+  const handleCustomDaysApply = useCallback((text: string) => {
+    const num = parseInt(text, 10);
+    if (!num || num <= 0) return;
+    const s = subExpired && subPaidUntilDate ? new Date(subPaidUntilDate) : new Date();
+    s.setHours(0, 0, 0, 0);
+    const e = new Date(s);
+    e.setDate(e.getDate() + num - 1);
     setStartDate(s);
     setEndDate(e);
     setCalendarMonth(new Date(s.getFullYear(), s.getMonth(), 1));
@@ -304,15 +347,46 @@ export default function PayMonthlyModal() {
       </View>
 
       <View style={styles.quickRow}>
+        <TouchableOpacity
+          style={[styles.quickBtnMonth, days === getSmartMonthDays(subExpired && subPaidUntilDate ? subPaidUntilDate : startDate) && !customDaysActive && styles.quickBtnActive]}
+          onPress={handleSmartMonth}
+        >
+          <Text style={[styles.quickBtnText, days === getSmartMonthDays(subExpired && subPaidUntilDate ? subPaidUntilDate : startDate) && !customDaysActive && styles.quickBtnTextActive]}>{smartMonthLabel}</Text>
+        </TouchableOpacity>
         {quickPeriods.map(p => (
           <TouchableOpacity
             key={p.days}
-            style={[styles.quickBtn, days === p.days && styles.quickBtnActive]}
+            style={[styles.quickBtn, days === p.days && !customDaysActive && styles.quickBtnActive]}
             onPress={() => handleQuickPeriod(p.days)}
           >
-            <Text style={[styles.quickBtnText, days === p.days && styles.quickBtnTextActive]}>{p.label}</Text>
+            <Text style={[styles.quickBtnText, days === p.days && !customDaysActive && styles.quickBtnTextActive]}>{p.label}</Text>
           </TouchableOpacity>
         ))}
+      </View>
+
+      <View style={styles.customDaysRow}>
+        <Text style={styles.customDaysLabel}>Или введите кол-во дней:</Text>
+        <View style={styles.customDaysInputWrap}>
+          <TextInput
+            style={[styles.customDaysInput, customDaysActive && styles.customDaysInputActive]}
+            value={customDaysInput}
+            onChangeText={(text) => {
+              const cleaned = text.replace(/[^0-9]/g, '');
+              setCustomDaysInput(cleaned);
+              setCustomDaysActive(cleaned.length > 0);
+              if (cleaned.length > 0) {
+                handleCustomDaysApply(cleaned);
+              }
+            }}
+            keyboardType="number-pad"
+            placeholder="Дни"
+            placeholderTextColor={Colors.textMuted}
+            maxLength={3}
+          />
+          {customDaysActive && customDaysInput.length > 0 && (
+            <Text style={styles.customDaysHint}>{days} дн. = {amount} ₽</Text>
+          )}
+        </View>
       </View>
 
       <View style={styles.calendarCard}>
@@ -584,6 +658,16 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 16,
   },
+  quickBtnMonth: {
+    paddingHorizontal: 12,
+    height: 36,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.card,
+    borderWidth: 1,
+    borderColor: Colors.cardBorder,
+  },
   quickBtn: {
     flex: 1,
     height: 36,
@@ -605,6 +689,45 @@ const styles = StyleSheet.create({
   },
   quickBtnTextActive: {
     color: Colors.white,
+  },
+  customDaysRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    gap: 10,
+  },
+  customDaysLabel: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    fontWeight: '500' as const,
+  },
+  customDaysInputWrap: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  customDaysInput: {
+    width: 70,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: Colors.card,
+    borderWidth: 1,
+    borderColor: Colors.cardBorder,
+    textAlign: 'center' as const,
+    fontSize: 15,
+    fontWeight: '600' as const,
+    color: Colors.text,
+    paddingHorizontal: 8,
+  },
+  customDaysInputActive: {
+    borderColor: Colors.primary,
+    borderWidth: 2,
+  },
+  customDaysHint: {
+    fontSize: 13,
+    color: Colors.primary,
+    fontWeight: '600' as const,
   },
   calendarCard: {
     backgroundColor: Colors.card,
