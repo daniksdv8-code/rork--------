@@ -14,6 +14,7 @@ export default function TabLayout() {
           borderTopColor: Colors.tabBarBorder,
         },
         headerShown: false,
+        lazy: true,
       }}
     >
       <Tabs.Screen

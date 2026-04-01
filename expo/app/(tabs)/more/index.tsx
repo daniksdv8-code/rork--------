@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import React, { useState, useEffect, useMemo } from 'react';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, InteractionManager, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { AlertTriangle, Clock, BarChart3, Settings, ChevronRight, Banknote, CalendarDays, FileText, Download, Wallet, Briefcase, ShieldCheck, Sparkles } from 'lucide-react-native';
 import Colors from '@/constants/colors';
@@ -9,7 +9,20 @@ import { useParking } from '@/providers/ParkingProvider';
 export default function MoreScreen() {
   const router = useRouter();
   const { isAdmin } = useAuth();
-  const { debtors } = useParking();
+  const parking = useParking() as any;
+  const debtors = parking?.debtors ?? [];
+  const [isReady, setIsReady] = useState<boolean>(false);
+
+  useEffect(() => {
+    const handle = InteractionManager.runAfterInteractions(() => {
+      setIsReady(true);
+    });
+    return () => handle.cancel();
+  }, []);
+
+  const debtorsBadge = useMemo(() => {
+    return debtors.length > 0 ? String(debtors.length) : undefined;
+  }, [debtors.length]);
 
   const menuItems: { label: string; icon: typeof AlertTriangle; route: string; color: string; badge?: string }[] = [
     {
@@ -17,7 +30,7 @@ export default function MoreScreen() {
       icon: AlertTriangle,
       route: '/(tabs)/more/debtors',
       color: Colors.danger,
-      badge: debtors.length > 0 ? String(debtors.length) : undefined,
+      badge: debtorsBadge,
     },
     {
       label: 'История транзакций',
@@ -90,6 +103,14 @@ export default function MoreScreen() {
     });
   }
 
+  if (!isReady) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="small" color={Colors.primary} />
+      </View>
+    );
+  }
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.menuList}>
@@ -118,6 +139,12 @@ export default function MoreScreen() {
 }
 
 const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: Colors.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   container: {
     flex: 1,
     backgroundColor: Colors.background,
