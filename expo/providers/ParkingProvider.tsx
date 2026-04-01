@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import createContextHook from '@nkzw/create-context-hook';
 import {
@@ -982,6 +983,16 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   }, [currentUser]);
 
   const checkIn = useCallback((carId: string, clientId: string, serviceType: ServiceType, plannedDepartureTime?: string, paymentAtEntry?: { method: PaymentMethod; amount: number; days?: number; paidUntilDate?: string; baseAmount?: number; adjustmentReason?: string }, debtAtEntry?: { amount: number; description?: string; paidUntilDate?: string }, isSecondary?: boolean, lombardEntry?: boolean) => {
+    const existingActiveSession = latestDataRef.current.sessions.find(
+      s => s.carId === carId && (s.status === 'active' || s.status === 'active_debt') && !s.cancelled
+    );
+    if (existingActiveSession) {
+      const car = latestDataRef.current.cars.find(c => c.id === carId);
+      const plate = car?.plateNumber ?? carId;
+      console.warn(`[CheckIn] Blocked: car ${plate} already has active session ${existingActiveSession.id}`);
+      Alert.alert('Авто уже на парковке', `Автомобиль ${plate} уже стоит на парковке. Сначала оформите выезд текущей сессии.`);
+      return;
+    }
     if (paymentAtEntry && paymentAtEntry.amount > 0) {
       cashOpsDirtyUntilRef.current = Date.now() + COLLECTION_DIRTY_MS;
     }
