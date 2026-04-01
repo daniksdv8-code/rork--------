@@ -720,11 +720,12 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
   const updateClientDebt = useCallback((clientId: string, amountDelta: number) => {
     const now = new Date().toISOString();
     setClientDebts(prev => {
+      let next: ClientDebt[];
       const existing = prev.find(cd => cd.clientId === clientId);
       if (existing) {
         const newTotal = roundMoney(Math.max(0, existing.totalAmount + amountDelta));
         const newActive = roundMoney(Math.max(0, existing.activeAmount + amountDelta));
-        return prev.map(cd => cd.clientId === clientId ? {
+        next = prev.map(cd => cd.clientId === clientId ? {
           ...cd,
           totalAmount: newTotal,
           activeAmount: newActive,
@@ -739,9 +740,12 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
           activeAmount: roundMoney(amountDelta),
           lastUpdate: now,
         };
-        return [...prev, newCd];
+        next = [...prev, newCd];
+      } else {
+        next = prev;
       }
-      return prev;
+      latestDataRef.current = { ...latestDataRef.current, clientDebts: next };
+      return next;
     });
     console.log(`[ClientDebt] Updated for ${clientId}: delta=${amountDelta}`);
   }, []);
@@ -835,7 +839,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       return;
     }
 
-    setDailyDebtAccruals(prev => [...prev, ...newAccruals]);
+    setDailyDebtAccruals(prev => {
+      const next = [...prev, ...newAccruals];
+      latestDataRef.current = { ...latestDataRef.current, dailyDebtAccruals: next };
+      return next;
+    });
 
     const nowStr = now.toISOString();
     setClientDebts(prev => {
@@ -860,6 +868,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
           });
         }
       }
+      latestDataRef.current = { ...latestDataRef.current, clientDebts: updated };
       return updated;
     });
 
@@ -1061,7 +1070,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       tariffType: isLombard ? 'lombard' : 'standard',
       lombardRateApplied: lombardRate,
     };
-    setSessions(prev => [...prev, session]);
+    setSessions(prev => {
+      const next = [...prev, session];
+      latestDataRef.current = { ...latestDataRef.current, sessions: next };
+      return next;
+    });
     addTransaction({
       clientId,
       carId,
@@ -1179,7 +1192,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
           tariffRate: dailyRate,
           createdAt: sessionNow,
         };
-        setDailyDebtAccruals(prev => [...prev, firstAccrual]);
+        setDailyDebtAccruals(prev => {
+          const next = [...prev, firstAccrual];
+          latestDataRef.current = { ...latestDataRef.current, dailyDebtAccruals: next };
+          return next;
+        });
         updateClientDebt(clientId, dailyRate);
         addTransaction({
           clientId,
@@ -1270,15 +1287,20 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     const isDebtSession = session.status === 'active_debt';
 
     if (isDebtSession && !paymentAtExit) {
-      setSessions(prev => prev.map(s =>
-        s.id === sessionId ? { ...s, exitTime: now, status: 'released_debt' as any, updatedAt: now } : s
-      ));
+      setSessions(prev => {
+        const next = prev.map(s =>
+          s.id === sessionId ? { ...s, exitTime: now, status: 'released_debt' as any, updatedAt: now } : s
+        );
+        latestDataRef.current = { ...latestDataRef.current, sessions: next };
+        return next;
+      });
 
       const entryAccruals = dailyDebtAccruals.filter(a => a.parkingEntryId === sessionId);
       const accrualTotal = roundMoney(entryAccruals.reduce((s, a) => s + a.amount, 0));
 
-      const cd = clientDebts.find(c => c.clientId === session.clientId);
-      const currentCdTotal = cd ? cd.totalAmount : 0;
+      const latestCd = (latestDataRef.current.clientDebts as ClientDebt[])?.find(c => c.clientId === session.clientId)
+        ?? clientDebts.find(c => c.clientId === session.clientId);
+      const currentCdTotal = latestCd ? latestCd.totalAmount : 0;
       const actualDebtRemaining = roundMoney(Math.min(accrualTotal, currentCdTotal));
       const removalFromCd = roundMoney(Math.min(accrualTotal, currentCdTotal));
 
@@ -1329,8 +1351,9 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     if (isDebtSession && paymentAtExit) {
       const entryAccruals = dailyDebtAccruals.filter(a => a.parkingEntryId === sessionId);
       const accrualTotal = roundMoney(entryAccruals.reduce((s, a) => s + a.amount, 0));
-      const cdForExit = clientDebts.find(c => c.clientId === session.clientId);
-      const currentCdTotalForExit = cdForExit ? cdForExit.totalAmount : 0;
+      const latestCdForExit = (latestDataRef.current.clientDebts as ClientDebt[])?.find(c => c.clientId === session.clientId)
+        ?? clientDebts.find(c => c.clientId === session.clientId);
+      const currentCdTotalForExit = latestCdForExit ? latestCdForExit.totalAmount : 0;
       const actualSessionDebt = roundMoney(Math.min(accrualTotal, currentCdTotalForExit));
       const paidAmount = roundMoney(Math.min(paymentAtExit.amount, actualSessionDebt));
       const afterPay = roundMoney(actualSessionDebt - paidAmount);
@@ -1338,9 +1361,13 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       const isLombardSession = session.tariffType === 'lombard' || session.serviceType === 'lombard';
       const exitServiceType = isLombardSession ? 'lombard' as const : session.serviceType;
 
-      setSessions(prev => prev.map(s =>
-        s.id === sessionId ? { ...s, exitTime: now, status: (afterPay > 0 ? 'released_debt' : 'completed') as any, updatedAt: now } : s
-      ));
+      setSessions(prev => {
+        const next = prev.map(s =>
+          s.id === sessionId ? { ...s, exitTime: now, status: (afterPay > 0 ? 'released_debt' : 'completed') as any, updatedAt: now } : s
+        );
+        latestDataRef.current = { ...latestDataRef.current, sessions: next };
+        return next;
+      });
 
       if (paidAmount > 0) {
         const payDesc = `Оплата при выезде (долг): ${paidAmount} ₽ (${methodLabel(paymentAtExit.method)})`;
@@ -1437,9 +1464,13 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     }
 
     const newStatus = releaseInDebt ? 'released_debt' : 'completed';
-    setSessions(prev => prev.map(s =>
-      s.id === sessionId ? { ...s, exitTime: now, status: newStatus as any, updatedAt: now } : s
-    ));
+    setSessions(prev => {
+      const next = prev.map(s =>
+        s.id === sessionId ? { ...s, exitTime: now, status: newStatus as any, updatedAt: now } : s
+      );
+      latestDataRef.current = { ...latestDataRef.current, sessions: next };
+      return next;
+    });
 
     if (session.serviceType === 'onetime') {
       const days = calculateDays(session.entryTime, now);
@@ -1758,9 +1789,13 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     const usedAmount = roundMoney(daysUsed * dailyRate);
     const refundAmount = roundMoney(Math.max(0, paidAmount - usedAmount));
 
-    setSessions(prev => prev.map(s =>
-      s.id === sessionId ? { ...s, exitTime: now, status: 'completed' as const, updatedAt: now } : s
-    ));
+    setSessions(prev => {
+      const next = prev.map(s =>
+        s.id === sessionId ? { ...s, exitTime: now, status: 'completed' as const, updatedAt: now } : s
+      );
+      latestDataRef.current = { ...latestDataRef.current, sessions: next };
+      return next;
+    });
 
     addTransaction({
       clientId: session.clientId,
@@ -1843,9 +1878,13 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     const isLombardCancel = session.tariffType === 'lombard' || session.serviceType === 'lombard';
     const isDebtCancel = session.status === 'active_debt';
 
-    setSessions(prev => prev.map(s =>
-      s.id === sessionId ? { ...s, status: 'completed' as const, exitTime: cancelNow, cancelled: true, updatedAt: cancelNow } : s
-    ));
+    setSessions(prev => {
+      const next = prev.map(s =>
+        s.id === sessionId ? { ...s, status: 'completed' as const, exitTime: cancelNow, cancelled: true, updatedAt: cancelNow } : s
+      );
+      latestDataRef.current = { ...latestDataRef.current, sessions: next };
+      return next;
+    });
 
     if (isDebtCancel) {
       const cancelAccruals = dailyDebtAccruals.filter(a => a.parkingEntryId === sessionId);
@@ -1854,7 +1893,11 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
         updateClientDebt(session.clientId, -cancelAccrualTotal);
         console.log(`[Cancel] Reversed ${cancelAccrualTotal} ₽ from clientDebts for cancelled debt entry ${sessionId}`);
       }
-      setDailyDebtAccruals(prev => prev.filter(a => a.parkingEntryId !== sessionId));
+      setDailyDebtAccruals(prev => {
+        const next = prev.filter(a => a.parkingEntryId !== sessionId);
+        latestDataRef.current = { ...latestDataRef.current, dailyDebtAccruals: next };
+        return next;
+      });
 
       const cancelEntryDebts = debts.filter(d => d.parkingEntryId === sessionId && d.remainingAmount > 0);
       if (cancelEntryDebts.length > 0) {
@@ -1896,9 +1939,13 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
     const restoreStatus = session.status === 'released_debt' ? 'active_debt' : 'active';
     const now = new Date().toISOString();
-    setSessions(prev => prev.map(s =>
-      s.id === sessionId ? { ...s, status: restoreStatus as any, exitTime: null, updatedAt: now } : s
-    ));
+    setSessions(prev => {
+      const next = prev.map(s =>
+        s.id === sessionId ? { ...s, status: restoreStatus as any, exitTime: null, updatedAt: now } : s
+      );
+      latestDataRef.current = { ...latestDataRef.current, sessions: next };
+      return next;
+    });
 
     if (relatedDebts.length > 0) {
       const debtRemainingToRestore = roundMoney(relatedDebts.reduce((s, d) => s + d.remainingAmount, 0));
@@ -3483,11 +3530,15 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       c.id === carId ? { ...c, deleted: true, deletedAt: now, updatedAt: now } : c
     ));
 
-    setSessions(prev => prev.map(s =>
-      s.carId === carId && (s.status === 'active' || s.status === 'active_debt')
-        ? { ...s, status: 'completed' as const, exitTime: now, cancelled: true, updatedAt: now }
-        : s
-    ));
+    setSessions(prev => {
+      const next = prev.map(s =>
+        s.carId === carId && (s.status === 'active' || s.status === 'active_debt')
+          ? { ...s, status: 'completed' as const, exitTime: now, cancelled: true, updatedAt: now }
+          : s
+      );
+      latestDataRef.current = { ...latestDataRef.current, sessions: next };
+      return next;
+    });
 
     logAction('car_delete', 'Удалена машина', `${car.plateNumber}${car.carModel ? ` (${car.carModel})` : ''}`, carId, 'car');
     schedulePush();
@@ -3505,11 +3556,15 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     setCars(prev => prev.map(c =>
       c.clientId === clientId ? { ...c, deleted: true, deletedAt: now, updatedAt: now } : c
     ));
-    setSessions(prev => prev.map(s =>
-      s.clientId === clientId && (s.status === 'active' || s.status === 'active_debt')
-        ? { ...s, status: 'completed' as const, exitTime: now, cancelled: true, updatedAt: now }
-        : s
-    ));
+    setSessions(prev => {
+      const next = prev.map(s =>
+        s.clientId === clientId && (s.status === 'active' || s.status === 'active_debt')
+          ? { ...s, status: 'completed' as const, exitTime: now, cancelled: true, updatedAt: now }
+          : s
+      );
+      latestDataRef.current = { ...latestDataRef.current, sessions: next };
+      return next;
+    });
 
     setDeletedClientIds(prev => prev.includes(clientId) ? prev : [...prev, clientId]);
 
