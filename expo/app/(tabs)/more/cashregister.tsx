@@ -1016,14 +1016,13 @@ export default function CashRegisterScreen() {
       </ScrollView>
 
       <Modal visible={showCloseModal} transparent animationType="fade">
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+        <TouchableWithoutFeedback onPress={() => { Keyboard.dismiss(); setShowCloseModal(false); }}>
           <View style={styles.modalOverlay}>
             <KeyboardAvoidingView
               behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
               style={styles.modalKeyboardView}
             >
-              <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-                <View style={styles.modalCard}>
+              <View style={styles.modalCard} onStartShouldSetResponder={() => true}>
                   <View style={styles.modalHeader}>
                     <Text style={styles.modalTitle}>Закрытие смены</Text>
                     <TouchableOpacity onPress={() => setShowCloseModal(false)}>
@@ -1076,22 +1075,20 @@ export default function CashRegisterScreen() {
                   <TouchableOpacity style={styles.modalSubmitBtn} onPress={handleCloseShift} activeOpacity={0.7}>
                     <Text style={styles.modalSubmitText}>Закрыть смену и выйти</Text>
                   </TouchableOpacity>
-                </View>
-              </TouchableWithoutFeedback>
+              </View>
             </KeyboardAvoidingView>
           </View>
         </TouchableWithoutFeedback>
       </Modal>
 
       <Modal visible={showExpenseModal} transparent animationType="fade">
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+        <TouchableWithoutFeedback onPress={() => { Keyboard.dismiss(); setShowExpenseModal(false); }}>
           <View style={styles.modalOverlay}>
             <KeyboardAvoidingView
               behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
               style={styles.modalKeyboardView}
             >
-              <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-                <View style={styles.modalCard}>
+              <View style={styles.modalCard} onStartShouldSetResponder={() => true}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Новый расход</Text>
               <TouchableOpacity onPress={() => setShowExpenseModal(false)}>
@@ -1143,22 +1140,20 @@ export default function CashRegisterScreen() {
                   <TouchableOpacity style={styles.modalSubmitBtn} onPress={() => handleAddExpense()} activeOpacity={0.7}>
                     <Text style={styles.modalSubmitText}>Добавить расход</Text>
                   </TouchableOpacity>
-                </View>
-              </TouchableWithoutFeedback>
+              </View>
             </KeyboardAvoidingView>
           </View>
         </TouchableWithoutFeedback>
       </Modal>
 
       <Modal visible={showWithdrawModal} transparent animationType="fade">
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+        <TouchableWithoutFeedback onPress={() => { Keyboard.dismiss(); setShowWithdrawModal(false); }}>
           <View style={styles.modalOverlay}>
             <KeyboardAvoidingView
               behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
               style={styles.modalKeyboardView}
             >
-              <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-                <View style={styles.modalCard}>
+              <View style={styles.modalCard} onStartShouldSetResponder={() => true}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Снятие из кассы</Text>
               <TouchableOpacity onPress={() => setShowWithdrawModal(false)}>
@@ -1202,8 +1197,7 @@ export default function CashRegisterScreen() {
                   <TouchableOpacity style={styles.modalSubmitBtn} onPress={() => handleWithdraw()} activeOpacity={0.7}>
                     <Text style={styles.modalSubmitText}>Снять из кассы</Text>
                   </TouchableOpacity>
-                </View>
-              </TouchableWithoutFeedback>
+              </View>
             </KeyboardAvoidingView>
           </View>
         </TouchableWithoutFeedback>
