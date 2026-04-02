@@ -233,55 +233,54 @@ export default function CashRegisterScreen() {
     Alert.alert('Готово', `Снято из кассы: ${amount} ₽`);
   }, [withdrawAmount, withdrawNotes, withdrawCash, isAdmin]);
 
-  const shiftCashIncome = useCallback((shift: CashShift) => {
-    if (shift.closingSummary) return shift.closingSummary.cashIncome;
+  const isInShift = useCallback((t: { date: string; shiftId?: string | null }, shift: CashShift) => {
+    if (t.shiftId === shift.id) return true;
+    if (t.shiftId && t.shiftId !== shift.id) return false;
     const openTime = new Date(shift.openedAt).getTime();
     const closeTime = shift.closedAt ? new Date(shift.closedAt).getTime() : Date.now();
+    const tTime = new Date(t.date).getTime();
+    return tTime >= openTime && tTime <= closeTime;
+  }, []);
+
+  const shiftCashIncome = useCallback((shift: CashShift) => {
+    if (shift.closingSummary) return shift.closingSummary.cashIncome;
     const txs = transactions as Transaction[];
     const income = txs.filter((t: Transaction) =>
       (t.type === 'payment' || t.type === 'debt_payment') &&
       t.method === 'cash' &&
       t.amount > 0 &&
-      new Date(t.date).getTime() >= openTime &&
-      new Date(t.date).getTime() <= closeTime
+      isInShift(t, shift)
     ).reduce((s: number, t: Transaction) => s + t.amount, 0);
     const cancelled = txs.filter((t: Transaction) =>
       t.type === 'cancel_payment' && t.method === 'cash' &&
-      new Date(t.date).getTime() >= openTime &&
-      new Date(t.date).getTime() <= closeTime
+      isInShift(t, shift)
     ).reduce((s: number, t: Transaction) => s + t.amount, 0);
     const refunded = txs.filter((t: Transaction) =>
       t.type === 'refund' && t.method === 'cash' &&
-      new Date(t.date).getTime() >= openTime &&
-      new Date(t.date).getTime() <= closeTime
+      isInShift(t, shift)
     ).reduce((s: number, t: Transaction) => s + t.amount, 0);
     return Math.round(income - cancelled - refunded);
-  }, [transactions]);
+  }, [transactions, isInShift]);
 
   const shiftCardIncome = useCallback((shift: CashShift) => {
     if (shift.closingSummary) return shift.closingSummary.cardIncome;
-    const openTime = new Date(shift.openedAt).getTime();
-    const closeTime = shift.closedAt ? new Date(shift.closedAt).getTime() : Date.now();
     const txs = transactions as Transaction[];
     const income = txs.filter((t: Transaction) =>
       (t.type === 'payment' || t.type === 'debt_payment') &&
       t.method === 'card' &&
       t.amount > 0 &&
-      new Date(t.date).getTime() >= openTime &&
-      new Date(t.date).getTime() <= closeTime
+      isInShift(t, shift)
     ).reduce((s: number, t: Transaction) => s + t.amount, 0);
     const cancelled = txs.filter((t: Transaction) =>
       t.type === 'cancel_payment' && t.method === 'card' &&
-      new Date(t.date).getTime() >= openTime &&
-      new Date(t.date).getTime() <= closeTime
+      isInShift(t, shift)
     ).reduce((s: number, t: Transaction) => s + t.amount, 0);
     const refunded = txs.filter((t: Transaction) =>
       t.type === 'refund' && t.method === 'card' &&
-      new Date(t.date).getTime() >= openTime &&
-      new Date(t.date).getTime() <= closeTime
+      isInShift(t, shift)
     ).reduce((s: number, t: Transaction) => s + t.amount, 0);
     return Math.round(income - cancelled - refunded);
-  }, [transactions]);
+  }, [transactions, isInShift]);
 
   const shiftExpenses = useCallback((shiftId: string) => {
     return (expenses as Expense[]).filter((e: Expense) => e.shiftId === shiftId);
@@ -300,24 +299,19 @@ export default function CashRegisterScreen() {
   }, [withdrawals]);
 
   const operatorBreakdown = useCallback((shift: CashShift) => {
-    const openTime = new Date(shift.openedAt).getTime();
-    const closeTime = shift.closedAt ? new Date(shift.closedAt).getTime() : Date.now();
     const txs = transactions as Transaction[];
     const shiftTx = txs.filter((t: Transaction) =>
       (t.type === 'payment' || t.type === 'debt_payment') &&
       t.amount > 0 &&
-      new Date(t.date).getTime() >= openTime &&
-      new Date(t.date).getTime() <= closeTime
+      isInShift(t, shift)
     );
     const cancelTx = txs.filter((t: Transaction) =>
       t.type === 'cancel_payment' &&
-      new Date(t.date).getTime() >= openTime &&
-      new Date(t.date).getTime() <= closeTime
+      isInShift(t, shift)
     );
     const refundTx = txs.filter((t: Transaction) =>
       t.type === 'refund' &&
-      new Date(t.date).getTime() >= openTime &&
-      new Date(t.date).getTime() <= closeTime
+      isInShift(t, shift)
     );
     const byOp: Record<string, { name: string; cash: number; card: number }> = {};
     shiftTx.forEach((t: Transaction) => {
@@ -335,7 +329,7 @@ export default function CashRegisterScreen() {
       else if (t.method === 'card') byOp[t.operatorId].card -= t.amount;
     });
     return Object.values(byOp);
-  }, [transactions]);
+  }, [transactions, isInShift]);
 
   const reportData = useMemo(() => {
     const now = new Date();

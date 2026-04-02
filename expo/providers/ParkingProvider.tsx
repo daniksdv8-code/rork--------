@@ -3243,7 +3243,16 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     const shift = shifts.find(s => s.id === shiftId);
     if (!shift) return;
 
-    const allShiftTx = transactions.filter(t => t.shiftId === shiftId);
+    const openTime = new Date(shift.openedAt).getTime();
+    const closeTime = Date.now();
+    const isInShift = (t: { date: string; shiftId?: string | null }) => {
+      if (t.shiftId === shiftId) return true;
+      if (t.shiftId && t.shiftId !== shiftId) return false;
+      const tTime = new Date(t.date).getTime();
+      return tTime >= openTime && tTime <= closeTime;
+    };
+
+    const allShiftTx = transactions.filter(t => isInShift(t));
     const shiftTx = allShiftTx.filter(t =>
       (t.type === 'payment' || t.type === 'debt_payment') &&
       t.amount > 0
@@ -3263,6 +3272,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     const totalExpenses = roundMoney(expenses.filter(e => e.shiftId === shiftId).reduce((s, e) => s + e.amount, 0));
     const totalWithdrawals = roundMoney(withdrawals.filter(w => w.shiftId === shiftId).reduce((s, w) => s + w.amount, 0));
     const calculatedBalance = roundMoney(shift.carryOver + cashIncome - totalExpenses - totalWithdrawals);
+    console.log(`[Shift] closeShift calc: carryOver=${shift.carryOver}, cashIncome=${cashIncome}, expenses=${totalExpenses}, withdrawals=${totalWithdrawals}, calculated=${calculatedBalance}, txByShiftId=${transactions.filter(t => t.shiftId === shiftId).length}, txByTime=${allShiftTx.length}`);
     const discrepancy = roundMoney(actualCash - calculatedBalance);
 
     const closingSummary = {
