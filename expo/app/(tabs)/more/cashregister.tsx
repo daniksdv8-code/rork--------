@@ -26,7 +26,7 @@ export default function CashRegisterScreen() {
   const {
     shifts, expenses, transactions, withdrawals, cashOperations,
     openShift, closeShift, getActiveShift, getActiveManagerShift, getActiveAdminShift, addExpense, withdrawCash,
-    getShiftCashBalance, getLastClosedShiftCarryOver,
+    getShiftCashBalance, getLastClosedShiftCarryOver, getManagerRegisterBalance,
   } = useParking();
 
   const [tab, setTab] = useState<CashTab>('current');
@@ -58,6 +58,10 @@ export default function CashRegisterScreen() {
     if (!isAdmin) return false;
     return !!getActiveManagerShift();
   }, [isAdmin, getActiveManagerShift]);
+
+  const managerRegisterBalance = useMemo(() => {
+    return getManagerRegisterBalance();
+  }, [getManagerRegisterBalance]);
 
   const handleOpenShift = useCallback(() => {
     if (!currentUser) return;
@@ -431,6 +435,15 @@ export default function CashRegisterScreen() {
           <View>
             {!activeShift ? (
               <View>
+                {!isAdmin && managerRegisterBalance > 0 && (
+                  <View style={styles.registerBalanceCard}>
+                    <Text style={styles.registerBalanceLabel}>Касса менеджера (накоплено)</Text>
+                    <Text style={styles.registerBalanceValue}>{fm(managerRegisterBalance)} ₽</Text>
+                    <Text style={styles.registerBalanceHint}>
+                      Эти средства перейдут вам при открытии смены
+                    </Text>
+                  </View>
+                )}
                 <View style={styles.noShiftCard}>
                   <StopCircle size={40} color={Colors.textMuted} />
                   <Text style={styles.noShiftTitle}>
@@ -439,11 +452,15 @@ export default function CashRegisterScreen() {
                   <Text style={styles.noShiftDesc}>
                     {isAdmin
                       ? 'Вы можете работать без смены или открыть свою смену для учёта'
-                      : 'Откройте смену для начала работы с кассой. Менеджер работает только с наличными — безнал автоматически идёт в финансы администратора.'}
+                      : 'Откройте смену для работы с кассой. Касса менеджера — единая. При открытии смены вы принимаете все накопленные наличные.'}
                   </Text>
                   <TouchableOpacity style={styles.openShiftBtn} onPress={handleOpenShift} activeOpacity={0.7}>
                     <PlayCircle size={20} color={Colors.white} />
-                    <Text style={styles.openShiftBtnText}>Открыть смену</Text>
+                    <Text style={styles.openShiftBtnText}>
+                      {!isAdmin && managerRegisterBalance > 0
+                        ? `Принять кассу (${fm(managerRegisterBalance)} ₽)`
+                        : 'Открыть смену'}
+                    </Text>
                   </TouchableOpacity>
                 </View>
 
@@ -506,7 +523,7 @@ export default function CashRegisterScreen() {
                     <Text style={styles.shiftInfoText}>С {formatDateTime(activeShift.openedAt)}</Text>
                   </View>
                   {activeShift.carryOver > 0 && (
-                    <Text style={styles.carryOverText}>Остаток с прошлой смены: {fm(activeShift.carryOver)} ₽</Text>
+                    <Text style={styles.carryOverText}>Принято из кассы (накоплено ранее): {fm(activeShift.carryOver)} ₽</Text>
                   )}
                 </View>
 
@@ -1021,7 +1038,7 @@ export default function CashRegisterScreen() {
                   {!isAdmin && activeShift && (
                     <View style={styles.handoverNotice}>
                       <Text style={styles.handoverNoticeText}>
-                        📦 Наличные будут переданы следующему менеджеру как остаток с предыдущей смены
+                        📦 Касса менеджера единая — все наличные останутся в кассе и перейдут следующему менеджеру, пока администратор их не снимет
                       </Text>
                     </View>
                   )}
@@ -1232,6 +1249,33 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 16,
+  },
+  registerBalanceCard: {
+    backgroundColor: Colors.successLight,
+    borderRadius: 14,
+    padding: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: Colors.success + '30',
+    marginBottom: 12,
+    gap: 4,
+  },
+  registerBalanceLabel: {
+    fontSize: 13,
+    fontWeight: '600' as const,
+    color: Colors.success,
+  },
+  registerBalanceValue: {
+    fontSize: 28,
+    fontWeight: '700' as const,
+    color: Colors.success,
+  },
+  registerBalanceHint: {
+    fontSize: 12,
+    color: Colors.success,
+    opacity: 0.8,
+    textAlign: 'center',
+    marginTop: 2,
   },
   noShiftCard: {
     backgroundColor: Colors.card,

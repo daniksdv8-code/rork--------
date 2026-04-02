@@ -528,13 +528,19 @@ export default function FinanceScreen() {
                 <View style={[styles.registerIcon, { backgroundColor: Colors.successLight }]}>
                   <Banknote size={20} color={Colors.success} />
                 </View>
-                <Text style={styles.registerCardTitle}>Касса менеджера (наличные)</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.registerCardTitle}>Касса менеджера (наличные)</Text>
+                  {managerReg.currentOperator && (
+                    <Text style={styles.registerOperatorHint}>Работает: {managerReg.currentOperator.name}</Text>
+                  )}
+                </View>
               </View>
-              <Text style={styles.registerBalance}>{fmtAmount(managerReg.balance)} ₽</Text>
+              <Text style={styles.registerBalance}>{fmtAmount(managerReg.registerBalance)} ₽</Text>
+              <Text style={styles.registerBalanceHint}>Фактический остаток в кассе</Text>
               <View style={styles.registerBreakdown}>
                 <View style={styles.registerBreakdownItem}>
                   <ArrowDownCircle size={14} color={Colors.success} />
-                  <Text style={styles.registerBreakdownLabel}>Наличные от клиентов</Text>
+                  <Text style={styles.registerBreakdownLabel}>Наличные от клиентов (за период)</Text>
                   <Text style={[styles.registerBreakdownValue, { color: Colors.success }]}>+{fmtAmount(managerReg.cashIncome)}</Text>
                 </View>
                 <View style={styles.registerBreakdownItem}>
@@ -807,12 +813,18 @@ export default function FinanceScreen() {
           <View>
             <View style={styles.regSummaryCard}>
               <View style={styles.regSummaryRow}>
-                <Text style={styles.regSummaryLabel}>Баланс (наличные)</Text>
-                <Text style={[styles.regSummaryValue, { color: Colors.primary }]}>{fmtAmount(managerReg.balance)} ₽</Text>
+                <Text style={styles.regSummaryLabel}>Фактически в кассе</Text>
+                <Text style={[styles.regSummaryValue, { color: Colors.primary }]}>{fmtAmount(managerReg.registerBalance)} ₽</Text>
               </View>
+              {managerReg.currentOperator && (
+                <View style={styles.regSummaryRow}>
+                  <Text style={styles.regSummaryLabel}>Работает с кассой</Text>
+                  <Text style={styles.regSummaryValue}>{managerReg.currentOperator.name}</Text>
+                </View>
+              )}
               <View style={styles.regSummaryDivider} />
               <View style={styles.regSummaryRow}>
-                <Text style={styles.regSummaryLabel}>Наличные (приход)</Text>
+                <Text style={styles.regSummaryLabel}>Наличные (приход за период)</Text>
                 <Text style={[styles.regSummaryValue, { color: Colors.success }]}>+{fmtAmount(managerReg.cashIncome)} ₽</Text>
               </View>
               <View style={styles.regSummaryRow}>
@@ -1235,7 +1247,18 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: '800' as const,
     color: Colors.text,
+    marginBottom: 4,
+  },
+  registerBalanceHint: {
+    fontSize: 12,
+    color: Colors.textMuted,
     marginBottom: 12,
+  },
+  registerOperatorHint: {
+    fontSize: 12,
+    color: Colors.success,
+    fontWeight: '500' as const,
+    marginTop: 2,
   },
   registerBreakdown: {
     gap: 6,

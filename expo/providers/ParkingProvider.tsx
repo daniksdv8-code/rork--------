@@ -3524,16 +3524,47 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
     const balance = roundMoney(cashIncome - totalExpenses - totalWithdrawals);
 
+    const openManagerShift = shifts.find(s => s.status === 'open' && (s.operatorRole ?? 'manager') !== 'admin');
+    let registerBalance: number;
+    if (openManagerShift) {
+      registerBalance = calculateShiftCashBalance(openManagerShift, { transactions, expenses, withdrawals });
+    } else {
+      const closedManagerShifts = shifts
+        .filter(s => s.status === 'closed' && s.closedAt && (s.operatorRole ?? 'manager') !== 'admin')
+        .sort((a, b) => new Date(b.closedAt!).getTime() - new Date(a.closedAt!).getTime());
+      const lastClosed = closedManagerShifts[0];
+      if (lastClosed) {
+        const closedActual = lastClosed.actualCash;
+        const calcBal = calculateShiftCashBalance(lastClosed, { transactions, expenses, withdrawals });
+        let co = closedActual != null ? closedActual : Math.max(0, calcBal);
+        if (lastClosed.closedAt) {
+          const closedAtTime = new Date(lastClosed.closedAt).getTime();
+          const bsw = withdrawals.filter(w => !w.shiftId && new Date(w.date).getTime() > closedAtTime).reduce((s, w) => s + w.amount, 0);
+          const bse = expenses.filter(e => !e.shiftId && new Date(e.date).getTime() > closedAtTime).reduce((s, e) => s + e.amount, 0);
+          co = roundMoney(Math.max(0, co - bsw - bse));
+        }
+        registerBalance = co;
+      } else {
+        registerBalance = balance;
+      }
+    }
+
+    const currentOperator = openManagerShift
+      ? { id: openManagerShift.operatorId, name: openManagerShift.operatorName }
+      : null;
+
     return {
       cashIncome,
       cardIncome,
       totalExpenses,
       totalWithdrawals,
       balance,
+      registerBalance,
+      currentOperator,
       expenses: periodExpenses,
       withdrawals: periodWithdrawals,
     };
-  }, [transactions, expenses, withdrawals]);
+  }, [transactions, expenses, withdrawals, shifts]);
 
   const getAdminCashRegister = useCallback((from?: Date, to?: Date) => {
     const filterByPeriod = <T extends { date: string }>(items: T[]): T[] => {
@@ -4699,7 +4730,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
 
     const closedActualCash = lastClosed.actualCash;
     const calculatedBalance = calculateShiftCashBalance(lastClosed, { transactions, expenses, withdrawals });
-    let carryOver = (closedActualCash != null && closedActualCash > 0)
+    let carryOver = closedActualCash != null
       ? closedActualCash
       : Math.max(0, calculatedBalance);
 
@@ -4720,6 +4751,14 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     console.log(`[CarryOver] role=${role}, actualCash=${closedActualCash}, calculated=${calculatedBalance}, final=${carryOver}`);
     return carryOver;
   }, [shifts, transactions, expenses, withdrawals]);
+
+  const getManagerRegisterBalance = useCallback((): number => {
+    const openManagerShift = shifts.find(s => s.status === 'open' && (s.operatorRole ?? 'manager') !== 'admin');
+    if (openManagerShift) {
+      return calculateShiftCashBalance(openManagerShift, { transactions, expenses, withdrawals });
+    }
+    return getLastClosedShiftCarryOver('manager');
+  }, [shifts, transactions, expenses, withdrawals, getLastClosedShiftCarryOver]);
 
   const issueSalaryAdvance = useCallback((employeeId: string, employeeName: string, amount: number, comment: string, forceNegative?: boolean, method?: PaymentMethod, source?: 'admin' | 'manager_shift'): { success: boolean; error?: string; wouldGoNegative?: boolean; currentBalance?: number } => {
     if (currentUser?.role !== 'admin') {
@@ -5278,6 +5317,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     employeeSalaryDebts,
     getAdminFinanceBalance,
     getLastClosedShiftCarryOver,
+    getManagerRegisterBalance,
     runDiagnostic,
     getAnomalyStats,
     getCleanupChecklist,
@@ -5312,7 +5352,7 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
     addManualDebt, deleteManualDebt,
     calculateDebtByMethod, deleteCashOperation, materializeOverstayDebts,
     salaryAdvances, salaryPayments, issueSalaryAdvance, paySalary, getEmployeeSalaryDebt, employeeSalaryDebts,
-    getAdminFinanceBalance, getLastClosedShiftCarryOver,
+    getAdminFinanceBalance, getLastClosedShiftCarryOver, getManagerRegisterBalance,
     runDiagnostic, getAnomalyStats,
     getCleanupChecklist, saveCleanupChecklist, completeCleanup, getTodayCleaningShift,
     getCleanupTemplate, updateCleanupTemplate, cleanupChecklistTemplate,
