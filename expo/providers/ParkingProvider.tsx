@@ -4775,13 +4775,16 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       console.log(`[SalaryAdvance] BLOCKED: user ${currentUser?.name} (role=${currentUser?.role}) attempted salary advance`);
       return { success: false, error: 'Операцию может выполнить только администратор' };
     }
+    if (source === 'manager_shift') {
+      console.log(`[SalaryAdvance] BLOCKED: attempted salary advance from manager_shift — forcing to admin`);
+    }
     amount = roundMoney(amount);
     if (amount <= 0) return { success: false, error: 'Сумма должна быть больше 0' };
     salaryDirtyUntilRef.current = Date.now() + COLLECTION_DIRTY_MS;
     cashOpsDirtyUntilRef.current = Date.now() + COLLECTION_DIRTY_MS;
     console.log(`[SalaryAdvance] Marked salary+cashOps dirty for ${COLLECTION_DIRTY_MS}ms`);
     const effectiveMethod: PaymentMethod = method ?? 'cash';
-    const effectiveSource = source ?? 'admin';
+    const effectiveSource = 'admin' as const;
     const now = new Date().toISOString();
 
     let balanceBefore: number;
@@ -4912,12 +4915,15 @@ export const [ParkingProvider, useParking] = createContextHook(() => {
       console.log(`[SalaryPayment] BLOCKED: user ${currentUser?.name} (role=${currentUser?.role}) attempted salary payment`);
       return { success: false, error: 'Операцию может выполнить только администратор' };
     }
+    if (source === 'manager_shift') {
+      console.log(`[SalaryPayment] BLOCKED: attempted salary payment from manager_shift — forcing to admin`);
+    }
     grossAmount = roundMoney(grossAmount);
     if (grossAmount <= 0) return { success: false, error: 'Сумма должна быть больше 0' };
     salaryDirtyUntilRef.current = Date.now() + COLLECTION_DIRTY_MS;
     cashOpsDirtyUntilRef.current = Date.now() + COLLECTION_DIRTY_MS;
     console.log(`[SalaryPayment] Marked salary+cashOps dirty for ${COLLECTION_DIRTY_MS}ms`);
-    const effectiveSource = source ?? 'admin';
+    const effectiveSource = 'admin' as const;
     const now = new Date().toISOString();
 
     const employeeAdvances = salaryAdvances.filter(a => a.employeeId === employeeId && a.remainingAmount > 0)
